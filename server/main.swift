@@ -3,6 +3,9 @@
 // applies editorial.json (pinned stories, blocked links), and writes edition.json.
 // Usage: publisher <editorial.json> <edition.json>. publish.sh runs it; see README.md.
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 struct Editorial: Decodable {
     struct Story: Decodable {
