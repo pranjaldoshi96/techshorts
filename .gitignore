@@ -1,0 +1,12 @@
+# Xcode
+ios/build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcarchive
+
+# macOS
+.DS_Store
+
+# Node (web prototype)
+node_modules/

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d12">
+<title>TechShorts</title>
+<style>
+  :root { --bg:#f4f5f7; --card:#fff; --text:#14171f; --muted:#6a7080; --accent:#2f6bff; --line:#e3e6ec; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0b0d12; --card:#151922; --text:#eceef3; --muted:#8c93a5; --accent:#6c97ff; --line:#252b38; } }
+  * { box-sizing:border-box; margin:0; }
+  html, body { height:100%; background:var(--bg); color:var(--text); font:16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { position:fixed; inset:0 0 auto 0; z-index:5; display:flex; align-items:center; gap:12px; padding:10px 16px; padding-top:calc(10px + env(safe-area-inset-top)); background:color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); }
+  header h1 { font-size:18px; font-weight:800; letter-spacing:-.3px; }
+  header h1 span { color:var(--accent); }
+  .chips { display:flex; gap:8px; overflow-x:auto; scrollbar-width:none; flex:1; }
+  .chips::-webkit-scrollbar { display:none; }
+  .chip { flex:none; border:1px solid var(--line); background:var(--card); color:var(--muted); border-radius:999px; padding:4px 12px; font-size:13px; cursor:pointer; }
+  .chip[aria-pressed="true"] { background:var(--accent); border-color:var(--accent); color:#fff; }
+  main { height:100%; overflow-y:auto; scroll-snap-type:y mandatory; padding-top:calc(56px + env(safe-area-inset-top)); scrollbar-width:none; }
+  main::-webkit-scrollbar { display:none; }
+  article { height:calc(100% - 0px); min-height:calc(100vh - 56px - env(safe-area-inset-top)); scroll-snap-align:start; display:flex; justify-content:center; align-items:center; padding:12px 16px 16px; }
+  .card { width:100%; max-width:560px; max-height:100%; background:var(--card); border:1px solid var(--line); border-radius:20px; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 8px 30px rgb(0 0 0 / .08); }
+  .img { aspect-ratio:16/9; background:linear-gradient(135deg, var(--accent), #8a5cff); background-size:cover; background-position:center; flex:none; }
+  .body { padding:18px 20px 8px; overflow-y:auto; }
+  .meta { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.6px; margin-bottom:8px; }
+  .meta b { color:var(--accent); }
+  h2 { font-size:21px; line-height:1.25; margin-bottom:10px; letter-spacing:-.2px; }
+  p { color:var(--muted); font-size:16px; }
+  .foot { display:flex; justify-content:space-between; align-items:center; padding:12px 20px 16px; }
+  .foot a { color:var(--accent); font-weight:600; text-decoration:none; }
+  .foot button { background:none; border:0; color:var(--muted); font-size:14px; cursor:pointer; }
+  .status { height:100%; display:grid; place-items:center; color:var(--muted); text-align:center; padding:24px; }
+  .hint { position:fixed; bottom:calc(14px + env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%); font-size:12px; color:var(--muted); background:var(--card); border:1px solid var(--line); padding:4px 12px; border-radius:999px; transition:opacity .4s; pointer-events:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Tech<span>Shorts</span></h1>
+  <div class="chips" id="chips"></div>
+</header>
+<main id="feed"><div class="status">Loading today's tech news…</div></main>
+<div class="hint" id="hint">Swipe up or press ↓ for next</div>
+
+<script>
+const feed = document.getElementById('feed');
+const chips = document.getElementById('chips');
+const hint = document.getElementById('hint');
+let category = '';
+const saved = new Set(JSON.parse(localStorage.getItem('saved') || '[]'));
+
+const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const ago = (iso) => {
+  const m = Math.max(1, Math.round((Date.now() - new Date(iso)) / 60000));
+  return m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
+};
+const safeUrl = (u) => (/^https?:\/\//i.test(u) ? u : '#');
+
+function renderChips(cats) {
+  if (chips.children.length) return;
+  chips.innerHTML = cats.map((s) => `<button class="chip" data-s="${esc(s)}" aria-pressed="${s === 'Top'}">${esc(s)}</button>`).join('');
+}
+chips.addEventListener('click', (e) => {
+  const b = e.target.closest('.chip'); if (!b) return;
+  category = b.dataset.s;
+  [...chips.children].forEach((c) => c.setAttribute('aria-pressed', c === b));
+  load();
+});
+
+function card(a) {
+  const img = a.image ? `style="background-image:url('${esc(safeUrl(a.image))}')"` : '';
+  return `<article><div class="card">
+    <div class="img" ${img}></div>
+    <div class="body">
+      <div class="meta"><b>${esc(a.source)}</b> · ${ago(a.publishedAt)}</div>
+      <h2>${esc(a.title)}</h2>
+      ${a.summary ? `<p>${esc(a.summary)}</p>` : ''}
+    </div>
+    <div class="foot">
+      <a href="${esc(safeUrl(a.url))}" target="_blank" rel="noopener noreferrer">Read full story →</a>
+      <button data-id="${esc(a.url)}">${saved.has(a.url) ? '★ Saved' : '☆ Save'}</button>
+    </div>
+  </div></article>`;
+}
+
+async function load() {
+  try {
+    const res = await fetch('/api/news' + `?category=${encodeURIComponent(category || 'Top')}`);
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    renderChips(data.categories);
+    feed.innerHTML = data.articles.length ? data.articles.map(card).join('') : '<div class="status">No stories right now. Try again soon.</div>';
+    feed.scrollTop = 0;
+  } catch {
+    feed.innerHTML = '<div class="status">Couldn’t load news.<br>Check your connection and refresh.</div>';
+  }
+}
+
+feed.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-id]'); if (!b) return;
+  const id = b.dataset.id;
+  saved.has(id) ? saved.delete(id) : saved.add(id);
+  localStorage.setItem('saved', JSON.stringify([...saved]));
+  b.textContent = saved.has(id) ? '★ Saved' : '☆ Save';
+});
+document.addEventListener('keydown', (e) => {
+  const h = feed.clientHeight;
+  if (e.key === 'ArrowDown' || e.key === 'j') feed.scrollBy({ top: h, behavior: 'smooth' });
+  if (e.key === 'ArrowUp' || e.key === 'k') feed.scrollBy({ top: -h, behavior: 'smooth' });
+});
+feed.addEventListener('scroll', () => (hint.style.opacity = 0), { once: true });
+load();
+setInterval(load, 15 * 60 * 1000);
+</script>
+</body>
+</html>
