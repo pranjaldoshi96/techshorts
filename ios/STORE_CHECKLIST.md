@@ -1,0 +1,37 @@
+# TechShorts — launch checklist
+
+## Done ✅
+- [x] iOS app (SwiftUI, iOS 17+), iPhone, portrait
+- [x] Ranked feed: wider coverage and Hacker News points first, duplicates merged into one card ("+N more")
+- [x] Five tabs, 22 sources, deals and sponsored posts filtered out
+- [x] On-device summaries with Apple Intelligence (iOS 26+), labelled; publisher excerpt elsewhere
+- [x] Saved stories, share, source toggles, daily digest notification, offline cache
+- [x] Branded covers for stories without a photo
+- [x] Publishing server: builds a ranked edition every 2 hours and after reboots; app falls back to direct feeds if it's over 8 hours old
+- [x] Privacy: no accounts, analytics, ads or third-party SDKs; privacy manifest (`PrivacyInfo.xcprivacy`)
+- [x] App icon, accent colour, light + dark mode
+- [x] Team `A4HLS6BV3C`, bundle ID `com.pranjald.techshorts`; signed Release archive succeeds
+- [x] 6.9" App Store screenshots in `AppStore/screenshots/`
+- [x] Store listing, review notes, privacy and age-rating answers in `AppStore/LISTING.md`
+- [x] Product, privacy and support pages live: https://pranjaldoshi96.github.io/apps/techshorts/
+
+## Before you submit — needs you ⚠️
+1. **Accept Apple's updated Program License Agreement** at developer.apple.com → Account. Until then Xcode can't create the App Store profile, and the upload fails with "PLA Update available". (Same blocker as Firstnest.)
+2. **Turn on GitHub Pages for the news edition:** github.com/pranjaldoshi96/techshorts → Settings → Pages → Deploy from a branch → `edition` / `(root)` → Save. Until then the app fetches feeds directly, which works but skips the server's ranking and image fill-in.
+3. **Create the app record** (below). "TechShorts: 60-Word Tech News" has no live App Store app with that name as of 3 Nov 2026, but a reserved name only shows up when you try.
+4. **Test on your iPhone via TestFlight** for a day or two. Not yet checked on a real device: the daily digest notification and background refresh.
+
+## Submit steps
+1. App Store Connect → Apps → **+** → New App → iOS, name from `AppStore/LISTING.md`, bundle ID `com.pranjald.techshorts`, SKU `techshorts-ios`.
+2. Upload a build: `ios/scripts/archive.sh` (or Xcode → Any iOS Device → Product → Archive → Distribute App → App Store Connect → Upload).
+3. Fill in the listing, keywords, screenshots, URLs, App Privacy ("Data Not Collected") and age rating from `AppStore/LISTING.md`.
+4. Availability: everywhere except China mainland.
+5. TestFlight: add yourself as an internal tester, install, use it for a couple of days. For friends, create a public link (external testers need a short Beta App Review for the first build).
+6. Submit for review.
+7. When it's live, change "Coming to the App Store" on https://pranjaldoshi96.github.io/apps/techshorts/ (and the home page card) to the App Store link, as was done for Roomerang.
+
+## Next versions (not in v1)
+- Home and Lock Screen widget with today's top story (WidgetKit)
+- iCloud sync of saved stories (CloudKit)
+- "What's in tech today?" for Siri and Shortcuts (App Intents)
+- Unit tests for the parser, filter and ranking

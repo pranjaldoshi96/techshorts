@@ -90,15 +90,18 @@ struct FeedService {
 
 extension Article {
     init?(item: FeedItem, source: FeedSource) {
-        let title = HTMLText.plain(item.title)
+        let rawTitle = HTMLText.plain(item.title)
+        // Link posts sometimes keep the page's site suffix, e.g. "… - YouTube".
+        let title = rawTitle.replacingOccurrences(of: "\\s+[-–|]\\s+YouTube$", with: "", options: .regularExpression)
         guard !title.isEmpty,
               let url = URL(string: item.link.trimmingCharacters(in: .whitespacesAndNewlines)),
               url.scheme == "https" || url.scheme == "http",
               let date = FeedDate.parse(item.date) else { return nil }
 
         var body = HTMLText.clean(HTMLText.plain(item.html))
-        if body.count > title.count, body.lowercased().hasPrefix(title.lowercased()) {
-            body = String(body.dropFirst(title.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        for prefix in [rawTitle, title] where body.count > prefix.count && body.lowercased().hasPrefix(prefix.lowercased()) {
+            body = String(body.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            break
         }
         // Hacker News bodies are just "Article URL: … Comments URL: …"; those get a meta description later instead.
         let usable = !body.hasPrefix("Article URL:") && body.caseInsensitiveCompare(title) != .orderedSame

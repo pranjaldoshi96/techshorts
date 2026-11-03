@@ -14,6 +14,7 @@ enum HTMLText {
         "The post .* appeared first on .*$", "Continue reading.*$", "Read more.*$", "Read the full .*$",
         "\\[(…|\\.\\.\\.)\\]\\s*$", "\\s*Discussion \\| Link\\s*$",
         "^This (story|article) originally appeared in .*?sign up here\\s*\\.\\s*",
+        "\\s*(Via \\S.{0,60}?)?\\s*Tags: [^.!?]*$",
     ]
 
     /// Strips publisher boilerplate such as "The post … appeared first on …".

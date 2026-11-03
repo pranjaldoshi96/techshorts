@@ -9,7 +9,8 @@ struct CardView: View {
         let summary = store.summary(for: article)
         VStack(alignment: .leading, spacing: 0) {
             ArticleImage(article: article)
-                .containerRelativeFrame(.vertical) { height, _ in height * 0.32 }
+                // Bigger photo on tall phones; small phones need the room for the summary.
+                .containerRelativeFrame(.vertical) { height, _ in height * (height > 700 ? 0.4 : 0.32) }
                 .frame(maxWidth: .infinity)
 
             VStack(alignment: .leading, spacing: 10) {

@@ -38,32 +38,14 @@ To add a source, add one line to `Models/FeedSource.swift`, then run the check.
 
 ## Publishing to the App Store
 
-### Steps only you can do
+Everything for the store is ready in this folder. Follow [`STORE_CHECKLIST.md`](STORE_CHECKLIST.md) for the remaining steps.
 
-1. **Join the Apple Developer Program** ($99/year) at developer.apple.com/programs. You can join as an individual, where your own name is shown as the seller, or as an organization, which needs a D-U-N-S number.
-2. **Pick a bundle ID** you control, such as `com.yourname.techshorts`. In Xcode, open the target's **Signing & Capabilities**, choose your Team and set the bundle ID. The project currently uses the placeholder `com.example.techshorts`.
-3. **Create the app record** in App Store Connect under **Apps**, then **+**, then **New App**. The name "TechShorts" may already be taken, so have a backup ready (for example "TechShorts: 60-Word Tech News").
-
-### Upload a build
-
-```bash
-TEAM_ID=ABCDE12345 BUNDLE_ID=com.yourname.techshorts scripts/archive.sh
-```
-
-You can also use **Product › Archive** and then **Distribute App** in Xcode. The build appears in **TestFlight** about 10–30 minutes later. Internal testers (up to 100 people on your team) can install it immediately. External testers need a quick Beta App Review first.
-
-For automatic builds, Xcode Cloud is included with the membership (25 compute hours a month). It can build and send every push on `main` to TestFlight once the code is in a GitHub, GitLab or Bitbucket repository.
-
-### Store listing checklist
-
-- **Screenshots**: required at 6.9″ (1320 × 2868). Take them from the *iPhone 17 Pro Max* simulator with ⌘S.
-- **Description, keywords, category** (News, with Technology as secondary).
-- **Marketing URL**: <https://pranjaldoshi96.github.io/apps/techshorts/>
-- **Support URL**: <https://pranjaldoshi96.github.io/apps/techshorts/support/>
-- **Privacy policy URL**: <https://pranjaldoshi96.github.io/apps/techshorts/privacy/>. These pages live in the `pranjaldoshi96.github.io` repo with your other apps.
-- **App Privacy**: answer **Data Not Collected**. This is accurate because there are no analytics, no accounts and no server. `PrivacyInfo.xcprivacy` already declares this.
-- **Age rating**: answer the questionnaire honestly. The in-app reader can open any web page, which can count as unrestricted web access.
-- **Export compliance**: already answered in `Info.plist` (`ITSAppUsesNonExemptEncryption = NO`).
+- **Signing:** team `A4HLS6BV3C`, bundle ID `com.pranjald.techshorts`, automatic signing.
+- **Listing text, review notes, privacy and age-rating answers:** [`AppStore/LISTING.md`](AppStore/LISTING.md)
+- **Screenshots:** [`AppStore/screenshots/`](AppStore/screenshots/), 6.9" (1320 × 2868)
+- **Product, support and privacy pages:** <https://pranjaldoshi96.github.io/apps/techshorts/>, in the `pranjaldoshi96.github.io` repo with your other apps
+- **Upload a build:** `scripts/archive.sh` archives, signs and uploads to App Store Connect. It then appears in TestFlight after 10–30 minutes.
+- **Export compliance:** already answered in `Info.plist` (`ITSAppUsesNonExemptEncryption = NO`).
 
 ### Review risks
 

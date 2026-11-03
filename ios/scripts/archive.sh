@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Archives a Release build and uploads it to App Store Connect (it then shows up in TestFlight).
 # Needs: Xcode signed in to your Apple Developer account (Xcode > Settings > Accounts).
-# Usage: TEAM_ID=ABCDE12345 BUNDLE_ID=com.yourname.techshorts scripts/archive.sh
+# Usage: scripts/archive.sh  (TEAM_ID and BUNDLE_ID default to the project's; override to use others)
 set -euo pipefail
 cd "$(dirname "$0")/.."
-: "${TEAM_ID:?Set TEAM_ID to your Apple Developer Team ID (developer.apple.com > Account > Membership)}"
-: "${BUNDLE_ID:?Set BUNDLE_ID to the bundle ID registered in App Store Connect}"
+TEAM_ID="${TEAM_ID:-A4HLS6BV3C}"
+BUNDLE_ID="${BUNDLE_ID:-com.pranjald.techshorts}"
 
 build_number="$(date +%Y%m%d.%H%M)"   # always increasing, as App Store Connect requires
 archive="build/TechShorts.xcarchive"
