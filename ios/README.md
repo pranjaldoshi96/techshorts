@@ -57,8 +57,10 @@ For automatic builds, Xcode Cloud is included with the membership (25 compute ho
 ### Store listing checklist
 
 - **Screenshots**: required at 6.9″ (1320 × 2868). Take them from the *iPhone 17 Pro Max* simulator with ⌘S.
-- **Description, keywords, category** (News, with Technology as secondary), and a **support URL**.
-- **Privacy policy URL**: required even though the app collects nothing. A draft is in `PRIVACY.md`, and you can host it on GitHub Pages.
+- **Description, keywords, category** (News, with Technology as secondary).
+- **Marketing URL**: <https://pranjaldoshi96.github.io/apps/techshorts/>
+- **Support URL**: <https://pranjaldoshi96.github.io/apps/techshorts/support/>
+- **Privacy policy URL**: <https://pranjaldoshi96.github.io/apps/techshorts/privacy/>. These pages live in the `pranjaldoshi96.github.io` repo with your other apps.
 - **App Privacy**: answer **Data Not Collected**. This is accurate because there are no analytics, no accounts and no server. `PrivacyInfo.xcprivacy` already declares this.
 - **Age rating**: answer the questionnaire honestly. The in-app reader can open any web page, which can count as unrestricted web access.
 - **Export compliance**: already answered in `Info.plist` (`ITSAppUsesNonExemptEncryption = NO`).
