@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds a TechShorts edition and publishes it to GitHub Pages (the repo's `edition` branch).
+# Builds a TechShorts edition and publishes it to the repo's `edition` branch,
+# where the app reads it.
 # Cron runs this every 2 hours; the app falls back to fetching feeds itself if an edition is over 8 hours old.
 # See README.md for setup.
 set -euo pipefail

@@ -65,7 +65,7 @@ This is accurate: there are no analytics, accounts or third-party SDKs, and the 
 ```
 TechShorts is a news reader. No login, no in-app purchases, no third-party SDKs.
 
-Content: headlines and short excerpts from 22 publishers' public RSS/Atom feeds, each credited and linked to the original article, which opens in SFSafariViewController. A ranked list of today's stories is published every 2 hours to https://pranjaldoshi96.github.io/techshorts/edition.json; if it's unavailable the app reads the feeds directly.
+Content: headlines and short excerpts from 22 publishers' public RSS/Atom feeds, each credited and linked to the original article, which opens in SFSafariViewController. A ranked list of today's stories is published every 2 hours to https://raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/edition.json; if it's unavailable the app reads the feeds directly.
 
 On-device summaries use Apple's Foundation Models framework and appear only on Apple Intelligence devices (iOS 26+), labelled "Summarized on device". Other devices show the publisher's excerpt.
 

@@ -4,7 +4,7 @@ Inshorts-style tech news for iPhone. One story per card, about 60 words each, ac
 
 ## How it works
 
-The app loads a ranked **edition** that the TechShorts publisher (`../server/`) posts to GitHub Pages every 2 hours. If that edition is more than 8 hours old or can't be loaded, the app fetches the publishers' feeds and ranks them itself, using the same code, so it keeps working without the server.
+The app loads a ranked **edition** that the TechShorts publisher (`../server/`) posts to this repo's `edition` branch every 2 hours. If that edition is more than 8 hours old or can't be loaded, the app fetches the publishers' feeds and ranks them itself, using the same code, so it keeps working without the server.
 
 | Piece | What it does | Apple tech |
 |---|---|---|

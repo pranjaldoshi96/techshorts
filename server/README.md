@@ -4,8 +4,8 @@ The app reads a ranked **edition** that this server publishes, instead of every 
 If the newest edition is more than 8 hours old, or can't be downloaded, the app fetches the feeds itself until a fresh one appears.
 
 ```
-server (cron, every 2 h)                GitHub Pages                         iPhone
-publish.sh ─ builds main.swift with ──► edition branch ──► pranjaldoshi96.github.io/techshorts/edition.json
+server (cron, every 2 h)                GitHub (techshorts repo)             iPhone
+publish.sh ─ builds main.swift with ──► edition branch ──► raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/edition.json
              the app's own feed and                               │ fresh (< 8 h)?  yes → show it
              ranking code, in Docker                              └──────────────── no  → fetch feeds directly
 ```
@@ -33,7 +33,7 @@ It's applied on the next run. To publish right away, run `~/TechShorts/server/pu
    The next run rebuilds the publisher automatically.
 3. A deploy key at `~/.ssh/techshorts_deploy`. Add its `.pub` to GitHub under
    **Settings → Deploy keys → Add deploy key**, with **Allow write access** ticked. It can only push to this repo.
-4. GitHub Pages: **Settings → Pages → Deploy from a branch → `edition` / root**.
+4. Nothing else on GitHub: the app reads `edition.json` straight from the `edition` branch. (To move to GitHub Pages later, turn on Pages for the `edition` branch and change `Edition.url` in the app.)
 5. Cron, every 2 hours and 2 minutes after each restart (Docker and cron both start at boot):
    ```
    17 */2 * * * $HOME/TechShorts/server/publish.sh --log
@@ -48,7 +48,7 @@ before anyone notices, and even then the app keeps working by fetching the feeds
 
 ```bash
 tail -20 ~/.techshorts/publish.log
-curl -s https://pranjaldoshi96.github.io/techshorts/edition.json | head -c 200
+curl -s https://raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/edition.json | head -c 200
 ```
 
 The app's **Settings** screen shows where the stories came from: "TechShorts edition, 2 hours ago" or "Direct from publishers".

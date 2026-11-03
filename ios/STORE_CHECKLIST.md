@@ -17,9 +17,8 @@
 
 ## Before you submit — needs you ⚠️
 1. **Accept Apple's updated Program License Agreement** at developer.apple.com → Account. Until then Xcode can't create the App Store profile, and the upload fails with "PLA Update available". (Same blocker as Firstnest.)
-2. **Turn on GitHub Pages for the news edition:** github.com/pranjaldoshi96/techshorts → Settings → Pages → Deploy from a branch → `edition` / `(root)` → Save. Until then the app fetches feeds directly, which works but skips the server's ranking and image fill-in.
-3. **Create the app record** (below). "TechShorts: 60-Word Tech News" has no live App Store app with that name as of 3 Nov 2026, but a reserved name only shows up when you try.
-4. **Test on your iPhone via TestFlight** for a day or two. Not yet checked on a real device: the daily digest notification and background refresh.
+2. **Register the bundle ID and create the app record** (below). Register `com.pranjald.techshorts` first at developer.apple.com/account/resources/identifiers/add/bundleId (App IDs → App → Explicit, no capabilities), or it won't appear in App Store Connect's bundle ID list. "TechShorts: 60-Word Tech News" has no live App Store app with that name as of 3 Nov 2026, but a reserved name only shows up when you try.
+3. **Test on your iPhone via TestFlight** for a day or two. Not yet checked on a real device: the daily digest notification and background refresh.
 
 ## Submit steps
 1. App Store Connect → Apps → **+** → New App → iOS, name from `AppStore/LISTING.md`, bundle ID `com.pranjald.techshorts`, SKU `techshorts-ios`.
