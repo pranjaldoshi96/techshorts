@@ -10,7 +10,7 @@ publish.sh ─ builds main.swift with ──► edition branch ──► raw.git
              ranking code, in Docker                              └──────────────── no  → fetch feeds directly
 ```
 
-The publisher is compiled from the same Swift files as the app (`ios/TechShorts/Models` and `Services`), so ranking,
+The publisher is compiled from the same Swift files as the app (`ios/Techgist/Models` and `Services`), so ranking,
 duplicate merging and filtering are identical on both sides. It also fills in missing images and excerpts from the
 article pages, so phones don't have to.
 

@@ -40,7 +40,7 @@ To add a source, add one line to `Models/FeedSource.swift`, then run the check.
 
 Everything for the store is ready in this folder. Follow [`STORE_CHECKLIST.md`](STORE_CHECKLIST.md) for the remaining steps.
 
-- **Signing:** team `A4HLS6BV3C`, bundle ID `com.pranjald.techshorts`, automatic signing.
+- **Signing:** team `A4HLS6BV3C`, bundle ID `com.pranjald.techgist`, automatic signing.
 - **Listing text, review notes, privacy and age-rating answers:** [`AppStore/LISTING.md`](AppStore/LISTING.md)
 - **Screenshots:** [`AppStore/screenshots/`](AppStore/screenshots/), 6.9" (1320 × 2868)
 - **Product, support and privacy pages:** <https://pranjaldoshi96.github.io/apps/techgist/>, in the `pranjaldoshi96.github.io` repo with your other apps

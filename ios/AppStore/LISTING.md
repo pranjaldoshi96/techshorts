@@ -9,7 +9,7 @@ Paste these into App Store Connect → your app → App Information / Version pa
 
 **Category:** Primary *News*, Secondary *Developer Tools*
 
-**Bundle ID:** `com.pranjald.techshorts` · **SKU:** `techgist-ios`
+**Bundle ID:** `com.pranjald.techgist` · **SKU:** `techgist-ios`
 
 **Promotional text** (170 chars, can change without review):
 > Today's tech in 60 words a story. AI, startups, dev tools and the best engineering blogs, ranked by what matters. No account, no ads, no tracking.

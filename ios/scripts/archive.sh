@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TEAM_ID="${TEAM_ID:-A4HLS6BV3C}"
-BUNDLE_ID="${BUNDLE_ID:-com.pranjald.techshorts}"
+BUNDLE_ID="${BUNDLE_ID:-com.pranjald.techgist}"
 
 build_number="$(date +%Y%m%d.%H%M)"   # always increasing, as App Store Connect requires
 archive="build/Techgist.xcarchive"

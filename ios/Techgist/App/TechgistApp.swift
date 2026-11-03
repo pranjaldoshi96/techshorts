@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct TechShortsApp: App {
+struct TechgistApp: App {
     @StateObject private var store = NewsStore()
     @Environment(\.scenePhase) private var scenePhase
 

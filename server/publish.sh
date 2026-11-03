@@ -25,10 +25,10 @@ fi
 echo "== $(date -u +%FT%TZ)"
 
 sources=(
-  ios/TechShorts/Models/Article.swift ios/TechShorts/Models/Edition.swift ios/TechShorts/Models/FeedSource.swift
-  ios/TechShorts/Services/HTMLText.swift ios/TechShorts/Services/FeedParser.swift
-  ios/TechShorts/Services/FeedService.swift ios/TechShorts/Services/Ranker.swift
-  ios/TechShorts/Services/PageMetadata.swift ios/TechShorts/Services/Disk.swift
+  ios/Techgist/Models/Article.swift ios/Techgist/Models/Edition.swift ios/Techgist/Models/FeedSource.swift
+  ios/Techgist/Services/HTMLText.swift ios/Techgist/Services/FeedParser.swift
+  ios/Techgist/Services/FeedService.swift ios/Techgist/Services/Ranker.swift
+  ios/Techgist/Services/PageMetadata.swift ios/Techgist/Services/Disk.swift
   server/main.swift
 )
 docker_run=(docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp)

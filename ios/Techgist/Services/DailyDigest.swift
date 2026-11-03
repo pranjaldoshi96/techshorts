@@ -38,7 +38,7 @@ enum DailyDigest {
 
 /// Refreshes the story cache (and the digest headline) while the app is in the background.
 enum BackgroundRefresh {
-    static let identifier = (Bundle.main.bundleIdentifier ?? "TechShorts") + ".refresh"
+    static let identifier = (Bundle.main.bundleIdentifier ?? "Techgist") + ".refresh"
 
     static func schedule() {
         let request = BGAppRefreshTaskRequest(identifier: identifier)

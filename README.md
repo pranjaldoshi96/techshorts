@@ -1,6 +1,6 @@
 # Techgist
 
-Published on the App Store as **Techgist: AI & Startup News**. (The repo and Xcode project keep the working name TechShorts.)
+Published on the App Store as **Techgist: AI & Startup News**. (Only the GitHub repo keeps its original name, techshorts; the app, Xcode project and bundle ID `com.pranjald.techgist` are Techgist.)
 
 Inshorts-style tech news: one story per card, about 60 words each, covering AI, startups, dev tools and good engineering blogs.
 
