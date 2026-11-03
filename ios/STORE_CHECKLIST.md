@@ -14,7 +14,7 @@
 - [x] App record "Techgist: AI & Startup News" created (plain "Techgist" and "TechShorts" belong to other developers)
 - [x] Build 1.0 (20261103.2052) uploaded on 3 Nov 2026 with `scripts/archive.sh`: AI summaries are fact-checked against the article. 
 - [x] Listing, screenshots, age rating (4+), free pricing in 174 territories (not China mainland), review details and App Privacy ("Data Not Collected") set
-- [x] **Submitted for App Review on 3 Nov 2026**; swapped to build 20261103.2323 (swipe tabs, wider Top, image sharing, on-device big story alerts) the same evening — status *Waiting for Review*, releases automatically when approved
+- [x] **Submitted for App Review on 3 Nov 2026**; swapped to build 20261103.2323 (swipe tabs, wider Top, image sharing, on-device big story alerts) the same evening — approved and **live on the App Store on 4 Nov 2026**: https://apps.apple.com/app/techgist-ai-startup-news/id6830218043
 - [x] 6.9" App Store screenshots in `AppStore/screenshots/`
 - [x] Store listing, review notes, privacy and age-rating answers in `AppStore/LISTING.md`
 - [x] Product, privacy and support pages live: https://pranjaldoshi96.github.io/apps/techgist/
@@ -31,7 +31,7 @@
 4. Availability: everywhere except China mainland.
 5. TestFlight: add yourself as an internal tester, install, use it for a couple of days. For friends, create a public link (external testers need a short Beta App Review for the first build).
 6. Submit for review.
-7. When it's live, change "Coming to the App Store" on https://pranjaldoshi96.github.io/apps/techgist/ (and the home page card) to the App Store link, as was done for Roomerang.
+7. ~~Link the website to the App Store~~ Done on 4 Nov 2026.
 
 ## Next versions (not in v1)
 - Home and Lock Screen widget with today's top story (WidgetKit)
