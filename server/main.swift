@@ -95,8 +95,10 @@ if let discussed = await redditLinks() {
         articles[i].alsoCoveredBy = (articles[i].alsoCoveredBy ?? []) + ["Reddit"]
         boosted += 1
     }
-    if boosted > 0 { articles = Ranker.rank(articles) }
-    print("Reddit: \(discussed.count) linked articles in today's top posts, \(boosted) of ours boosted")
+    // Re-ranking only reorders; keep the original list if it would ever add or drop a story.
+    let reranked = Ranker.rank(articles)
+    if boosted > 0, Set(reranked.map(\.id)) == Set(articles.map(\.id)) { articles = reranked }
+    print("Reddit: \(discussed.count) linked articles in today's top posts, \(boosted) of ours boosted; \(articles.count) stories before and \(reranked.count) after re-ranking")
 } else {
     print("Reddit: unreachable, publishing without it")
 }
