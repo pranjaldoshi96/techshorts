@@ -2,7 +2,7 @@ import Foundation
 import UserNotifications
 import BackgroundTasks
 
-/// A repeating local notification ("Your daily TechShorts") carrying the latest top headline.
+/// A repeating local notification ("Your daily Techgist") carrying the latest top headline.
 /// Local notifications need no server or push certificate.
 enum DailyDigest {
     static let requestID = "daily-digest"
@@ -23,7 +23,7 @@ enum DailyDigest {
         guard isEnabled else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = "Your daily TechShorts"
+        content.title = "Your daily Techgist"
         if let top, Date().timeIntervalSince(top.publishedAt) < 18 * 3600 {
             content.body = top.title
         } else {

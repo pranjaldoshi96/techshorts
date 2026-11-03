@@ -93,7 +93,7 @@ struct SettingsView: View {
                     switch store.origin {
                     case .edition(let publishedAt):
                         LabeledContent("Stories") {
-                            Text("TechShorts edition, \(publishedAt, format: .relative(presentation: .named))")
+                            Text("Techgist edition, \(publishedAt, format: .relative(presentation: .named))")
                         }
                     case .direct:
                         LabeledContent("Stories", value: "Direct from publishers")
@@ -115,7 +115,7 @@ struct SettingsView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Allow notifications for TechShorts in Settings to get the daily digest.")
+                Text("Allow notifications for Techgist in Settings to get the daily digest.")
             }
         }
     }

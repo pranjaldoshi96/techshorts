@@ -43,7 +43,7 @@ Everything for the store is ready in this folder. Follow [`STORE_CHECKLIST.md`](
 - **Signing:** team `A4HLS6BV3C`, bundle ID `com.pranjald.techshorts`, automatic signing.
 - **Listing text, review notes, privacy and age-rating answers:** [`AppStore/LISTING.md`](AppStore/LISTING.md)
 - **Screenshots:** [`AppStore/screenshots/`](AppStore/screenshots/), 6.9" (1320 × 2868)
-- **Product, support and privacy pages:** <https://pranjaldoshi96.github.io/apps/techshorts/>, in the `pranjaldoshi96.github.io` repo with your other apps
+- **Product, support and privacy pages:** <https://pranjaldoshi96.github.io/apps/techgist/>, in the `pranjaldoshi96.github.io` repo with your other apps
 - **Upload a build:** `scripts/archive.sh` archives, signs and uploads to App Store Connect. It then appears in TestFlight after 10–30 minutes.
 - **Export compliance:** already answered in `Info.plist` (`ITSAppUsesNonExemptEncryption = NO`).
 

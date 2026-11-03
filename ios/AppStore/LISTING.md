@@ -1,15 +1,15 @@
-# App Store listing — TechShorts
+# App Store listing — Techgist
 
 Paste these into App Store Connect → your app → App Information / Version page.
 
-**Name** (30 chars max): `TechShorts: 60-Word Tech News`
-Backup if it's taken: `TechShorts – Tech in 60 Words`
+**Name** (30 chars max): `Techgist: AI & Startup News`
+"TechShorts: 60-Word Tech News" was refused as already in use on 3 Nov 2026, so the app is named Techgist.
 
-**Subtitle** (30 chars max): `AI, startups & dev, ranked`
+**Subtitle** (30 chars max): `Tech news in 60 words a story`
 
 **Category:** Primary *News*, Secondary *Developer Tools*
 
-**Bundle ID:** `com.pranjald.techshorts` · **SKU:** `techshorts-ios`
+**Bundle ID:** `com.pranjald.techshorts` · **SKU:** `techgist-ios`
 
 **Promotional text** (170 chars, can change without review):
 > Today's tech in 60 words a story. AI, startups, dev tools and the best engineering blogs, ranked by what matters. No account, no ads, no tracking.
@@ -21,7 +21,7 @@ tech news,ai news,startup,developer,programming,hacker news,engineering,summary,
 
 **Description:**
 ```
-TechShorts is the fastest way to keep up with tech. One story per card, sixty words each, from the outlets and blogs people who build things actually read.
+Techgist is the fastest way to keep up with tech. One story per card, sixty words each, from the outlets and blogs people who build things actually read.
 
 THE STORIES THAT MATTER, FIRST
 Stories covered by several outlets or popular on Hacker News rise to the top. The same story from different publishers is merged into one card, so you never read it twice. Deals, buying guides and sponsored posts are filtered out.
@@ -34,7 +34,7 @@ FIVE TABS
 • Blogs — Simon Willison, The Pragmatic Engineer, Stratechery, Martin Fowler, Julia Evans
 
 SUMMARIES WRITTEN ON YOUR IPHONE
-On iPhones with Apple Intelligence, TechShorts writes a short summary of each story on your device. Nothing is sent to a server. On other iPhones you get the publisher's own excerpt.
+On iPhones with Apple Intelligence, Techgist writes a short summary of each story on your device. Nothing is sent to a server. On other iPhones you get the publisher's own excerpt.
 
 MADE FOR A QUICK READ
 • Swipe up for the next story
@@ -50,9 +50,9 @@ No account. No ads. No tracking. What you read and save stays on your iPhone.
 Every story links to the original article and credits its publisher.
 ```
 
-**Marketing URL:** https://pranjaldoshi96.github.io/apps/techshorts/
-**Support URL:** https://pranjaldoshi96.github.io/apps/techshorts/support/
-**Privacy Policy URL:** https://pranjaldoshi96.github.io/apps/techshorts/privacy/
+**Marketing URL:** https://pranjaldoshi96.github.io/apps/techgist/
+**Support URL:** https://pranjaldoshi96.github.io/apps/techgist/support/
+**Privacy Policy URL:** https://pranjaldoshi96.github.io/apps/techgist/privacy/
 
 **App Privacy (nutrition label):** choose **"No, we do not collect data from this app."** → result: *Data Not Collected*.
 This is accurate: there are no analytics, accounts or third-party SDKs, and the only network requests are for public news feeds and article pages.
@@ -63,7 +63,7 @@ This is accurate: there are no analytics, accounts or third-party SDKs, and the 
 
 **App Review notes:**
 ```
-TechShorts is a news reader. No login, no in-app purchases, no third-party SDKs.
+Techgist is a news reader. No login, no in-app purchases, no third-party SDKs.
 
 Content: headlines and short excerpts from 22 publishers' public RSS/Atom feeds, each credited and linked to the original article, which opens in SFSafariViewController. A ranked list of today's stories is published every 2 hours to https://raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/edition.json; if it's unavailable the app reads the feeds directly.
 
@@ -78,4 +78,4 @@ To try it: swipe up through stories, switch tabs (Top, AI, Startups, Dev, Blogs)
 3. `03-blogs.png` Blogs tab
 4. `04-settings.png` Settings: digest, summaries, sources
 
-These show real stories, so a publisher's photo appears in screenshot 1. If App Review objects to third-party images, retake it on a card that uses TechShorts' own cover.
+These show real stories, so a publisher's photo appears in screenshot 1. If App Review objects to third-party images, retake it on a card that uses Techgist's own cover.

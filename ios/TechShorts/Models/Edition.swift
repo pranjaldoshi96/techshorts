@@ -1,6 +1,6 @@
 import Foundation
 
-/// A ranked set of stories built and published by the TechShorts server (see `server/` in the repo).
+/// A ranked set of stories built and published by the Techgist server (see `server/` in the repo).
 /// The app shows it while it's under 8 hours old, and fetches the publishers' feeds itself when it isn't.
 struct Edition: Codable, Sendable {
     var publishedAt: Date

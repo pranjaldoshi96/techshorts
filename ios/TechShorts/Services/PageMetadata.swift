@@ -27,7 +27,7 @@ actor PageMetadata {
 
     private static func fetch(_ url: URL) async -> Meta? {
         var request = URLRequest(url: url, timeoutInterval: 10)
-        request.setValue("TechShorts/1.0 (iOS RSS reader)", forHTTPHeaderField: "User-Agent")
+        request.setValue("Techgist/1.0 (iOS RSS reader)", forHTTPHeaderField: "User-Agent")
         guard let (data, _) = try? await URLSession.shared.data(for: request) else { return nil }
         let html = String(decoding: data.prefix(500_000), as: UTF8.self)
         let head = html.range(of: "</head>", options: .caseInsensitive).map { String(html[..<$0.lowerBound]) } ?? html

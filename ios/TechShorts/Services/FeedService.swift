@@ -3,7 +3,7 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// Fetches every feed directly. The same code runs in the app and on the TechShorts server.
+/// Fetches every feed directly. The same code runs in the app and on the Techgist server.
 struct FeedService {
     static let perFeedLimit = 12
 
@@ -67,7 +67,7 @@ struct FeedService {
 
     func fetch(_ source: FeedSource) async throws -> [Article] {
         var request = URLRequest(url: source.url, timeoutInterval: 20)
-        request.setValue("TechShorts/1.0 (iOS RSS reader)", forHTTPHeaderField: "User-Agent")
+        request.setValue("Techgist/1.0 (iOS RSS reader)", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)

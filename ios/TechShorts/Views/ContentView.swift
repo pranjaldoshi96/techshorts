@@ -13,7 +13,7 @@ struct ContentView: View {
                 feed
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("TechShorts")
+            .navigationTitle("Techgist")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

@@ -1,4 +1,6 @@
-# TechShorts
+# Techgist
+
+Published on the App Store as **Techgist: AI & Startup News**. (The repo and Xcode project keep the working name TechShorts.)
 
 Inshorts-style tech news: one story per card, about 60 words each, covering AI, startups, dev tools and good engineering blogs.
 
