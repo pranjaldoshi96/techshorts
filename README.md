@@ -13,7 +13,7 @@ Inshorts-style tech news: one story per card, about 60 words each, covering AI, 
 ## Quick start (iOS)
 
 ```bash
-open ios/TechShorts.xcodeproj
+open ios/Techgist.xcodeproj
 ```
 
 Choose an iPhone simulator and press Run. To check that every news feed still parses:

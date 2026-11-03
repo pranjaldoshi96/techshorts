@@ -4,20 +4,20 @@
 	classes = {};
 	objectVersion = 77;
 	objects = {
-		A00000000000000000000001 /* TechShorts.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TechShorts.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A00000000000000000000001 /* Techgist.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Techgist.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000002 /* TechShorts */ = {isa = PBXFileSystemSynchronizedRootGroup; path = TechShorts; sourceTree = "<group>"; };
 		A00000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		A00000000000000000000004 = {isa = PBXGroup; children = (A00000000000000000000002, A00000000000000000000005); sourceTree = "<group>"; };
 		A00000000000000000000005 /* Products */ = {isa = PBXGroup; children = (A00000000000000000000001); name = Products; sourceTree = "<group>"; };
-		A00000000000000000000006 /* TechShorts */ = {
+		A00000000000000000000006 /* Techgist */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A00000000000000000000012;
 			buildPhases = (A00000000000000000000007, A00000000000000000000003, A00000000000000000000008);
 			buildRules = ();
 			dependencies = ();
 			fileSystemSynchronizedGroups = (A00000000000000000000002);
-			name = TechShorts;
-			productName = TechShorts;
+			name = Techgist;
+			productName = Techgist;
 			productReference = A00000000000000000000001;
 			productType = "com.apple.product-type.application";
 		};

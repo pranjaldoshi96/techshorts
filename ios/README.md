@@ -20,10 +20,10 @@ The app runs on iOS 17 and later. On iPhones without Apple Intelligence it shows
 
 ## Run
 
-Open `TechShorts.xcodeproj` in Xcode and press Run, or use the command line:
+Open `Techgist.xcodeproj` in Xcode and press Run, or use the command line:
 
 ```bash
-xcodebuild -project TechShorts.xcodeproj -scheme TechShorts -sdk iphonesimulator -derivedDataPath build build
+xcodebuild -project Techgist.xcodeproj -scheme Techgist -sdk iphonesimulator -derivedDataPath build build
 ```
 
 ## Check the feeds

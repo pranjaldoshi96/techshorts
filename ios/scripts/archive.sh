@@ -8,9 +8,9 @@ TEAM_ID="${TEAM_ID:-A4HLS6BV3C}"
 BUNDLE_ID="${BUNDLE_ID:-com.pranjald.techshorts}"
 
 build_number="$(date +%Y%m%d.%H%M)"   # always increasing, as App Store Connect requires
-archive="build/TechShorts.xcarchive"
+archive="build/Techgist.xcarchive"
 
-xcodebuild -project TechShorts.xcodeproj -scheme TechShorts -configuration Release \
+xcodebuild -project Techgist.xcodeproj -scheme Techgist -configuration Release \
   -destination 'generic/platform=iOS' -archivePath "$archive" \
   DEVELOPMENT_TEAM="$TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" CURRENT_PROJECT_VERSION="$build_number" \
   -allowProvisioningUpdates archive
