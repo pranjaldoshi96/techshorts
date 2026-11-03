@@ -55,6 +55,49 @@ var articles = result.articles.filter { article in
         && !blocked.contains { $0 == article.source || article.url.absoluteString.contains($0) }
 }
 
+// A story that one of today's top Reddit posts links to counts as one more outlet covering it, which lifts its rank
+// and shows on the card as "+N more". Only exact links match. Reddit's JSON API needs an account and its open RSS
+// allows about one request at a time, so all subreddits come in one combined request (the day's top 100 posts).
+// If Reddit is unreachable the edition simply goes out without the boost.
+let subreddits = ["technology", "programming", "MachineLearning", "LocalLLaMA", "artificial", "startups", "webdev"]
+
+func redditLinks() async -> Set<String>? {
+    let url = URL(string: "https://www.reddit.com/r/\(subreddits.joined(separator: "+"))/top/.rss?t=day&limit=100")!
+    var request = URLRequest(url: url, timeoutInterval: 30)
+    request.setValue("linux:techgist-publisher:1.0", forHTTPHeaderField: "User-Agent")
+    for attempt in 1...2 {
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let status = (response as? HTTPURLResponse)?.statusCode else { return nil }
+        if status == 429, attempt == 1 {
+            try? await Task.sleep(nanoseconds: 35_000_000_000)   // Reddit's limit resets after 30 s
+            continue
+        }
+        guard status == 200 else { return nil }
+        let links = FeedParser.parse(data).compactMap { post in
+            HTMLText.allMatches("href=\"([^\"]+)\"", in: post.html)
+                .map(HTMLText.decodeEntities)
+                .first { $0.hasPrefix("http") && !$0.contains("reddit.com") && !$0.contains("redd.it") }
+                .flatMap(URL.init(string:))
+                .map(FeedService.dedupeKey)
+        }
+        return Set(links)
+    }
+    return nil
+}
+
+if let discussed = await redditLinks() {
+    var boosted = 0
+    for i in articles.indices where discussed.contains(FeedService.dedupeKey(articles[i].url))
+        && !(articles[i].alsoCoveredBy ?? []).contains("Reddit") {
+        articles[i].alsoCoveredBy = (articles[i].alsoCoveredBy ?? []) + ["Reddit"]
+        boosted += 1
+    }
+    if boosted > 0 { articles = Ranker.rank(articles) }
+    print("Reddit: \(discussed.count) linked articles in today's top posts, \(boosted) of ours boosted")
+} else {
+    print("Reddit: unreachable, publishing without it")
+}
+
 // Fill in what the feeds left out here, so phones don't each have to load the article pages.
 let missing = articles.indices.filter { articles[$0].image == nil || articles[$0].excerpt.isEmpty }
 for start in stride(from: 0, to: missing.count, by: 8) {
