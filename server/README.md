@@ -5,7 +5,7 @@ If the newest edition is more than 8 hours old, or can't be downloaded, the app 
 
 ```
 server (cron, every 2 h)                GitHub Pages                         iPhone
-publish.sh ─ builds main.swift with ──► edition branch ──► pranjaldoshi96.github.io/TechShorts/edition.json
+publish.sh ─ builds main.swift with ──► edition branch ──► pranjaldoshi96.github.io/techshorts/edition.json
              the app's own feed and                               │ fresh (< 8 h)?  yes → show it
              ranking code, in Docker                              └──────────────── no  → fetch feeds directly
 ```
@@ -40,7 +40,7 @@ It's applied on the next run. To publish right away, run `~/TechShorts/server/pu
 
 ```bash
 tail -20 ~/.techshorts/publish.log
-curl -s https://pranjaldoshi96.github.io/TechShorts/edition.json | head -c 200
+curl -s https://pranjaldoshi96.github.io/techshorts/edition.json | head -c 200
 ```
 
 The app's **Settings** screen shows where the stories came from: "TechShorts edition, 2 hours ago" or "Direct from publishers".

@@ -9,7 +9,7 @@ repo="$(dirname "$here")"
 state="${TECHSHORTS_STATE:-$HOME/.techshorts}"   # compiled publisher, editorial.json, site checkout
 image="${SWIFT_IMAGE:-swift:6.2-jammy}"
 deploy_key="${DEPLOY_KEY:-$HOME/.ssh/techshorts_deploy}"
-remote="${EDITION_REMOTE:-git@github.com:pranjaldoshi96/TechShorts.git}"
+remote="${EDITION_REMOTE:-git@github.com:pranjaldoshi96/techshorts.git}"
 
 mkdir -p "$state/bin" "$state/site"
 exec 9>"$state/lock"

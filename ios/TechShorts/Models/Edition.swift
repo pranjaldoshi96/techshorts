@@ -6,7 +6,7 @@ struct Edition: Codable, Sendable {
     var publishedAt: Date
     var articles: [Article]
 
-    static let url = URL(string: "https://pranjaldoshi96.github.io/TechShorts/edition.json")!
+    static let url = URL(string: "https://pranjaldoshi96.github.io/techshorts/edition.json")!
     static let maxAge: TimeInterval = 8 * 3600
 
     var isFresh: Bool { Date().timeIntervalSince(publishedAt) < Self.maxAge && !articles.isEmpty }
