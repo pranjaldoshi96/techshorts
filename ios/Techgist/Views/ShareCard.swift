@@ -3,7 +3,7 @@ import UIKit
 
 /// Shares a story as a picture of its card with a Techgist footer, plus a short line linking to the app.
 enum StoryShare {
-    static let appURL = URL(string: "https://pranjaldoshi96.github.io/apps/techgist/")!
+    static let appURL = URL(string: "https://apps.apple.com/app/techgist-ai-startup-news/id6830218043")!
 
     struct Payload: Identifiable {
         let id = UUID()
@@ -21,7 +21,7 @@ enum StoryShare {
             .environment(\.colorScheme, .light))
         renderer.scale = 3
         guard let image = renderer.uiImage else { return nil }
-        return Payload(image: image, text: "\(article.title)\n\nRead it in 60 words on Techgist: \(appURL.absoluteString)")
+        return Payload(image: image, text: "\(article.title)\n\nRead tech news in 60 words on Techgist. Get it on the App Store: \(appURL.absoluteString)")
     }
 }
 
@@ -71,8 +71,8 @@ private struct ShareCard: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 1) {
-                    Text("Get the app").font(.caption.bold())
-                    Text("pranjaldoshi96.github.io/apps/techgist").font(.system(size: 9, weight: .medium)).opacity(0.85)
+                    Text("Download free on the").font(.caption2).opacity(0.85)
+                    Text("App Store").font(.subheadline.bold())
                 }
             }
             .foregroundStyle(.white)
