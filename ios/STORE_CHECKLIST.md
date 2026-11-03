@@ -15,6 +15,7 @@
 - [x] Build 1.0 (20261103.2052) uploaded on 3 Nov 2026 with `scripts/archive.sh`: AI summaries are fact-checked against the article. 
 - [x] Listing, screenshots, age rating (4+), free pricing in 174 territories (not China mainland), review details and App Privacy ("Data Not Collected") set
 - [x] **Submitted for App Review on 3 Nov 2026**; swapped to build 20261103.2323 (swipe tabs, wider Top, image sharing, on-device big story alerts) the same evening — approved and **live on the App Store on 4 Nov 2026**: https://apps.apple.com/app/techgist-ai-startup-news/id6830218043
+- [x] **1.1** (build 20261104.0039) submitted on 4 Nov 2026: shared stories link to the App Store instead of the website
 - [x] 6.9" App Store screenshots in `AppStore/screenshots/`
 - [x] Store listing, review notes, privacy and age-rating answers in `AppStore/LISTING.md`
 - [x] Product, privacy and support pages live: https://pranjaldoshi96.github.io/apps/techgist/
