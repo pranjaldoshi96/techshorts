@@ -27,7 +27,7 @@ THE STORIES THAT MATTER, FIRST
 Stories covered by several outlets or popular on Hacker News rise to the top. The same story from different publishers is merged into one card, so you never read it twice. Deals, buying guides and sponsored posts are filtered out.
 
 FIVE TABS
-• Top — TechCrunch, The Verge, Ars Technica, Wired and the Hacker News front page
+• Top — the day's biggest stories from every tab, plus TechCrunch, The Verge, Ars Technica, Wired, BBC, The Guardian, The New York Times, CNBC, Engadget and the Hacker News front page
 • AI — MIT Technology Review, The Decoder, OpenAI, Google AI, Latent Space
 • Startups — TechCrunch Startups, Product Hunt, Lenny's Newsletter
 • Dev — GitHub, Cloudflare, Changelog, DEV Community
@@ -37,11 +37,13 @@ SUMMARIES WRITTEN ON YOUR IPHONE
 On iPhones with Apple Intelligence, Techgist writes a short summary of each story on your device. Nothing is sent to a server. On other iPhones you get the publisher's own excerpt.
 
 MADE FOR A QUICK READ
-• Swipe up for the next story
+• Swipe up for the next story, left and right to switch tabs
 • Tap through to read the full article in Safari
-• Save stories for later and share them
+• Save stories for later
+• Share a story as a clean image card, ready for any chat
 • Turn off any source you don't want
 • One daily digest notification at the time you choose
+• Optional alerts when a story is covered by several outlets at once (at most 3 a day)
 • Works offline with the latest stories
 
 PRIVATE BY DESIGN
@@ -69,7 +71,7 @@ Content: headlines and short excerpts from 22 publishers' public RSS/Atom feeds,
 
 On-device summaries use Apple's Foundation Models framework and appear only on Apple Intelligence devices (iOS 26+), labelled "Summarized on device". Other devices show the publisher's excerpt.
 
-To try it: swipe up through stories, switch tabs (Top, AI, Startups, Dev, Blogs), tap the bookmark icon to save, and open Settings (gear icon) to turn sources off or enable the daily digest notification.
+To try it: swipe up through stories and left/right between tabs (Top, AI, Startups, Dev, Blogs), tap the share icon to share a story as an image, tap the bookmark icon to save, and open Settings (gear icon) to turn sources off or enable the daily digest and big story alerts. Notifications are local, created on the device; there is no push server.
 ```
 
 **Screenshots:** `AppStore/screenshots/` — 6.9" (1320×2868), upload in this order:
