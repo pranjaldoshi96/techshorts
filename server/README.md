@@ -34,7 +34,15 @@ It's applied on the next run. To publish right away, run `~/TechShorts/server/pu
 3. A deploy key at `~/.ssh/techshorts_deploy`. Add its `.pub` to GitHub under
    **Settings → Deploy keys → Add deploy key**, with **Allow write access** ticked. It can only push to this repo.
 4. GitHub Pages: **Settings → Pages → Deploy from a branch → `edition` / root**.
-5. Cron: `17 */2 * * * $HOME/TechShorts/server/publish.sh >> $HOME/.techshorts/publish.log 2>&1`
+5. Cron, every 2 hours and 2 minutes after each restart (Docker and cron both start at boot):
+   ```
+   17 */2 * * * $HOME/TechShorts/server/publish.sh --log
+   @reboot sleep 120 && $HOME/TechShorts/server/publish.sh --log
+   ```
+
+It's a plain script, not an AI agent, so every run does the same thing. If a run fails (network down, GitHub unreachable),
+the next one 2 hours later tries again. The app tolerates up to 8 hours without a new edition, so 3 runs in a row can fail
+before anyone notices, and even then the app keeps working by fetching the feeds itself.
 
 ## Checking on it
 

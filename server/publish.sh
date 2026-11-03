@@ -14,6 +14,13 @@ remote="${EDITION_REMOTE:-git@github.com:pranjaldoshi96/techshorts.git}"
 mkdir -p "$state/bin" "$state/site"
 exec 9>"$state/lock"
 flock -n 9 || { echo "Another publish is running."; exit 0; }
+
+# With --log (as cron runs it), append to publish.log and keep only its last 2,000 lines.
+if [[ "${1:-}" == "--log" ]]; then
+  log="$state/publish.log"
+  [[ -f "$log" ]] && tail -n 2000 "$log" > "$log.tmp" && mv "$log.tmp" "$log"
+  exec >>"$log" 2>&1
+fi
 echo "== $(date -u +%FT%TZ)"
 
 sources=(
