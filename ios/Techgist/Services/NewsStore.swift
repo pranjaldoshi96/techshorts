@@ -81,6 +81,8 @@ final class NewsStore: ObservableObject {
         replaceArticles(with: result.articles)
         lastUpdated = Date()
         persist()
+        // These stories are on screen now, so they shouldn't alert later.
+        BreakingNews.markSeen(articles)
         await DailyDigest.reschedule(with: topStory)
     }
 

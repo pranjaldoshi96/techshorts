@@ -57,7 +57,6 @@ struct SettingsView: View {
     @AppStorage(Keys.digestMinute) private var digestMinute = 8 * 60
     @State private var showDeniedAlert = false
     @AppStorage(Keys.breakingNews) private var breakingEnabled = false
-    @State private var breakingError: String?
 
     var body: some View {
         NavigationStack {
@@ -76,7 +75,7 @@ struct SettingsView: View {
                 Section {
                     Toggle("Big story alerts", isOn: breakingBinding)
                 } footer: {
-                    Text(breakingError ?? "An alert when a story is covered by several outlets at once. At most 3 a day.")
+                    Text("An alert when a story is covered by several outlets at once, at most 3 a day. iOS decides when the app checks in the background, so alerts can arrive a few hours after a story breaks.")
                 }
 
                 Section {
@@ -145,17 +144,14 @@ struct SettingsView: View {
 
     private var breakingBinding: Binding<Bool> {
         Binding(get: { breakingEnabled }, set: { on in
-            breakingError = nil
             Task {
-                guard on else { await BreakingNews.disable(); return }
-                do {
-                    try await BreakingNews.enable()
-                } catch BreakingNews.Failure.notificationsDenied {
-                    showDeniedAlert = true
-                } catch BreakingNews.Failure.noICloud {
-                    breakingError = "Sign in to iCloud in Settings to get big story alerts. They're delivered through iCloud."
-                } catch {
-                    breakingError = "Couldn't turn on alerts. Check your connection and try again."
+                if on {
+                    let granted = await BreakingNews.enable()
+                    breakingEnabled = granted
+                    showDeniedAlert = !granted
+                } else {
+                    BreakingNews.disable()
+                    breakingEnabled = false
                 }
             }
         })

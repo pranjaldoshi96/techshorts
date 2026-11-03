@@ -61,5 +61,3 @@ GIT_SSH_COMMAND="ssh -i $deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecki
   git push -q -f "$remote" edition
 echo "Published to $remote (edition branch)"
 
-# Big-story alerts through CloudKit (best effort; see notify.py).
-python3 "$here/notify.py" || echo "Alerts step failed"

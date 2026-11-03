@@ -42,7 +42,8 @@ enum BackgroundRefresh {
 
     static func schedule() {
         let request = BGAppRefreshTaskRequest(identifier: identifier)
-        request.earliestBeginDate = Date().addingTimeInterval(3 * 3600)
+        // The earliest iOS may run it; iOS decides the actual time from how the app is used.
+        request.earliestBeginDate = Date().addingTimeInterval(3600)
         try? BGTaskScheduler.shared.submit(request)
     }
 
@@ -55,5 +56,6 @@ enum BackgroundRefresh {
         let enabled = result.articles.filter { !disabled.contains($0.source) }
         let top = enabled.filter { $0.topRank != nil }.min { $0.topRank! < $1.topRank! } ?? enabled.first { $0.category == .top }
         await DailyDigest.reschedule(with: top)
+        await BreakingNews.alertIfNeeded(enabled)
     }
 }
