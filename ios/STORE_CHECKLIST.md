@@ -11,6 +11,8 @@
 - [x] Privacy: no accounts, analytics, ads or third-party SDKs; privacy manifest (`PrivacyInfo.xcprivacy`)
 - [x] App icon, accent colour, light + dark mode
 - [x] Team `A4HLS6BV3C`, bundle ID `com.pranjald.techgist`; signed Release archive succeeds
+- [x] App record "Techgist: AI & Startup News" created (plain "Techgist" and "TechShorts" belong to other developers)
+- [x] Build 1.0 (20261103.2026) uploaded on 3 Nov 2026 with `scripts/archive.sh`
 - [x] 6.9" App Store screenshots in `AppStore/screenshots/`
 - [x] Store listing, review notes, privacy and age-rating answers in `AppStore/LISTING.md`
 - [x] Product, privacy and support pages live: https://pranjaldoshi96.github.io/apps/techgist/
