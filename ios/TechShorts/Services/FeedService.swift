@@ -23,12 +23,21 @@ struct FeedService {
         return (Self.merge(results.compactMap(\.1)), failed)
     }
 
-    private static func merge(_ feeds: [[Article]]) -> [Article] {
-        // A story can appear in several feeds (e.g. TechCrunch and TechCrunch Startups): keep the more specific category.
-        let all = feeds.joined().sorted { ($0.category == .top ? 1 : 0) < ($1.category == .top ? 1 : 0) }
-        var seen = Set<String>()
-        let unique = all.filter { seen.insert(dedupeKey($0.url)).inserted }
-        return unique.sorted { $0.publishedAt > $1.publishedAt }
+    static func merge(_ feeds: [[Article]]) -> [Article] {
+        // The same link can appear in several feeds (TechCrunch and TechCrunch Startups, or a story on Hacker News).
+        // Keep one copy in the more specific category, but remember the other sources and HN points for ranking.
+        var byKey: [String: Article] = [:]
+        for article in feeds.joined() {
+            let key = dedupeKey(article.url)
+            guard let existing = byKey[key] else { byKey[key] = article; continue }
+            let preferNew = existing.category == .top && article.category != .top
+            var kept = preferNew ? article : existing
+            let dropped = preferNew ? existing : article
+            kept.points = [kept.points, dropped.points].compactMap { $0 }.max()
+            kept.alsoCoveredBy = (kept.alsoCoveredBy ?? []) + [dropped.source] + (dropped.alsoCoveredBy ?? [])
+            byKey[key] = kept
+        }
+        return Ranker.rank(Array(byKey.values))
     }
 
     func fetch(_ source: FeedSource) async throws -> [Article] {
@@ -76,7 +85,8 @@ extension Article {
             image: item.image ?? HTMLText.firstImage(in: item.html),
             source: source.name,
             category: source.category,
-            publishedAt: date
+            publishedAt: date,
+            points: HTMLText.firstMatch("Points: (\\d+)", in: item.html).flatMap(Int.init)
         )
     }
 }

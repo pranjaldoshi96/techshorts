@@ -8,7 +8,8 @@ Everything runs on the phone. There is no server to host or pay for.
 
 | Piece | What it does | Apple tech |
 |---|---|---|
-| `Services/FeedService.swift`, `FeedParser.swift` | Fetches 22 RSS/Atom feeds in parallel, dedupes, drops deals, buying guides and sponsored posts | URLSession, XMLParser |
+| `Services/FeedService.swift`, `FeedParser.swift` | Fetches 22 RSS/Atom feeds in parallel, merges repeated links, drops deals, buying guides and sponsored posts | URLSession, XMLParser |
+| `Services/Ranker.swift` | Ranks stories by importance: how many outlets cover the same story (matched by headline), Hacker News points, source weight, and age. Merges same-story duplicates into one card marked "+N more", and stops one source from filling the top of a tab | |
 | `Services/PageMetadata.swift` | Fills in a missing image or excerpt from the article's `og:` tags | |
 | `Services/Summarizer.swift` | Writes 50–60 word summaries on the device and labels them "Summarized on device" | Foundation Models (Apple Intelligence, iOS 26+) |
 | `Services/DailyDigest.swift` | Sends a daily notification with the top headline, and refreshes stories in the background | UserNotifications, BackgroundTasks |

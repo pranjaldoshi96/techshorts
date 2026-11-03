@@ -20,6 +20,15 @@ Task {
     let all = await FeedService().fetchAll()
     print("\nTotal after dedupe: \(all.articles.count) stories; failed: \(all.failed)")
     for c in Category.allCases { print("  \(c.rawValue): \(all.articles.filter { $0.category == c }.count)") }
+    for c in Category.allCases {
+        print("\nTop of \(c.rawValue):")
+        for a in all.articles.filter({ $0.category == c }).prefix(6) {
+            let age = Int(Date().timeIntervalSince(a.publishedAt) / 3600)
+            let extra = [a.points.map { "\($0) pts" }, a.alsoCoveredBy.map { "also: " + $0.joined(separator: ", ") }]
+                .compactMap { $0 }.joined(separator: "; ")
+            print("  \(age)h  \(a.source): \(a.title.prefix(80))" + (extra.isEmpty ? "" : "  [\(extra)]"))
+        }
+    }
     exit(failures > 3 ? 1 : 0)
 }
 semaphore.wait()

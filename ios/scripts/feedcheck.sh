@@ -7,5 +7,6 @@ main="${TMPDIR:-/tmp}/main.swift"
 cp scripts/feedcheck-main.swift "$main"
 swiftc -O -o "$out" TechShorts/Models/Article.swift TechShorts/Models/FeedSource.swift \
   TechShorts/Services/HTMLText.swift TechShorts/Services/FeedParser.swift TechShorts/Services/FeedService.swift \
+  TechShorts/Services/Ranker.swift \
   TechShorts/Services/Disk.swift "$main"
 "$out"

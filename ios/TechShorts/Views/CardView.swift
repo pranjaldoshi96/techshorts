@@ -15,6 +15,11 @@ struct CardView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
                     Text(article.source.uppercased()).bold().foregroundStyle(.tint)
+                    if let others = article.alsoCoveredBy, !others.isEmpty {
+                        Text("+\(others.count) more")
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("Also covered by \(others.formatted())")
+                    }
                     Text("·").foregroundStyle(.secondary)
                     Text(article.publishedAt, format: .relative(presentation: .named)).foregroundStyle(.secondary)
                 }

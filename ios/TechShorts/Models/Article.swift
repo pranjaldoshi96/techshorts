@@ -16,6 +16,10 @@ struct Article: Codable, Identifiable, Hashable, Sendable {
     let source: String
     let category: Category
     let publishedAt: Date
+    /// Hacker News points, when the story is on the HN front page.
+    var points: Int?
+    /// Other outlets reporting the same story, used for ranking and shown on the card.
+    var alsoCoveredBy: [String]?
 
     var id: String { url.absoluteString }
 }
