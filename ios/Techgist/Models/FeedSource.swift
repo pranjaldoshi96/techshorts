@@ -32,6 +32,11 @@ struct FeedSource: Identifiable, Hashable, Sendable {
         FeedSource("Ars Technica", .top, "https://feeds.arstechnica.com/arstechnica/index"),
         FeedSource("Wired", .top, "https://www.wired.com/feed/rss"),
         FeedSource("Hacker News", .top, "https://hnrss.org/frontpage?points=150"),
+        FeedSource("BBC Technology", .top, "https://feeds.bbci.co.uk/news/technology/rss.xml"),
+        FeedSource("The Guardian", .top, "https://www.theguardian.com/uk/technology/rss"),
+        FeedSource("New York Times", .top, "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml"),
+        FeedSource("CNBC Tech", .top, "https://www.cnbc.com/id/19854910/device/rss/rss.html"),
+        FeedSource("Engadget", .top, "https://www.engadget.com/rss.xml"),
 
         FeedSource("MIT Tech Review", .ai, "https://www.technologyreview.com/topic/artificial-intelligence/feed"),
         FeedSource("The Decoder", .ai, "https://the-decoder.com/feed/"),

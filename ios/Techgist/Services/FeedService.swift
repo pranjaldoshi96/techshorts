@@ -125,6 +125,8 @@ enum ContentFilter {
         "\\d+% off", "\\$\\d+ off", "\\bon sale\\b", "\\b(best|lowest) price", "all-time low", "black friday", "cyber monday",
         "prime day", "gift guide", "coupon", "promo code", "\\bbest\\b.{0,60}\\bdeals?\\b", "\\bdeals? of the (day|week)\\b",
         "\\bsponsored\\b", "^(the )?\\d+ best\\b", "\\bbest\\b.*\\(20\\d\\d\\)",
+        // Publishers' own event promotions.
+        "\\bfounder summit\\b", "\\btechcrunch disrupt\\b", "\\bstrictlyvc\\b", "\\btickets?\\b.{0,40}\\b(sale|save|discount|price)",
     ].joined(separator: "|"), options: .caseInsensitive)
 
     private static let path = try! NSRegularExpression(pattern: [

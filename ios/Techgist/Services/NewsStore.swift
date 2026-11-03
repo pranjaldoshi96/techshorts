@@ -31,13 +31,19 @@ final class NewsStore: ObservableObject {
         aiSummariesEnabled = UserDefaults.standard.object(forKey: Keys.aiSummaries) as? Bool ?? true
     }
 
-    var visibleArticles: [Article] {
-        articles.filter { $0.category == category && !disabledSources.contains($0.source) }
+    var visibleArticles: [Article] { articles(in: category) }
+
+    /// Top mixes Top sources with the best stories from every tab (`topRank`); stories cached by older
+    /// versions have no rank, so fall back to the Top sources alone.
+    func articles(in category: Category) -> [Article] {
+        let enabled = articles.filter { !disabledSources.contains($0.source) }
+        if category == .top, enabled.contains(where: { $0.topRank != nil }) {
+            return enabled.filter { $0.topRank != nil }.sorted { $0.topRank! < $1.topRank! }
+        }
+        return enabled.filter { $0.category == category }
     }
 
-    var topStory: Article? {
-        articles.first { $0.category == .top && !disabledSources.contains($0.source) }
-    }
+    var topStory: Article? { articles(in: .top).first }
 
     func summary(for article: Article) -> (text: String, isAI: Bool) {
         if aiSummariesEnabled, let s = aiSummaries[article.id] { return (s, true) }

@@ -20,6 +20,8 @@ struct Article: Codable, Identifiable, Hashable, Sendable {
     var points: Int?
     /// Other outlets reporting the same story, used for ranking and shown on the card.
     var alsoCoveredBy: [String]?
+    /// Position in the Top tab, which mixes Top sources with the strongest stories from every other tab.
+    var topRank: Int?
 
     var id: String { url.absoluteString }
 }

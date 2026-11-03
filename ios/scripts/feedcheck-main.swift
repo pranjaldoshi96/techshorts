@@ -20,6 +20,9 @@ Task {
     let all = await FeedService().fetchAll()
     print("\nTotal after dedupe: \(all.articles.count) stories; failed: \(all.failed)")
     for c in Category.allCases { print("  \(c.rawValue): \(all.articles.filter { $0.category == c }.count)") }
+    let topTab = all.articles.filter { $0.topRank != nil }.sorted { $0.topRank! < $1.topRank! }
+    print("\nTop tab: \(topTab.count) stories, by tab: " + Category.allCases.map { c in "\(c.rawValue) \(topTab.filter { $0.category == c }.count)" }.joined(separator: ", "))
+    for a in topTab.prefix(12) { print("  [\(a.category.rawValue)] \(a.source): \(a.title.prefix(70))") }
     for c in Category.allCases {
         print("\nTop of \(c.rawValue):")
         for a in all.articles.filter({ $0.category == c }).prefix(6) {

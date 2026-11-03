@@ -4,6 +4,7 @@ struct CardView: View {
     @EnvironmentObject private var store: NewsStore
     let article: Article
     let onRead: () -> Void
+    @State private var preparingShare = false
 
     var body: some View {
         let summary = store.summary(for: article)
@@ -58,9 +59,18 @@ struct CardView: View {
                         Image(systemName: store.isSaved(article) ? "bookmark.fill" : "bookmark")
                     }
                     .accessibilityLabel(store.isSaved(article) ? "Remove from saved" : "Save story")
-                    ShareLink(item: article.url, subject: Text(article.title)) {
-                        Image(systemName: "square.and.arrow.up")
+                    Button {
+                        preparingShare = true
+                        Task {
+                            if let payload = await StoryShare.payload(for: article, summary: summary.text) {
+                                StoryShare.present(payload)
+                            }
+                            preparingShare = false
+                        }
+                    } label: {
+                        if preparingShare { ProgressView() } else { Image(systemName: "square.and.arrow.up") }
                     }
+                    .disabled(preparingShare)
                     .accessibilityLabel("Share")
                 }
             }
@@ -93,7 +103,7 @@ struct ArticleImage: View {
 }
 
 /// A designed cover for stories without a photo: a gradient in the category's colors with its symbol and the source name.
-private struct StoryCover: View {
+struct StoryCover: View {
     let article: Article
 
     private var style: (colors: [Color], symbol: String) {

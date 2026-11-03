@@ -10,7 +10,15 @@ struct ContentView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 CategoryBar(selection: $store.category)
-                feed
+                // Swipe left and right between tabs; up and down between stories.
+                TabView(selection: $store.category) {
+                    ForEach(Category.allCases) { category in
+                        CategoryFeed(category: category) { reading = $0 }
+                            .tag(category)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .animation(.default, value: store.category)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Techgist")
@@ -31,9 +39,16 @@ struct ContentView: View {
         }
         .task { await store.refreshIfStale() }
     }
+}
 
-    @ViewBuilder private var feed: some View {
-        let items = store.visibleArticles
+/// One tab's stories, one card per screen.
+struct CategoryFeed: View {
+    @EnvironmentObject private var store: NewsStore
+    let category: Category
+    let onRead: (Article) -> Void
+
+    var body: some View {
+        let items = store.articles(in: category)
         if items.isEmpty {
             if store.isRefreshing || (store.lastUpdated == nil && store.failedSources.isEmpty) {
                 ProgressView("Fetching today's stories…")
@@ -52,7 +67,7 @@ struct ContentView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, article in
-                        CardView(article: article) { reading = article }
+                        CardView(article: article) { onRead(article) }
                             .containerRelativeFrame(.vertical)
                             .task { await store.prepare(article) }
                             .onAppear {
@@ -70,7 +85,6 @@ struct ContentView: View {
             .scrollTargetBehavior(.paging)
             .scrollIndicators(.hidden)
             .refreshable { await store.refresh() }
-            .id(store.category)
         }
     }
 }
@@ -79,10 +93,11 @@ struct CategoryBar: View {
     @Binding var selection: Category
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
                 ForEach(Category.allCases) { c in
-                    Button { selection = c } label: {
+                    Button { withAnimation { selection = c } } label: {
                         Text(c.rawValue)
                             .font(.subheadline.weight(.medium))
                             .padding(.horizontal, 14)
@@ -93,12 +108,16 @@ struct CategoryBar: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(selection == c ? .isSelected : [])
+                    .id(c)
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
         }
         .scrollIndicators(.hidden)
+        // Keep the current tab's chip in view when it changes by swiping.
+        .onChange(of: selection) { _, new in withAnimation { proxy.scrollTo(new, anchor: .center) } }
+        }
     }
 }
 

@@ -48,9 +48,12 @@ guard result.articles.count >= 60 else {
 }
 
 let blocked = editorial.blocked ?? []
-let pinned = (editorial.pinned ?? []).map {
-    Article(url: $0.url, title: $0.title, excerpt: $0.excerpt, content: "", image: $0.image,
-            source: $0.source ?? "Techgist", category: $0.category, publishedAt: $0.publishedAt)
+// Pinned stories lead both their own tab and Top (negative ranks sort before every ranked story).
+let pinnedStories = editorial.pinned ?? []
+let pinned = pinnedStories.enumerated().map { i, story in
+    Article(url: story.url, title: story.title, excerpt: story.excerpt, content: "", image: story.image,
+            source: story.source ?? "Techgist", category: story.category, publishedAt: story.publishedAt,
+            topRank: i - pinnedStories.count)
 }
 let pinnedKeys = Set(pinned.map { FeedService.dedupeKey($0.url) })
 var articles = result.articles.filter { article in

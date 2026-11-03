@@ -52,6 +52,8 @@ enum BackgroundRefresh {
         guard !result.articles.isEmpty else { return }
         ArticleCache.save(result.articles, at: Date())
         let disabled = Set(UserDefaults.standard.stringArray(forKey: Keys.disabledSources) ?? [])
-        await DailyDigest.reschedule(with: result.articles.first { $0.category == .top && !disabled.contains($0.source) })
+        let enabled = result.articles.filter { !disabled.contains($0.source) }
+        let top = enabled.filter { $0.topRank != nil }.min { $0.topRank! < $1.topRank! } ?? enabled.first { $0.category == .top }
+        await DailyDigest.reschedule(with: top)
     }
 }

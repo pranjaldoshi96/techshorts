@@ -12,8 +12,8 @@ enum Ranker {
         let idf = inverseDocumentFrequency(tokens)
         let groups = clusters(articles, tokens, idf)
 
-        var ranked: [Category: [(article: Article, score: Double)]] = [:]
-        for group in groups {
+        var ranked: [Category: [Scored]] = [:]
+        for (groupIndex, group) in groups.enumerated() {
             let members = group.map { articles[$0] }
             let sourceNames = members.flatMap { [$0.source] + ($0.alsoCoveredBy ?? []) }
             let points = members.compactMap(\.points).max()
@@ -26,14 +26,40 @@ enum Ranker {
                     let others = otherPublishers(sourceNames, excluding: lead.source)
                     lead.alsoCoveredBy = others.isEmpty ? nil : others
                     lead.points = points
-                    ranked[category, default: []].append((lead, score(lead, coverage: others.count + 1, now: now)))
+                    lead.topRank = nil
+                    ranked[category, default: []].append(Scored(article: lead, score: score(lead, coverage: others.count + 1, now: now), group: groupIndex))
                 }
             }
         }
+
+        // The Top tab: Top sources plus the strongest stories from every other tab, one card per story.
+        var topPicks = ranked[.top] ?? []
+        var topGroups = Set(topPicks.map(\.group))
+        for category in Category.allCases where category != .top {
+            let best = (ranked[category] ?? []).sorted { $0.score > $1.score }
+            for pick in best.prefix(topPicksPerTab[category] ?? 0) where topGroups.insert(pick.group).inserted {
+                topPicks.append(pick)
+            }
+        }
+        let topOrder = Dictionary(spreadSources(topPicks).enumerated().map { ($1.id, $0) }, uniquingKeysWith: min)
+
         return Category.allCases.flatMap { category in
-            spreadSources(ranked[category] ?? [])
+            spreadSources(ranked[category] ?? []).map { article in
+                var a = article
+                a.topRank = topOrder[a.id]
+                return a
+            }
         }
     }
+
+    private struct Scored {
+        var article: Article
+        var score: Double
+        var group: Int
+    }
+
+    /// How many of each tab's best stories also appear in Top.
+    private static let topPicksPerTab: [Category: Int] = [.ai: 6, .startups: 4, .dev: 3, .blogs: 3]
 
     static func score(_ article: Article, coverage: Int, now: Date) -> Double {
         let ageHours = max(0, now.timeIntervalSince(article.publishedAt) / 3600)
@@ -57,7 +83,7 @@ enum Ranker {
 
     /// Orders by score, but each further story from a source already shown counts for 25% less,
     /// so one prolific feed can't fill the top of a tab.
-    private static func spreadSources(_ scored: [(article: Article, score: Double)]) -> [Article] {
+    private static func spreadSources(_ scored: [Scored]) -> [Article] {
         var pending = scored
         var shown: [String: Int] = [:]
         var out: [Article] = []
