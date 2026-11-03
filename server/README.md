@@ -14,6 +14,8 @@ The publisher is compiled from the same Swift files as the app (`ios/Techgist/Mo
 duplicate merging and filtering are identical on both sides. It also fills in missing images and excerpts from the
 article pages, so phones don't have to.
 
+**Reddit signal (server only):** each run makes one request for the day's top 100 posts across r/technology, r/programming, r/MachineLearning, r/LocalLLaMA, r/artificial, r/startups and r/webdev. A story whose exact link appears there counts as one more outlet covering it, so it ranks higher and its card shows "+N more". Reddit's open RSS allows about one anonymous request at a time, so this is one combined request with one retry; if Reddit is unreachable, the edition publishes without it (the log says so).
+
 The server is on a private network, so phones never connect to it. It only pushes the finished file to GitHub, which serves it.
 
 ## Your own stories and blocking
