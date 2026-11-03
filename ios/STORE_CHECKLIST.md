@@ -14,7 +14,7 @@
 - [x] App record "Techgist: AI & Startup News" created (plain "Techgist" and "TechShorts" belong to other developers)
 - [x] Build 1.0 (20261103.2052) uploaded on 3 Nov 2026 with `scripts/archive.sh`: AI summaries are fact-checked against the article. 
 - [x] Listing, screenshots, age rating (4+), free pricing in 174 territories (not China mainland), review details and App Privacy ("Data Not Collected") set
-- [x] **Submitted for App Review on 3 Nov 2026** with build 20261103.2052 — status *Waiting for Review*, releases automatically when approved
+- [x] **Submitted for App Review on 3 Nov 2026**; swapped to build 20261103.2323 (swipe tabs, wider Top, image sharing, on-device big story alerts) the same evening — status *Waiting for Review*, releases automatically when approved
 - [x] 6.9" App Store screenshots in `AppStore/screenshots/`
 - [x] Store listing, review notes, privacy and age-rating answers in `AppStore/LISTING.md`
 - [x] Product, privacy and support pages live: https://pranjaldoshi96.github.io/apps/techgist/
