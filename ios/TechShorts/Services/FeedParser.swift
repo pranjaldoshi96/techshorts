@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationXML)
+import FoundationXML
+#endif
 
 struct FeedItem {
     var title = ""
@@ -20,7 +23,7 @@ final class FeedParser: NSObject, XMLParserDelegate {
         let delegate = FeedParser()
         let parser = XMLParser(data: data)
         parser.delegate = delegate
-        parser.parse()
+        _ = parser.parse()
         return delegate.items
     }
 

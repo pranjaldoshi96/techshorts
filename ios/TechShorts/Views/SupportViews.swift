@@ -90,6 +90,16 @@ struct SettingsView: View {
 
                 Section {
                     LabeledContent("Version", value: Self.version)
+                    switch store.origin {
+                    case .edition(let publishedAt):
+                        LabeledContent("Stories") {
+                            Text("TechShorts edition, \(publishedAt, format: .relative(presentation: .named))")
+                        }
+                    case .direct:
+                        LabeledContent("Stories", value: "Direct from publishers")
+                    case nil:
+                        EmptyView()
+                    }
                 } footer: {
                     Text("Headlines and excerpts come from each publisher's public feed and link to the original story. Your reading, saves and settings stay on this device.")
                 }

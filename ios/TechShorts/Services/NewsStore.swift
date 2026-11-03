@@ -7,6 +7,7 @@ final class NewsStore: ObservableObject {
     @Published private(set) var lastUpdated: Date?
     @Published private(set) var isRefreshing = false
     @Published private(set) var failedSources: [String] = []
+    @Published private(set) var origin: NewsOrigin?
     @Published private(set) var aiSummaries: [String: String] = [:]
     @Published private(set) var saved: [Article]
     @Published var category: Category = .top
@@ -66,9 +67,10 @@ final class NewsStore: ObservableObject {
         if articles.isEmpty {
             onProgress = { [weak self] partial in await self?.showPartial(partial) }
         }
-        let result = await FeedService().fetchAll(onProgress: onProgress)
+        let result = await FeedService().latest(onProgress: onProgress)
         failedSources = result.failed
         guard !result.articles.isEmpty else { return }
+        origin = result.origin
 
         replaceArticles(with: result.articles)
         lastUpdated = Date()

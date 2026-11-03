@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Reads og:image / og:description from an article page, for feeds that ship without an image or excerpt.
 actor PageMetadata {

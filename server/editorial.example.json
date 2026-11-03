@@ -1,0 +1,16 @@
+{
+  "pinned": [
+    {
+      "title": "Welcome to TechShorts",
+      "url": "https://github.com/pranjaldoshi96/TechShorts",
+      "excerpt": "Your daily tech, AI and startup news in 60 words a story. Swipe up for the next one.",
+      "category": "Top",
+      "source": "TechShorts",
+      "publishedAt": "2026-11-03T09:00:00Z"
+    }
+  ],
+  "blocked": [
+    "Some Source Name",
+    "example.com/a-story-to-hide"
+  ]
+}

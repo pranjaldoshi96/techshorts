@@ -48,7 +48,7 @@ enum BackgroundRefresh {
 
     static func run() async {
         schedule()
-        let result = await FeedService().fetchAll()
+        let result = await FeedService().latest()
         guard !result.articles.isEmpty else { return }
         ArticleCache.save(result.articles, at: Date())
         let disabled = Set(UserDefaults.standard.stringArray(forKey: Keys.disabledSources) ?? [])
