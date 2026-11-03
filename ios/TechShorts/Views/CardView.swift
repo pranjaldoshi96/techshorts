@@ -8,7 +8,7 @@ struct CardView: View {
     var body: some View {
         let summary = store.summary(for: article)
         VStack(alignment: .leading, spacing: 0) {
-            ArticleImage(url: article.image)
+            ArticleImage(article: article)
                 .containerRelativeFrame(.vertical) { height, _ in height * 0.32 }
                 .frame(maxWidth: .infinity)
 
@@ -74,23 +74,52 @@ struct CardView: View {
 }
 
 struct ArticleImage: View {
-    let url: URL?
+    let article: Article
 
     var body: some View {
-        Rectangle()
-            .fill(LinearGradient(colors: [.accentColor, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+        StoryCover(article: article)
             .overlay {
-                if let url {
+                // The cover stays visible while the photo loads, and if it never does.
+                if let url = article.image {
                     AsyncImage(url: url, transaction: Transaction(animation: .easeIn(duration: 0.2))) { phase in
                         if let image = phase.image { image.resizable().scaledToFill() }
                     }
-                } else {
-                    Image(systemName: "newspaper")
-                        .font(.system(size: 40))
-                        .foregroundStyle(.white.opacity(0.85))
                 }
             }
             .clipped()
             .accessibilityHidden(true)
+    }
+}
+
+/// A designed cover for stories without a photo: a gradient in the category's colors with its symbol and the source name.
+private struct StoryCover: View {
+    let article: Article
+
+    private var style: (colors: [Color], symbol: String) {
+        switch article.category {
+        case .top: ([Color(red: 0.18, green: 0.42, blue: 1), Color(red: 0.45, green: 0.25, blue: 0.95)], "bolt.fill")
+        case .ai: ([Color(red: 0.55, green: 0.2, blue: 0.95), Color(red: 0.95, green: 0.3, blue: 0.6)], "sparkles")
+        case .startups: ([Color(red: 1, green: 0.45, blue: 0.2), Color(red: 0.95, green: 0.2, blue: 0.4)], "rocket.fill")
+        case .dev: ([Color(red: 0.05, green: 0.6, blue: 0.55), Color(red: 0.1, green: 0.35, blue: 0.75)], "chevron.left.forwardslash.chevron.right")
+        case .blogs: ([Color(red: 0.95, green: 0.6, blue: 0.1), Color(red: 0.85, green: 0.3, blue: 0.2)], "text.quote")
+        }
+    }
+
+    var body: some View {
+        LinearGradient(colors: style.colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+            .overlay(alignment: .topTrailing) {
+                Image(systemName: style.symbol)
+                    .font(.system(size: 120, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.15))
+                    .offset(x: 24, y: -12)
+            }
+            .overlay(alignment: .bottomLeading) {
+                Text(article.source)
+                    .font(.system(.largeTitle, design: .rounded, weight: .heavy))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.6)
+                    .padding(20)
+            }
     }
 }
