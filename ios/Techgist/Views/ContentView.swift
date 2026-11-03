@@ -5,6 +5,12 @@ struct ContentView: View {
     @State private var showSaved = false
     @State private var showSettings = false
     @State private var reading: Article?
+    @State private var alertStory: AlertStory?
+
+    struct AlertStory: Identifiable {
+        let url: URL
+        var id: URL { url }
+    }
 
     var body: some View {
         NavigationStack {
@@ -36,8 +42,14 @@ struct ContentView: View {
             .sheet(isPresented: $showSaved) { SavedView() }
             .sheet(isPresented: $showSettings) { SettingsView() }
             .sheet(item: $reading) { SafariView(url: $0.url).ignoresSafeArea() }
+            .sheet(item: $alertStory) { SafariView(url: $0.url).ignoresSafeArea() }
         }
         .task { await store.refreshIfStale() }
+        .onAppear {
+            // A tapped big-story alert opens its article.
+            AppDelegate.openStory = { alertStory = AlertStory(url: $0) }
+            if let url = AppDelegate.takePending() { alertStory = AlertStory(url: url) }
+        }
     }
 }
 

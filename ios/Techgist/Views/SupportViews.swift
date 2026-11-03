@@ -56,6 +56,8 @@ struct SettingsView: View {
     @AppStorage(Keys.digestEnabled) private var digestEnabled = false
     @AppStorage(Keys.digestMinute) private var digestMinute = 8 * 60
     @State private var showDeniedAlert = false
+    @AppStorage(Keys.breakingNews) private var breakingEnabled = false
+    @State private var breakingError: String?
 
     var body: some View {
         NavigationStack {
@@ -69,6 +71,12 @@ struct SettingsView: View {
                     Text("Notifications")
                 } footer: {
                     Text("One notification a day with the top tech story.")
+                }
+
+                Section {
+                    Toggle("Big story alerts", isOn: breakingBinding)
+                } footer: {
+                    Text(breakingError ?? "An alert when a story is covered by several outlets at once. At most 3 a day.")
                 }
 
                 Section {
@@ -115,7 +123,7 @@ struct SettingsView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Allow notifications for Techgist in Settings to get the daily digest.")
+                Text("Allow notifications for Techgist in Settings to get the daily digest and big story alerts.")
             }
         }
     }
@@ -131,6 +139,24 @@ struct SettingsView: View {
                     digestEnabled = false
                 }
                 await DailyDigest.reschedule(with: store.topStory)
+            }
+        })
+    }
+
+    private var breakingBinding: Binding<Bool> {
+        Binding(get: { breakingEnabled }, set: { on in
+            breakingError = nil
+            Task {
+                guard on else { await BreakingNews.disable(); return }
+                do {
+                    try await BreakingNews.enable()
+                } catch BreakingNews.Failure.notificationsDenied {
+                    showDeniedAlert = true
+                } catch BreakingNews.Failure.noICloud {
+                    breakingError = "Sign in to iCloud in Settings to get big story alerts. They're delivered through iCloud."
+                } catch {
+                    breakingError = "Couldn't turn on alerts. Check your connection and try again."
+                }
             }
         })
     }

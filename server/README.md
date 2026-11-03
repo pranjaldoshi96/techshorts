@@ -18,6 +18,14 @@ article pages, so phones don't have to.
 
 The server is on a private network, so phones never connect to it. It only pushes the finished file to GitHub, which serves it.
 
+## Big story alerts
+
+After each publish, `notify.py` may send one push alert through CloudKit (container `iCloud.com.pranjald.techgist`):
+a Top story covered by 3+ outlets and under 6 hours old, or a pinned story with `"notify": true`. At most 1 per run
+and 3 per 24 hours, never the same story twice. It needs `~/.techshorts/cloudkit_key.pem` (generated on the server)
+and `~/.techshorts/cloudkit_key_id` (from CloudKit Console → Tokens & Keys → Server-to-Server Keys). Without them it
+skips quietly. `python3 server/notify.py --test` sends a test alert to development builds.
+
 ## Your own stories and blocking
 
 Create `~/.techshorts/editorial.json` on the server (see `editorial.example.json`):

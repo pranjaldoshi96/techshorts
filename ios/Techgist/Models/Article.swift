@@ -42,4 +42,5 @@ enum Keys {
     static let aiSummaries = "aiSummariesEnabled"
     static let digestEnabled = "digestEnabled"
     static let digestMinute = "digestMinuteOfDay"
+    static let breakingNews = "breakingNewsEnabled"
 }

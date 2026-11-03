@@ -60,3 +60,6 @@ git -c user.name="TechShorts publisher" -c user.email="techshorts-publisher@user
 GIT_SSH_COMMAND="ssh -i $deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
   git push -q -f "$remote" edition
 echo "Published to $remote (edition branch)"
+
+# Big-story alerts through CloudKit (best effort; see notify.py).
+python3 "$here/notify.py" || echo "Alerts step failed"

@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct TechgistApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store = NewsStore()
     @Environment(\.scenePhase) private var scenePhase
 
