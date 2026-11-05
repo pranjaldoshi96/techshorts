@@ -46,7 +46,7 @@ enum BreakingNews {
         let content = UNMutableNotificationContent()
         let others = story.alsoCoveredBy?.count ?? 0
         content.title = others > 0 ? "\(story.source) + \(others) more" : story.source
-        content.body = story.title
+        content.body = story.displayTitle
         content.sound = .default
         content.userInfo = ["url": story.url.absoluteString]
         let request = UNNotificationRequest(identifier: "big-story-\(story.id)", content: content, trigger: nil)

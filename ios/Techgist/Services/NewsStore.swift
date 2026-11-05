@@ -11,6 +11,10 @@ final class NewsStore: ObservableObject {
     @Published private(set) var aiSummaries: [String: String] = [:]
     @Published private(set) var saved: [Article]
     @Published var category: Category = .top
+    /// A newer set of stories found while reading; shown only when the reader taps the "new stories" button.
+    @Published private(set) var waiting: (articles: [Article], origin: NewsOrigin, newCount: Int)?
+    /// Bumped when the feed should jump back to the newest story.
+    @Published private(set) var scrollToTopRequests = 0
 
     @Published var disabledSources: Set<String> {
         didSet { UserDefaults.standard.set(Array(disabledSources), forKey: Keys.disabledSources) }
@@ -33,19 +37,25 @@ final class NewsStore: ObservableObject {
 
     var visibleArticles: [Article] { articles(in: category) }
 
-    /// Top mixes Top sources with the best stories from every tab (`topRank`); stories cached by older
-    /// versions have no rank, so fall back to the Top sources alone.
+    /// Every tab shows the newest story first. Top holds Top sources plus the strongest stories from every tab
+    /// (`topRank`); stories cached by older versions have no rank, so Top falls back to its own sources.
     func articles(in category: Category) -> [Article] {
         let enabled = articles.filter { !disabledSources.contains($0.source) }
-        if category == .top, enabled.contains(where: { $0.topRank != nil }) {
-            return enabled.filter { $0.topRank != nil }.sorted { $0.topRank! < $1.topRank! }
-        }
-        return enabled.filter { $0.category == category }
+        let inTab = category == .top && enabled.contains(where: { $0.topRank != nil })
+            ? enabled.filter { $0.topRank != nil }
+            : enabled.filter { $0.category == category }
+        return inTab.sorted { $0.publishedAt > $1.publishedAt }
     }
 
-    var topStory: Article? { articles(in: .top).first }
+    /// The biggest story right now (for the daily digest), not just the newest.
+    var topStory: Article? {
+        articles.filter { $0.topRank != nil && !disabledSources.contains($0.source) }.min { $0.topRank! < $1.topRank! }
+            ?? articles(in: .top).first
+    }
 
+    /// Techgist's summary first, then one written on this iPhone, then the publisher's excerpt.
     func summary(for article: Article) -> (text: String, isAI: Bool) {
+        if let s = article.summary { return (s, true) }
         if aiSummariesEnabled, let s = aiSummaries[article.id] { return (s, true) }
         return (article.excerpt, false)
     }
@@ -80,6 +90,7 @@ final class NewsStore: ObservableObject {
 
         replaceArticles(with: result.articles)
         lastUpdated = Date()
+        waiting = nil
         persist()
         // These stories are on screen now, so they shouldn't alert later.
         BreakingNews.markSeen(articles)
@@ -94,9 +105,32 @@ final class NewsStore: ObservableObject {
                 if $0.excerpt.isEmpty, let d = meta.description { $0.excerpt = d }
             }
         }
-        if aiSummariesEnabled, aiSummaries[article.id] == nil, let s = await Summarizer.shared.summary(for: article) {
+        if article.summary == nil, aiSummariesEnabled, aiSummaries[article.id] == nil,
+           let s = await Summarizer.shared.summary(for: article) {
             aiSummaries[article.id] = s
         }
+    }
+
+    /// Looks for newer stories without disturbing the reader; `showWaitingStories()` brings them in.
+    func checkForNewStories() async {
+        guard !isRefreshing, !articles.isEmpty else { return }
+        let result = await FeedService().latest()
+        guard !result.articles.isEmpty else { return }
+        let current = Set(articles.map(\.id))
+        let newCount = result.articles.filter { !current.contains($0.id) && !disabledSources.contains($0.source) }.count
+        waiting = newCount > 0 ? (result.articles, result.origin, newCount) : nil
+    }
+
+    func showWaitingStories() {
+        guard let waiting else { return }
+        replaceArticles(with: waiting.articles)
+        origin = waiting.origin
+        lastUpdated = Date()
+        self.waiting = nil
+        persist()
+        BreakingNews.markSeen(articles)
+        scrollToTopRequests += 1
+        Task { await DailyDigest.reschedule(with: topStory) }
     }
 
     private func showPartial(_ partial: [Article]) {
@@ -134,7 +168,7 @@ final class NewsStore: ObservableObject {
             saved.remove(at: i)
         } else {
             var copy = article
-            if let s = aiSummaries[article.id] { copy.excerpt = s }
+            if article.summary == nil, let s = aiSummaries[article.id] { copy.excerpt = s }
             saved.insert(copy, at: 0)
         }
         Disk.save(saved, to: Self.savedFile)

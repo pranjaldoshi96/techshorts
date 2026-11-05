@@ -28,7 +28,7 @@ struct CardView: View {
                 .font(.caption)
                 .lineLimit(1)
 
-                Text(article.title)
+                Text(article.displayTitle)
                     .font(.title3.weight(.bold))
                     .lineLimit(4)
                     .fixedSize(horizontal: false, vertical: true)
@@ -41,7 +41,7 @@ struct CardView: View {
                         .minimumScaleFactor(0.85)
                 }
                 if summary.isAI {
-                    Label("Summarized on device", systemImage: "sparkles")
+                    Label("Summarized by AI", systemImage: "sparkles")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }

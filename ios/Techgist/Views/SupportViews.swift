@@ -27,7 +27,7 @@ struct SavedView: View {
                     List(store.saved) { article in
                         Button { reading = article } label: {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(article.title).font(.headline).foregroundStyle(.primary)
+                                Text(article.displayTitle).font(.headline).foregroundStyle(.primary)
                                 Text("\(article.source) · \(article.publishedAt.formatted(date: .abbreviated, time: .omitted))")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)

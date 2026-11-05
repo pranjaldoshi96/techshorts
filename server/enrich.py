@@ -144,7 +144,7 @@ def thumbnail(url, out_dir):
     try:
         r = requests.get(url, headers={"User-Agent": UA}, timeout=20)
         r.raise_for_status()
-        img = Image.open(io.BytesIO(r.content)).convert("RGB")
+        img = Image.open(io.BytesIO(r.content)).convert("RGBA").convert("RGB")
         if img.width > 720: img = img.resize((720, round(img.height * 720 / img.width)), Image.LANCZOS)
         img.save(path, "JPEG", quality=72, optimize=True, progressive=True)
         return name

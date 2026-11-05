@@ -21,7 +21,7 @@ enum StoryShare {
             .environment(\.colorScheme, .light))
         renderer.scale = 3
         guard let image = renderer.uiImage else { return nil }
-        return Payload(image: image, text: "\(article.title)\n\nRead tech news in 60 words on Techgist. Get it on the App Store: \(appURL.absoluteString)")
+        return Payload(image: image, text: "\(article.displayTitle)\n\nRead tech news in 60 words on Techgist. Get it on the App Store: \(appURL.absoluteString)")
     }
 }
 
@@ -47,7 +47,7 @@ private struct ShareCard: View {
                 Text(article.source.uppercased())
                     .font(.caption.bold())
                     .foregroundStyle(Color.accentColor)
-                Text(article.title)
+                Text(article.displayTitle)
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.black)
                     .fixedSize(horizontal: false, vertical: true)

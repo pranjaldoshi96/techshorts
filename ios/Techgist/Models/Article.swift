@@ -22,6 +22,12 @@ struct Article: Codable, Identifiable, Hashable, Sendable {
     var alsoCoveredBy: [String]?
     /// Position in the Top tab, which mixes Top sources with the strongest stories from every other tab.
     var topRank: Int?
+    /// Techgist's own headline and summary, written on the server by an LLM and checked against the article.
+    var headline: String?
+    var summary: String?
+
+    /// The headline to show: Techgist's when there is one, otherwise the publisher's.
+    var displayTitle: String { headline ?? title }
 
     var id: String { url.absoluteString }
 }

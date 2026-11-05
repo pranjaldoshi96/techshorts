@@ -25,7 +25,7 @@ enum DailyDigest {
         let content = UNMutableNotificationContent()
         content.title = "Your daily Techgist"
         if let top, Date().timeIntervalSince(top.publishedAt) < 18 * 3600 {
-            content.body = top.title
+            content.body = top.displayTitle
         } else {
             content.body = "Today's tech, AI and startup news, 60 words a story."
         }
