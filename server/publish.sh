@@ -44,19 +44,27 @@ fi
 
 "${docker_run[@]}" -v "$state":/state "$image" /state/bin/publisher /state/editorial.json /state/site/edition.json
 
+# Techgist's own headlines and summaries (LLM) and lightweight images; see enrich.py. Never blocks the publish.
+python3 "$here/enrich.py" "$state/site/edition.json" "$state/site/img" \
+  "https://raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/img" || echo "Enrich step failed"
+
 if [[ ! -f "$deploy_key" ]]; then
   echo "Built $state/site/edition.json; not published because $deploy_key is missing."
   exit 0
 fi
 
-# The edition branch holds a single commit, replaced on every publish, so the repo doesn't grow.
+# The edition branch holds a single commit, amended on every publish, so the repo doesn't grow. Keeping the local
+# repo between runs means images already on GitHub aren't uploaded again.
 cd "$state/site"
 touch .nojekyll
-rm -rf .git
-git init -q -b edition
+[[ -d .git ]] || git init -q -b edition
 git add -A
-git -c user.name="TechShorts publisher" -c user.email="techshorts-publisher@users.noreply.github.com" \
-  commit -q -m "Edition $(date -u +%FT%TZ)"
+author=(-c user.name="TechShorts publisher" -c user.email="techshorts-publisher@users.noreply.github.com")
+if git rev-parse -q --verify HEAD >/dev/null; then
+  git "${author[@]}" commit -q --amend --allow-empty -m "Edition $(date -u +%FT%TZ)"
+else
+  git "${author[@]}" commit -q -m "Edition $(date -u +%FT%TZ)"
+fi
 GIT_SSH_COMMAND="ssh -i $deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
   git push -q -f "$remote" edition
 echo "Published to $remote (edition branch)"
