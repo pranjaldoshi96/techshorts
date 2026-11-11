@@ -62,6 +62,8 @@ def build(db, srcs):
         "items": {r["status"]: r["n"] for r in db.q("SELECT status, COUNT(*) n FROM items GROUP BY status")},
         "llm": llm_stats(db, now - timedelta(hours=24)),
         "validation": validation_stats(db, now - timedelta(hours=24)),
+        "events": event_stats(db, now - timedelta(hours=24)),
+        "importance": importance_drift(db, now - timedelta(hours=24)),
     }
 
 
@@ -91,6 +93,33 @@ def validation_stats(db, since):
     skips = _count([r for r in rows if r["outcome"] != "ok"], "reason")
     return {"window": "24h", "passed": ok, "failed": failed, "thin": sum(r["outcome"] == "thin" for r in rows),
             "passRate": round(ok / (ok + failed), 3) if ok + failed else None, "skipReasons": skips}
+
+
+def event_stats(db, since):
+    live = db.q("SELECT n_publishers FROM events WHERE status = 'live' AND updated_at >= ?", iso(since))
+    return {"window": "24h", "live": len(live), "multiPublisher": sum((r["n_publishers"] or 0) >= 2 for r in live),
+            "merged": db.one("SELECT COUNT(*) n FROM events WHERE status = 'merged' AND updated_at >= ?",
+                             iso(since))["n"],
+            "aliases": db.one("SELECT COUNT(*) n FROM event_alias")["n"],
+            "unclustered": db.one("SELECT COUNT(*) n FROM writes w JOIN items i USING (url_canonical) WHERE"
+                                  " w.type IS NOT NULL AND i.status != 'dropped' AND w.written_at >= ? AND"
+                                  " w.url_canonical NOT IN (SELECT url_canonical FROM event_members)",
+                                  iso(since))["n"]}
+
+
+def importance_drift(db, since):
+    """Spec 2.10 drift check: the raw LLM score per item against the clamped score per event, over 24 h. ntfy
+    alerts when more than 10% of items come back raw >= 8 (the model inflating, or a prompt regression)."""
+    raw = [r["importance"] for r in db.q("SELECT importance FROM writes WHERE written_at >= ? AND importance IS NOT"
+                                         " NULL", iso(since))]
+    ev = db.q("SELECT importance FROM events WHERE status = 'live' AND updated_at >= ? AND importance IS NOT NULL",
+              iso(since))
+    hist = lambda vals: {str(i): sum(v == i for v in vals) for i in range(1, 11)}  # noqa: E731
+    share = round(sum(v >= 8 for v in raw) / len(raw), 3) if raw else None
+    if share is not None and len(raw) >= 20 and share > 0.10:
+        notify(db, "importance_drift", f"{share:.0%} of items scored raw importance >= 8 in 24 h (limit 10%)")
+    return {"window": "24h", "rawItems": hist(raw), "clampedEvents": hist([r["importance"] for r in ev]),
+            "rawShareAtLeast8": share}
 
 
 def _count(rows, key):

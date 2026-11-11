@@ -25,7 +25,9 @@ DEFAULTS = {
     "check_every_hours": 24,
     "llm": {"base_url": "https://integrate.api.nvidia.com/v1", "model": None, "fallback_model": None, "daily_budget": 0,
             "rate_per_min": 30, "concurrency": 6, "timeout_s": 30, "max_items_per_tick": 18},
-    "embed": {"model": None},
+    "embed": {"model": None, "dims": None, "lead_words": 120},
+    # Placeholders only; the real thresholds are calibrated into config.yaml (tools/label_pairs.py).
+    "cluster": {"t_cand": 0.5, "t_join": 0.6, "t_signal": 0.5},
 }
 
 

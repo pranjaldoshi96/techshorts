@@ -7,3 +7,5 @@ pydantic>=2.0
 # Article text (spec 2.5). trafilatura 2.x needs lxml's html cleaner, which now ships separately.
 trafilatura>=1.12
 lxml_html_clean>=0.4
+# Embeddings and clustering math (WP3).
+numpy>=1.24

@@ -92,6 +92,50 @@ CREATE TABLE IF NOT EXISTS write_log (
   at TEXT NOT NULL, url_canonical TEXT, kind TEXT NOT NULL, model TEXT, outcome TEXT, reason TEXT, ms INTEGER
 );
 CREATE INDEX IF NOT EXISTS write_log_at ON write_log(at);
+
+-- One vector per item (WP3). kind: passage (items, from title + text opening) or query (signal headlines).
+-- input_sha lets a held item whose text changed on retry be re-embedded.
+CREATE TABLE IF NOT EXISTS embeddings (
+  url_canonical TEXT PRIMARY KEY, kind TEXT NOT NULL, model TEXT, dims INTEGER, input_sha TEXT, vec BLOB NOT NULL,
+  at TEXT NOT NULL
+);
+
+-- Events (spec 2.9). status: live, or merged (then event_alias points at the survivor). published_at is
+-- event_published_at, the earliest member's publisher time; created_at/updated_at are the worker's own clock.
+CREATE TABLE IF NOT EXISTS events (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'live',
+  parent_id TEXT,
+  anchor_url TEXT NOT NULL,
+  lead_url TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  published_at TEXT NOT NULL,
+  last_material_update_at TEXT,
+  type TEXT, topics TEXT, region TEXT, relevance INTEGER, is_news INTEGER, breaking_members INTEGER,
+  sensitive INTEGER,
+  n_publishers INTEGER, publishers TEXT, on_techmeme INTEGER NOT NULL DEFAULT 0, hn TEXT,
+  importance_raw REAL, importance INTEGER, clamps TEXT,
+  headline TEXT, summary TEXT, summary_short TEXT, notif_line TEXT, s1 TEXT, text_from TEXT, entailed INTEGER,
+  headline_history TEXT,
+  rewrite_reason TEXT, rewrite_importance INTEGER, rewritten_at TEXT, rewrite_publishers TEXT
+);
+CREATE INDEX IF NOT EXISTS events_live ON events(status, published_at);
+
+CREATE TABLE IF NOT EXISTS event_members (
+  url_canonical TEXT PRIMARY KEY, event_id TEXT NOT NULL, joined_at TEXT NOT NULL, how TEXT, cosine REAL
+);
+CREATE INDEX IF NOT EXISTS event_members_ev ON event_members(event_id);
+
+-- Merged ids keep resolving for 30 days (push taps, Saved, /e/ links).
+CREATE TABLE IF NOT EXISTS event_alias (old_id TEXT PRIMARY KEY, id TEXT NOT NULL, at TEXT NOT NULL);
+
+-- Techmeme / HN sightings attached to an event (exact URL or cosine >= T_signal).
+CREATE TABLE IF NOT EXISTS event_signals (
+  event_id TEXT NOT NULL, url_canonical TEXT NOT NULL, source_id TEXT NOT NULL, how TEXT, points INTEGER,
+  comments INTEGER, hn_url TEXT, at TEXT NOT NULL,
+  PRIMARY KEY (event_id, url_canonical, source_id)
+);
 """
 
 # Columns added after a table first shipped; added in place so an existing state.db keeps working.

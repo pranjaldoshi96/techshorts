@@ -283,8 +283,8 @@ named person.
 or product is "global" (an Anthropic IPO, CoreWeave earnings and an Nvidia probe are all global). "in" for \
 India-market companies, Indian policy or Indian funding.
 - entities: names exactly as in the text; amounts as written ("$1.4T").
-- event: "new", unless a candidate event below is the same real-world event (then its id), or this is a later \
-development of one (then "followup:<id>"). material_update: true when it adds a major new fact to that event.
+- event: which candidate event below this article covers (see "Candidate events"), else "new". \
+material_update: true when it adds a major new fact to that event.
 
 Writing:
 - headline: 50 to 70 characters. Fact-first, sentence case, active voice, present tense. The subject is the \
@@ -329,8 +329,12 @@ keeps that word or attributes the claim ("X says ...", "Report: ...").<<hedges>>
 newsletters or podcasts. Never use: revolutionize, game-changer, groundbreaking, delve, landscape, seamless, \
 cutting-edge.
 <<attribution>>
-Candidate events:
+Candidate events (stories already in the feed):
 <<candidates>>
+If this article covers the same real-world event as a candidate (the same announcement, filing, deal, incident or \
+scandal), set "event" to that id, even when it takes a different angle, adds analysis or reports a smaller detail: \
+one card per event. If it reports a clearly new development of a candidate's story (a resignation, a ruling, a \
+second deal), set "event" to "followup:<id>". Otherwise "new".
 
 Article:
 Source: <<source>>
@@ -491,8 +495,10 @@ def _neg_time(s):
     return -from_iso(s).timestamp()
 
 
-def write_pending(db, srcs, cfg, client, fetch_text=None, now=None):
-    """Text → LLM write → validate → entail for due items, in parallel; results are recorded serially."""
+def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_for=None):
+    """Text → (embed + candidate events) → LLM write → validate → entail for due items. Texts and writes run in
+    parallel; results are recorded serially. `candidates_for([(row, text)])` returns {url: [candidate events]}
+    for the prompt (cluster.py); it gets one batched embedding call for the whole tick."""
     now = now or utcnow()
     stats = collections.Counter()
     llm_cfg = cfg["llm"]
@@ -506,6 +512,9 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None):
     if not rows:
         return stats
     triaged = {r["url_canonical"] for r in db.q("SELECT url_canonical FROM writes WHERE status = 'thin'")}
+    # A thin item can only ever join an event, and its event often didn't exist yet at its first triage. So a retry
+    # of a thin item that is still in no event asks again when there are candidates now (one call, no writing).
+    clustered = {r["url_canonical"] for r in db.q("SELECT url_canonical FROM event_members")}
     if fetch_text is None:
         session = requests.Session()
         session.mount("https://", requests.adapters.HTTPAdapter(pool_maxsize=llm_cfg.get("concurrency", 6)))
@@ -514,23 +523,40 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None):
         def fetch_text(item, source):
             return text_mod.article_text(item, source, cfg["fetch"]["user_agent"], robots, session)
 
-    def job(row):
-        item = dict(row)
+    def prepare(row):
         source = by_id[row["source_id"]]
         author = json.loads(row["extra"] or "{}").get("author")
         attr = attribution_mod.detect(row["url"], row["title"], author, source.id)
+        return row, fetch_text(dict(row), source), attr, author
+
+    with cf.ThreadPoolExecutor(llm_cfg.get("concurrency", 6)) as pool:
+        prepared = list(pool.map(prepare, rows))
+    cands = {}
+    if candidates_for is not None:
         try:
-            text = fetch_text(item, source)
+            cands = candidates_for([(row, text) for row, text, _, _ in prepared]) or {}
+        except LLMError as e:
+            # Candidates only help the model name the event; clustering still runs on cosine and entities.
+            log.warning("embedding for candidates failed: %s", e)
+            stats["embed_failed"] += 1
+
+    def job(p):
+        row, text, attr, author = p
+        item = dict(row)
+        source = by_id[row["source_id"]]
+        c = cands.get(row["url_canonical"], ())
+        try:
             if text.thin:
-                if row["url_canonical"] in triaged:     # classified on an earlier try; only the text is retried
-                    return row, text, attr, WriteResult("thin", reason="no_text")
-                return row, text, attr, triage_thin(client, cfg, item, source.name, text, attr)
-            return row, text, attr, write_item(client, cfg, item, source.name, text, attr, author)
+                url = row["url_canonical"]
+                if url in triaged and (url in clustered or not c):
+                    return row, text, attr, WriteResult("thin", reason="no_text")   # only the text is retried
+                return row, text, attr, triage_thin(client, cfg, item, source.name, text, attr, c)
+            return row, text, attr, write_item(client, cfg, item, source.name, text, attr, author, c)
         except AuthError:
             return row, None, attr, None
 
     with cf.ThreadPoolExecutor(llm_cfg.get("concurrency", 6)) as pool:
-        results = list(pool.map(job, rows))
+        results = list(pool.map(job, prepared))
 
     auth_failed = False
     for row, text, attr, result in results:
@@ -558,3 +584,123 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None):
         stats["auth_failed"] += 1
     db.commit()
     return stats
+
+
+# Event rewrite (spec 2.9 "Event text")
+
+REWRITE_PROMPT = """Several outlets covered one event. Write its card from their reports.
+
+Return this JSON object:
+{"importance": 1-10, "headline": "...", "headline_alt": "...", "headline_short": "...",
+ "s1": "...", "s1_alt": "...", "s1_long": "...", "s2": "...", "s2_alt": "...", "s2_long": "...",
+ "s3": "...", "s3_alt": "...", "s3_long": "...", "notif_line": "..."}
+
+- importance, for the event as a whole: 10 industry-defining. 8-9 frontier model from a top lab, >= $500M \
+funding, a breach or outage hitting millions, major regulation. 6-7 $25-500M funding (or >= $15M in India), \
+notable launch or earnings. 4-5 smaller launches, open source, policy proposals, strong analysis. 1-3 how-to, \
+reviews, explainers, promos, minor updates.
+- Same writing rules as a single card: headline 50 to 70 characters, fact-first, sentence case, present tense, \
+numbers as digits, no question or final period; s1 18-22 words (who did what, with the key number), s2 16-20 \
+words (the most important detail or context), s3 15-19 words (the concrete consequence); _alt versions 11-14 \
+words (headline_alt at most 55 characters, headline_short at most 40), _long versions 24-28 words; notif_line one \
+sentence under 90 characters with information not in the headline.
+- Lead with the newest material fact.
+- Numbers: use a number only if REPORT 1 states it or at least two reports state it. When reports disagree, use \
+REPORT 1's value with "up to" or "about", or leave the number out.
+- Keep hedges (suspected, alleged, reportedly, according to). Use only facts in the reports. Plain text, no \
+first person, never "the article". Never use: revolutionize, game-changer, groundbreaking, delve, landscape, \
+seamless, cutting-edge.
+
+<<reports>>"""
+
+REWRITE_MEMBERS = 4
+REWRITE_WORDS = 300
+
+
+def representative(members, n=REWRITE_MEMBERS):
+    """The lead first, then the hard-news members closest on average to the other hard-news members."""
+    import numpy as np
+    hard = [m for m in members if m.hard and not m.thin and m.text]
+    if len(hard) <= n:
+        return hard
+
+    def rep(m):
+        return float(np.mean([np.dot(m.vec, o.vec) for o in hard if o is not m]))
+    return sorted(hard, key=lambda m: (-rep(m), m.url))[:n]
+
+
+def rewrite_numbers_ok(out, lead_text, member_texts):
+    """Each number in the new text must be in the lead's text or in >= 2 member texts (spec 2.9)."""
+    lead_nums = validate.numbers(lead_text)
+    member_nums = [validate.numbers(t) for t in member_texts]
+    for n in validate.numbers(" ".join([out.headline, out.s1, out.s2, out.s3, out.notif_line])):
+        if validate.number_grounded(n, lead_nums):
+            continue
+        if sum(validate.number_grounded(n, ns) for ns in member_nums) >= 2:
+            continue
+        return n.text
+    return None
+
+
+def rewrite_event(client, cfg, store, ev):
+    """One rewrite call (plus one feedback retry) for an event; on failure the lead's own text stays.
+    Returns True when the event got new text."""
+    from . import cluster
+    row = ev.row
+    lead = next((m for m in ev.members if m.url == row.get("lead_url")), None)
+    if lead is None or not lead.text:
+        return False
+    picked = [lead] + [m for m in representative(ev.members) if m is not lead][:REWRITE_MEMBERS - 1]
+    reports = "\n\n".join(
+        f"REPORT {i}: {store.by_id[m.source_id].name if m.source_id in store.by_id else m.source_id}\n"
+        f"Title: {m.title}\nText: {text_mod.cap_words(m.text, REWRITE_WORDS)}" for i, m in enumerate(picked, 1))
+    base = [{"role": "system", "content": SYSTEM},
+            {"role": "user", "content": entail.fill(REWRITE_PROMPT, reports=reports)}]
+    model = cfg["llm"]["model"]
+    source_text = "\n".join(m.text for m in picked)
+    feedback, reply = None, None
+    now = store.now
+    row["rewritten_at"] = cluster.iso(now)
+    row["rewrite_reason"] = None
+    for attempt in range(2):
+        messages = list(base)
+        if feedback:
+            messages += [{"role": "assistant", "content": reply},
+                         {"role": "user", "content": "Your answer failed these checks:\n- " + "\n- ".join(feedback)
+                          + "\nFix them and reply with the whole JSON object again."}]
+        try:
+            reply = client.chat(model, messages, kind="rewrite", temperature=0.5 if attempt else 0.2)
+            data = json.loads(re.search(r"\{.*\}", reply or "", re.S).group(0))
+            out = WriteOutput.model_validate({
+                "is_news": lead.is_news, "type": lead.type, "relevance": lead.relevance,
+                "region": lead.region, "topics": lead.topics, **{k: v for k, v in data.items() if k in (
+                    "importance", "headline", "headline_alt", "headline_short", "s1", "s1_alt", "s1_long", "s2",
+                    "s2_alt", "s2_long", "s3", "s3_alt", "s3_long", "notif_line")}})
+        except AuthError:
+            raise
+        except (LLMError, AttributeError, ValueError, ValidationError) as e:
+            log.info("rewrite %s: %s", ev.id, type(e).__name__)
+            return False
+        validate.select(out)
+        v = validate.check(out, source_text, lead.title, "", None, None, " ".join(lead.text.split()[:200]))
+        bad = rewrite_numbers_ok(out, lead.text, [m.text for m in picked])
+        if bad:
+            v.fail("ungrounded", f"'{bad}' is not in REPORT 1 or in two reports; use REPORT 1's figure or drop it.")
+        if not v.ok:
+            feedback = v.feedback
+            continue
+        try:
+            e = entail.check(client, model, lead.title, "\n".join(
+                text_mod.cap_words(m.text, 200) for m in picked), out.headline, out.s1)
+        except AuthError:
+            raise
+        except (LLMError, ValueError):
+            return False
+        if not e.ok:
+            feedback = [e.feedback()]
+            continue
+        row["rewrite_importance"] = out.importance
+        row["rewrite_publishers"] = row.get("publishers")
+        cluster._set_text(row, out.headline, v.full, v.short, out.notif_line, out.s1, 1, "rewrite", now)
+        return True
+    return False

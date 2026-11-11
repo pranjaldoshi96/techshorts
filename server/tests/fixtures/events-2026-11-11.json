@@ -1,0 +1,240 @@
+{
+ "note": "Hand-labelled events in the 2026-11-11 edition fixture (WP3a). `events`: items that are the same real-world event (one card). `related`: same saga or topic but not clearly one card (an earlier stage, a side interview); pairs touching them are left out of calibration in both directions. Every other pair of fixture items is a different event. Keys are fixture URLs; titles are for reading.",
+ "events": {
+  "anthropic_ipo": [
+   {
+    "url": "https://www.theguardian.com/technology/2026/nov/10/anthropic-valuation-stock-market-flotation-ipo-wall-street-ai",
+    "title": "Anthropic targets valuation of up to $1.4tn in stock market flotation"
+   },
+   {
+    "url": "https://www.cnbc.com/2026/11/11/anthopic-australian-retail-ipo-offering-.html",
+    "title": "Anthropic opens Australian retail IPO offering as AI scrutiny intensifies"
+   },
+   {
+    "url": "https://www.cnbc.com/2026/11/10/anthropic-ipo-revenue-growth-cramer.html",
+    "title": "Jim Cramer says Anthropic's explosive growth could justify a record-breaking IPO"
+   },
+   {
+    "url": "https://www.nytimes.com/2026/11/10/business/anthropic-ipo-nvidia.html",
+    "title": "Anthropic’s Giant IPO Will Tie It Closer to Nvidia"
+   },
+   {
+    "url": "https://www.nytimes.com/2026/11/10/technology/anthropic-ipo-google-amazon.html",
+    "title": "Amazon and Google Will See Big Paydays from Anthropic IPO"
+   },
+   {
+    "url": "https://www.bbc.co.uk/news/articles/crpdgd723x2zo?at_medium=RSS&at_campaign=rss",
+    "title": "Claude chatbot maker set for $1.3tn stock market debut despite 'catastrophic' AI warning"
+   },
+   {
+    "url": "https://techcrunch.com/2026/11/10/all-7-anthropic-founders-will-each-cash-out-about-250m-in-ipo/",
+    "title": "All 7 Anthropic founders will each cash out about $250M in IPO"
+   },
+   {
+    "url": "https://the-decoder.com/anthropic-kicks-off-ipo-roadshow-offering-shares-at-70-to-78-and-targeting-a-trillion-dollar-valuation/",
+    "title": "Anthropic kicks off IPO roadshow, offering shares at $70 to $78 and targeting a trillion-dollar valuation"
+   }
+  ],
+  "huang_spy_probe": [
+   {
+    "url": "https://www.bbc.co.uk/news/videos/c80404zyr53wo?at_medium=RSS&at_campaign=rss",
+    "title": "Who is the suspected Chinese spy at centre of the Nvidia investigation?"
+   },
+   {
+    "url": "https://www.cnbc.com/2026/11/10/nvidia-jensen-huang-affair-office.html",
+    "title": "Nvidia's Huang tries to project 'business as usual' in return to office after affair revelation"
+   },
+   {
+    "url": "https://www.nytimes.com/2026/11/10/technology/jensen-huang-nvidia-board.html",
+    "title": "Nvidia’s Board Has a History of Letting Jensen Huang Get His Way"
+   },
+   {
+    "url": "https://www.theverge.com/ai-artificial-intelligence/1031063/jensen-huang-ai-race-us-china-spy",
+    "title": "The US is winning the AI race. Jensen Huang could have blown it"
+   },
+   {
+    "url": "https://www.bbc.co.uk/news/articles/cj3vqv3nee72o?at_medium=RSS&at_campaign=rss",
+    "title": "Zoe Kleinman: Nvidia CEO's affair will cause ripples across US and beyond"
+   },
+   {
+    "url": "https://www.theguardian.com/us-news/video/2026/nov/09/trump-hegseth-jensen-huang",
+    "title": "Trump backs embattled Hegseth and Jensen Huang and says FBI looking into spy allegations – video"
+   },
+   {
+    "url": "https://www.nytimes.com/2026/11/09/technology/jensen-huang-affair-nvidia.html",
+    "title": "Is Jensen Huang Too Powerful to Be Punished by Nvidia?"
+   },
+   {
+    "url": "https://stratechery.com/2026/jensen-huangs-affair-the-culper-report-huangs-righteousness/",
+    "title": "Jensen Huang’s Affair, The Culper Report, Huang’s Righteousness"
+   },
+   {
+    "url": "https://stratechery.com/2026/the-jensen-huang-story-gets-worse-washington-vs-new-york-silicon-valley/",
+    "title": "The Jensen Huang Story Gets Worse, Washington vs. New York, Silicon Valley"
+   }
+  ],
+  "coreweave_earnings": [
+   {
+    "url": "https://www.cnbc.com/2026/11/10/coreweave-crwv-q3-earnings-report-2026.html",
+    "title": "CoreWeave beats on revenue and lifts guidance, easing AI slowdown concerns"
+   },
+   {
+    "url": "https://www.cnbc.com/2026/11/10/coreweave-earnings-preview-debt-capex.html",
+    "title": "CoreWeave earnings put debt-fueled AI build-out under scrutiny"
+   }
+  ],
+  "chatgpt_businesses": [
+   {
+    "url": "https://techcrunch.com/2026/11/10/openai-rolls-out-new-business-profiles-making-chatgpt-just-a-little-bit-more-like-google/",
+    "title": "OpenAI rolls out new business profiles, making ChatGPT just a little bit more like Google"
+   },
+   {
+    "url": "https://the-decoder.com/openai-turns-chatgpt-into-a-business-directory-with-ai-agents-that-handle-customer-questions/",
+    "title": "OpenAI turns ChatGPT into a business directory with AI agents that handle customer questions"
+   },
+   {
+    "url": "https://openai.com/index/introducing-businesses-chatgpt",
+    "title": "Introducing Businesses in ChatGPT"
+   }
+  ],
+  "ny_raise_act": [
+   {
+    "url": "https://techcrunch.com/2026/11/10/openai-anthropic-face-new-oversight-as-new-yorks-ai-safety-law-takes-effect/",
+    "title": "OpenAI, Anthropic face new oversight as New York’s AI safety law takes effect"
+   },
+   {
+    "url": "https://www.engadget.com/2312487/new-york-will-independently-test-ai-models/",
+    "title": "New York will independently test AI models"
+   }
+  ],
+  "australia_ai_penalties": [
+   {
+    "url": "https://www.bbc.co.uk/news/articles/cmp3g37l566po?at_medium=RSS&at_campaign=rss",
+    "title": "Australia considers criminal penalties for rogue AI in wake of OpenAI hack"
+   },
+   {
+    "url": "https://www.theguardian.com/australia-news/video/2026/nov/10/mandatory-ai-safety-and-security-protections-announced-after-openai-breach-of-medicare-video",
+    "title": "Mandatory AI safety and security protections announced after OpenAI breach of Medicare – video"
+   }
+  ],
+  "claude_workspace_meetings": [
+   {
+    "url": "https://techcrunch.com/2026/11/10/anthropic-launches-claude-meetings-to-turn-workplace-discussions-into-plans-and-tasks/",
+    "title": "Anthropic launches Claude Meetings to turn workplace discussions into plans and tasks"
+   },
+   {
+    "url": "https://the-decoder.com/anthropic-turns-claude-into-a-full-workspace-with-plugins-spreadsheets-whiteboards-and-soon-meeting-notes/",
+    "title": "Anthropic turns Claude into a full workspace with Plugins, spreadsheets, whiteboards, and soon Meeting notes"
+   }
+  ],
+  "meta_muse_ember": [
+   {
+    "url": "https://the-decoder.com/meta-launches-muse-ember-a-small-ai-model-built-for-the-repetitive-work-agents-actually-do/",
+    "title": "Meta launches Muse Ember, a small AI model built for the repetitive work agents actually do"
+   },
+   {
+    "url": "https://simonwillison.net/2026/Nov/10/muse-ember/",
+    "title": "Introducing Our Smallest, Most Efficient Model: Muse Ember"
+   }
+  ],
+  "kora_desktop_os": [
+   {
+    "url": "https://techcrunch.com/2026/11/10/after-challenging-googles-android-with-cyanogen-its-co-founder-takes-aim-at-windows-for-ai-era/",
+    "title": "After challenging Google’s Android with Cyanogen, its co-founder takes aim at Windows for AI era"
+   },
+   {
+    "url": "https://www.wired.com/story/kora-new-linux-based-desktop-operating-system-is-built-for-ai-nerds/",
+    "title": "This New Linux-Based Desktop Operating System Is Built for AI Nerds"
+   }
+  ]
+ },
+ "related": {
+  "anthropic_ipo": [
+   {
+    "url": "https://latent.space/p/ainews-anthropic-ipo-whither-now/",
+    "title": "[AINews] Anthropic IPO: Whither Now?"
+   },
+   {
+    "url": "https://stratechery.com/2026/sharp-tech-on-video-anthropics-s-1-and-what-it-means-for-meta-and-muse-you-can-see-everything-and-brewers/",
+    "title": "Sharp Tech on Video: Anthropic’s S-1 and What It Means for Meta and Muse, You Can See Everything, and Brewers!"
+   }
+  ],
+  "huang_spy_probe": [
+   {
+    "url": "https://www.bbc.co.uk/news/articles/c64g1gzy2vdzo?at_medium=RSS&at_campaign=rss",
+    "title": "Faisal Islam: What the boss of US tech giant Nvidia told me about China and national security"
+   }
+  ],
+  "uk_under16_ban": [
+   {
+    "url": "https://www.theguardian.com/uk-news/2026/nov/10/uk-social-media-ban-expansion-for-under-16s-could-cover-youtube-kids",
+    "title": "UK social media ban expansion for under-16s could cover YouTube Kids"
+   },
+   {
+    "url": "https://www.bbc.co.uk/news/articles/cmzxjvpqrjxro?at_medium=RSS&at_campaign=rss",
+    "title": "Government 'looking seriously' at banning under-16s from Vinted and eBay"
+   }
+  ],
+  "pixel_november_drop": [
+   {
+    "url": "https://arstechnica.com/gadgets/2026/11/november-pixel-drop-brings-gemini-intelligence-to-pixel-10-family/",
+    "title": "Pixel phones getting new icon styles, Create My Widget, and more in November Pixel Drop"
+   },
+   {
+    "url": "https://www.theverge.com/tech/1031089/google-pixel-drop-november-2026-hilight",
+    "title": "Google is making Pixel HiLight slightly more useful"
+   },
+   {
+    "url": "https://blog.google/products-and-platforms/platforms/android/gemini-intelligence-november-features-devices/",
+    "title": "Gemini Intelligence: New features, on more devices"
+   }
+  ],
+  "claude_fable_52": [
+   {
+    "url": "https://the-decoder.com/claude-fable-5-2-and-mythos-5-2-cement-anthropics-ai-lead-just-before-its-ipo/",
+    "title": "Claude Fable 5.2 and Mythos 5.2 cement Anthropic's AI lead just before its IPO"
+   },
+   {
+    "url": "https://simonwillison.net/2026/Nov/9/llm-anthropic/",
+    "title": "llm-anthropic 0.31"
+   }
+  ],
+  "gemini_4_carbon": [
+   {
+    "url": "https://the-decoder.com/gemini-4-carbon-arrives-just-in-time-to-feel-like-yesterdays-news-in-the-fastest-model-cycle-yet/",
+    "title": "Gemini 4 Carbon arrives just in time to feel like yesterday's news in the fastest model cycle yet"
+   },
+   {
+    "url": "https://simonwillison.net/2026/Nov/10/llm-gemini/",
+    "title": "llm-gemini 0.36"
+   }
+  ]
+ },
+ "must_differ": [
+  {
+   "a": "anthropic_ipo",
+   "b_url": "https://www.vulncheck.com/blog/anthropic-glasswing-november-update",
+   "why": "Glasswing CVE criticism (Anthropic)"
+  },
+  {
+   "a": "anthropic_ipo",
+   "b": "ny_raise_act",
+   "why": "RAISE Act (Anthropic named)"
+  },
+  {
+   "a": "anthropic_ipo",
+   "b": "australia_ai_penalties",
+   "why": "Australia penalties"
+  },
+  {
+   "a": "anthropic_ipo",
+   "b_url": "https://the-decoder.com/claude-fable-5-2-and-mythos-5-2-cement-anthropics-ai-lead-just-before-its-ipo/",
+   "why": "Claude Fable 5.2 launch 'just before its IPO'"
+  },
+  {
+   "a": "huang_spy_probe",
+   "b_synthetic": "syn_nvidia_earnings",
+   "why": "Nvidia earnings vs the probe"
+  }
+ ]
+}

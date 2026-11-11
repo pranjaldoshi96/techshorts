@@ -1,7 +1,8 @@
 """Techgist worker: one long-running loop with a 60 s tick (spec section 2.1).
 
-R1 so far: fetch (conditional GET) → prefilter → timestamps → article text → LLM write → validate → entailment,
-with state in SQLite and health.json. Later stages (clustering, ranking, v1 publish) plug in after `write_pending`.
+R1 so far: fetch (conditional GET) → prefilter → timestamps → article text → embed + candidate events → LLM write →
+validate → entailment → cluster (serial assign, signals, merge, lead, event importance, rewrite), with state in
+SQLite and health.json. Ranking and the v1 publish (WP4) plug in after `cluster.run`.
 
 Run from server/:
   python3 -m worker.main              # loop forever (the systemd service)
@@ -18,7 +19,7 @@ from datetime import timedelta
 
 import requests
 
-from . import config, fetch, health, llm, sources as sources_mod
+from . import cluster, config, embed, fetch, health, llm, sources as sources_mod
 from .db import DB, from_iso, utcnow
 
 log = logging.getLogger("techgist")
@@ -81,14 +82,24 @@ def make_client(cfg):
     return llm.Client(cfg["llm"]["base_url"], key, bucket, timeout=cfg["llm"]["timeout_s"])
 
 
-def tick(db, cfg, poll_all=False, client=None):
+def tick(db, cfg, poll_all=False, client=None, embedder=None):
     # Reloaded every tick so a sources.yaml edit applies without a restart.
     srcs = sources_mod.load()
     maybe_check_sources(db, srcs, cfg)
     counts = fetch_due(db, srcs, cfg, poll_all)
     if client is not None:
-        counts.update({f"write_{k}": v for k, v in llm.write_pending(db, srcs, cfg, client).items()})
-    # WP3+: embed → cluster → rank → publish v1.
+        cands = None
+        if embedder is not None:
+            def cands(prepared):
+                now = utcnow()
+                return cluster.candidates(db, cfg, cluster.embed_items(db, cfg, embedder, prepared, now), now)
+        counts.update({f"write_{k}": v for k, v in llm.write_pending(db, srcs, cfg, client,
+                                                                      candidates_for=cands).items()})
+    if embedder is not None:
+        rewriter = (lambda store, ev: llm.rewrite_event(client, cfg, store, ev)) if client is not None else None
+        counts.update({f"cluster_{k}": v for k, v in cluster.run(db, cfg, srcs, utcnow(), embedder,
+                                                                 rewriter).items() if v})
+    # WP4: rank → tabs → publish v1.
     health.write(db, srcs, config.state_path(cfg, "health.json"))
     db.commit()
     return counts
@@ -104,10 +115,13 @@ def main():
     db = DB(config.state_path(cfg, "state.db"))
     log.info("worker start, state in %s", cfg["state_dir"])
     client = make_client(cfg)
+    embedder = embed.make(cfg, llm.api_key())
+    if embedder is None:
+        log.warning("no embedding model or key; clustering is off")
     while True:
         started = time.monotonic()
         try:
-            counts = tick(db, cfg, args.all, client)
+            counts = tick(db, cfg, args.all, client, embedder)
             if counts:
                 log.info("tick: %s", dict(sorted(counts.items())))
         except Exception:

@@ -37,6 +37,25 @@ llm:
   # Caps one tick's LLM stage at about a minute of the rate limit, so polling isn't starved during a backlog.
   max_items_per_tick: 18
 embed:
-  # The only embedding model that answered for this key (2048-d); nv-embedqa-e5-v5 and llama-3.2-nv-embedqa
-  # return 410. Used from WP3.
+  # The only embedding model that answered for this key on 2026-11-11; nv-embedqa-e5-v5, llama-3.2-nv-embedqa-1b-v2,
+  # llama-nemotron-embed-1b-v2, nv-embed-v1 and bge-m3 return 410. It accepts `dimensions` (Matryoshka).
   model: nvidia/nemotron-3.5-embed-1b
+  # Input = original title + the first lead_words words of the item's text; picked with dims by
+  # `tools/label_pairs.py --variants` on the labelled fixture pairs. Changing either needs a re-calibration.
+  dims: 1024
+  lead_words: 120
+
+# Clustering (spec 2.9). Thresholds come from tools/label_pairs.py (WP3a): each is the lowest cosine at which the
+# labelled fixture pairs keep precision >= 0.97. Don't hand-tune them; re-run the tool.
+cluster:
+  t_cand: 0.525
+  t_join: 0.47
+  t_signal: 0.45
+  # An LLM-picked event may join without a shared entity when cosine >= t_join + pick_margin.
+  pick_margin: 0.03
+  join_max_age_h: 48
+  join_max_idle_h: 24
+  merge_max_age_h: 6
+  alias_days: 30
+  max_candidates: 5
+  rewrite_cap_h: 2
