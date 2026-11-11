@@ -138,6 +138,11 @@ def tick(db, cfg, poll_all=False, client=None, embedder=None, out_dir=None, star
             log.warning("degraded publish (%s): %d cards, %d without AI text", outage, report["articles"],
                         report["degradedCards"])
     alerts = health.alerts(db, now, started_at)
+    if report and report.get("published") and report.get("emptyCategories"):
+        empty = ", ".join(report["emptyCategories"])
+        log.warning("v1 edition has no %s articles; 1.2 shows those tabs empty", empty)
+        health.notify(db, "v1_empty_category", f"1.2 tabs with no articles: {empty}")
+        alerts.append("v1_empty_category")
     extra = {"llmOutage": outage, "alerts": alerts,
              "llmBudget": {"used24h": db.llm_calls_since(now - timedelta(hours=24)),
                            "daily": cfg["llm"].get("daily_budget")}}

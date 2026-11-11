@@ -14,7 +14,7 @@ from datetime import timedelta
 
 import requests
 
-from .db import iso
+from .db import from_iso, iso
 from . import text as text_mod
 
 EXCERPT_WORDS = 55
@@ -71,6 +71,26 @@ def llm_outage(db, now, have_client=True):
     if len(items) >= PASS_MIN_OUTCOMES and sum(r["outcome"] == "ok" for r in items) / len(items) < PASS_FLOOR:
         return "pass_rate"
     return None
+
+
+def outage_since(db, reason, now):
+    """When the LLM stopped seeing new items, or None for "never saw any" (no_key). Only items first seen after
+    this publish as outage singletons: anything older the LLM already judged, and that judgement stands.
+    For auth it is the last success (chat ok or key check ok); with none on record, the first auth failure.
+    The 429 storm and pass-rate outages are judged over a window, so their start is that window's start."""
+    if reason == "rate_limited":
+        return now - STORM_WINDOW
+    if reason == "pass_rate":
+        return now - PASS_WINDOW
+    if reason != "auth":
+        return None
+    ok = db.one("SELECT MAX(at) at FROM write_log WHERE kind != 'item' AND outcome = 'ok'")["at"]
+    ok = max(filter(None, (ok, db.get_meta("key_ok_at"))), default=None)
+    if ok:
+        return from_iso(ok)
+    first = db.one("SELECT MIN(at) at FROM write_log WHERE kind != 'item' AND outcome IN ('http_401', 'http_403')")
+    first = first["at"] or db.get_meta("key_auth_failed_at")
+    return from_iso(first) if first else None
 
 
 def needs_probe(db, now):

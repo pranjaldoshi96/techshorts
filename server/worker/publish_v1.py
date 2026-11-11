@@ -33,6 +33,7 @@ from .llm import LLMError
 log = logging.getLogger("techgist")
 
 V1_CATEGORY = {"ai": "AI", "startups": "Startups", "dev": "Dev", "reads": "Blogs"}
+V1_CATEGORIES = ("Top", "AI", "Startups", "Dev", "Blogs")
 URL_SAFE = ":/?#[]@!$&'()*+,;=%~-._"
 MAX_WINDOW = timedelta(days=14)
 OUTAGE_SINGLETON_WINDOW = timedelta(hours=36)
@@ -144,15 +145,25 @@ def event_candidate(ctx, ev):
     return c, None
 
 
-def outage_singletons(ctx, taken):
-    """LLM outage only: tier-1 items that never made it into an event (the LLM and embeddings share the key, so
-    nothing new clusters) publish alone with their publisher title, so the feed keeps moving."""
+def outage_singletons(ctx, events):
+    """LLM outage only: tier-1 items first seen after the outage began that never made it into an event (the LLM
+    and embeddings share the key, so nothing new clusters) publish alone with their publisher title, so the feed
+    keeps moving. An item the LLM already judged keeps that judgement: a held NYT paywall piece rated relevance 1
+    is no more shippable in an outage. And a singleton that repeats a story some event already carries is dropped
+    (`same_story`), since without a headline vector the edition-wide duplicate guard can't see it."""
+    since = degraded_mod.outage_since(ctx.db, ctx.outage, ctx.now)
+    floor = ctx.now - OUTAGE_SINGLETON_WINDOW
     rows = ctx.db.q(
         "SELECT i.*, w.status wstatus, w.type, w.is_news, w.relevance, w.importance, w.topics, w.region, w.headline,"
-        " w.summary, w.text FROM items i LEFT JOIN writes w ON w.url_canonical = i.url_canonical"
-        " WHERE i.status IN ('new', 'held', 'written') AND i.published_at >= ?"
-        " AND i.url_canonical NOT IN (SELECT url_canonical FROM event_members)",
-        iso(ctx.now - OUTAGE_SINGLETON_WINDOW))
+        " w.summary, w.text, e.vec FROM items i LEFT JOIN writes w ON w.url_canonical = i.url_canonical"
+        " LEFT JOIN embeddings e ON e.url_canonical = i.url_canonical AND e.kind = 'passage'"
+        " WHERE i.status IN ('new', 'held', 'written') AND i.published_at >= ? AND i.first_seen_at >= ?"
+        " AND i.url_canonical NOT IN (SELECT url_canonical FROM event_members)"
+        " ORDER BY i.published_at DESC",
+        iso(floor), iso(max(floor, since) if since else floor))
+    taken = {c.data["lead"]["url_canonical"] for c in events}
+    seen = StorySet(ctx, events)
+    t_join = ctx.cfg["cluster"]["t_join"]
     out = []
     from .cluster import event_id
     for r in rows:
@@ -162,26 +173,73 @@ def outage_singletons(ctx, taken):
         if ctx.editorial.blocked(s, r["url"]):
             continue
         r = dict(r)
-        ok = r["wstatus"] == "ok" and r["type"] is not None
-        topics = json.loads(r["topics"] or "[]") if ok else []
+        vec = embed_mod.from_blob(r["vec"]) if r["vec"] is not None else None
+        if seen.same_story(vec, r["title"], t_join):
+            continue
+        seen.add(vec, r["title"])
+        classified = r["type"] is not None
+        text_ok = r["wstatus"] == "ok"
+        topics = json.loads(r["topics"] or "[]") if classified else []
         imp = r["importance"] or 1
-        if ok:
+        if classified:
             imp = importance_mod.compute([importance_mod.Member(r["url_canonical"], s.id, s.v1_name, True, r["type"],
                                                                 imp, topics, [])], r["type"], topics).value
         c = rank.Candidate(
-            id=event_id(r["url_canonical"]), importance=imp, type=r["type"] if ok else None,
-            is_news=bool(r["is_news"]) if ok else True, relevance=r["relevance"] or 0 if ok else 0, topics=topics,
+            id=event_id(r["url_canonical"]), importance=imp, type=r["type"],
+            is_news=bool(r["is_news"]) if classified else True, relevance=r["relevance"] or 0, topics=topics,
             region=r["region"] or s.region, n_publishers=1, on_techmeme=False, hn_points=0,
             authority=float(s.authority), published_at=from_iso(r["published_at"]), lead_source=s.id,
             lead_publisher=s.v1_name, lead_reads=s.reads, lead_tier1=True,
-            ai_text=bool(ok and r["headline"] and r["summary"]), classified=ok)
+            ai_text=bool(text_ok and r["headline"] and r["summary"]), classified=classified)
         lead = {k: r[k] for k in ("url_canonical", "url", "source_id", "title", "feed_text", "image", "og_image",
                                   "published_at", "first_seen_at", "text")}
-        c.data = {"lead": lead, "members": [lead], "publishers": [s.v1_name], "headline": r["headline"] if ok else None,
-                  "summary": r["summary"] if ok else None, "hn": {}, "title_words": _words(r["title"]),
-                  "first_seen_at": r["first_seen_at"], "images": image_sources(ctx, lead, [lead]), "parent_id": None}
+        c.data = {"lead": lead, "members": [lead], "publishers": [s.v1_name],
+                  "headline": r["headline"] if c.ai_text else None, "summary": r["summary"] if c.ai_text else None,
+                  "hn": {}, "title_words": _words(r["title"]), "first_seen_at": r["first_seen_at"],
+                  "images": image_sources(ctx, lead, [lead]), "parent_id": None, "singleton": True}
         out.append(c)
     return out
+
+
+# Words that say nothing about which story a title is about.
+STOP = set("""the and for with from that this will are was were has have had its into over after about than
+new says say said how why what who when where more most can could would should not but you your our their they
+them his her him she one two all out off now just also amid back big inc""".split())
+
+
+def _keywords(title):
+    return {w for w in _words(title) if w not in STOP}
+
+
+class StorySet:
+    """The stories an outage edition already carries, as members' stored passage vectors and title keywords.
+    A singleton with a vector is the same story at cosine >= T_join (the clusterer's own rule). Without one,
+    two shared keywords with any member title counts: looser than the 60% title guard on purpose, because a
+    wrongly dropped singleton costs one card in an outage while a duplicate is visible to everyone ("Amazon and
+    Google Will See Big Paydays from Anthropic IPO" next to the IPO event shares only "anthropic" and "ipo")."""
+
+    def __init__(self, ctx, events):
+        self.vecs, self.keys = [], []
+        urls = [m["url_canonical"] for c in events for m in c.data["members"]]
+        for i in range(0, len(urls), 500):
+            chunk = urls[i:i + 500]
+            for row in ctx.db.q("SELECT vec FROM embeddings WHERE kind = 'passage' AND url_canonical IN (%s)"
+                                % ",".join("?" * len(chunk)), *chunk):
+                self.vecs.append(embed_mod.from_blob(row["vec"]))
+        for c in events:
+            for m in c.data["members"]:
+                self.keys.append(_keywords(m["title"]))
+
+    def add(self, vec, title):
+        if vec is not None:
+            self.vecs.append(vec)
+        self.keys.append(_keywords(title))
+
+    def same_story(self, vec, title, t_join):
+        if vec is not None:
+            return any(float(vec @ v) >= t_join for v in self.vecs)
+        k = _keywords(title)
+        return any(len(k & o) >= 2 for o in self.keys)
 
 
 def load_candidates(ctx):
@@ -194,8 +252,7 @@ def load_candidates(ctx):
         else:
             out.append(c)
     if ctx.outage:
-        taken = {c.data["lead"]["url_canonical"] for c in out}
-        out += outage_singletons(ctx, taken)
+        out += outage_singletons(ctx, out)
     return out, held
 
 
@@ -368,6 +425,9 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
         "tabs": {tid: _tab_report(ranked, now) for tid, ranked in tabs.items()},
         "filtered": stats, "topScores": [round(scores[c.id], 4) for c, _ in tabs["top"][:5]],
         "images": {"used": len(used_images), "generated": sum(n.startswith("gen_") for n in used_images)},
+        # A 1.2 tab that would show nothing (e.g. Blogs while Reads' min_importance sits above the LLM's essay
+        # ratings): the tick alerts on it, since 1.2 users see an empty tab with no explanation.
+        "emptyCategories": [cat for cat in V1_CATEGORIES if not any(a["category"] == cat for a in articles)],
     }
     return edition, report, used_images, tabs
 

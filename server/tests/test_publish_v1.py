@@ -209,6 +209,89 @@ def test_llm_outage_publishes_degraded_with_at_least_15_top(replayed, tmp_path):
         db.conn.execute("DELETE FROM items WHERE url_canonical LIKE 'https://example.com/%'")
 
 
+def _held_item(db, u, src, title, first_seen, write=None, vec_of=None):
+    db.insert_item({"url_canonical": u, "url": u, "source_id": src, "title": title,
+                    "feed_text": "A company announced a thing on Tuesday. It matters for builders. " * 3,
+                    "first_seen_at": first_seen, "published_at": first_seen - timedelta(minutes=5),
+                    "feed_published_at": first_seen - timedelta(minutes=5), "status": "held" if write else "new"})
+    if write:
+        cols = {"url_canonical": u, "status": "thin", "written_at": tc.iso(first_seen), "text_words": 26,
+                "is_news": 1, "region": "us", **write}
+        db.conn.execute("INSERT INTO writes (%s) VALUES (%s)" % (",".join(cols), ",".join("?" * len(cols))),
+                        list(cols.values()))
+    if vec_of:
+        db.conn.execute("INSERT INTO embeddings SELECT ?, kind, model, dims, input_sha, vec, at FROM embeddings"
+                        " WHERE url_canonical = ? AND kind = 'passage'", (u, vec_of))
+
+
+def test_outage_keeps_earlier_judgements_and_one_card_per_story(replayed):
+    """Items the LLM judged before the outage keep that judgement: the held Toyota truck (relevance 1), a held
+    explainer and an aquarium screen saver stay out of Top, even though their tier-1 leads would carry an
+    unclassified singleton there. And a singleton that repeats the IPO event is dropped, with or without a stored
+    vector, so the degraded Top passes the same content and dedup rules as the normal one."""
+    db = replayed
+    end = db.end
+    db.log_write(end - timedelta(hours=3), None, "write", "m", "ok")      # last success: the outage starts here
+    db.log_write(end - timedelta(minutes=30), None, "write", "m", "http_401")
+    outage = degraded.llm_outage(db, end)
+    assert outage == "auth" and degraded.outage_since(db, outage, end) == end - timedelta(hours=3)
+    ex = "https://example.com/"
+    toyota = tc.url("Toyota Plans to Sell a Kei Pickup")
+    judged = {
+        ex + "nyt/blackberries": ("nyt", "What BlackBerries and Horseshoes Reveal About Our Presidents",
+                                  {"type": "explainer", "relevance": 1, "importance": 2, "is_news": 0,
+                                   "topics": '["policy"]'}),
+        ex + "verge/aquarium": ("verge", "A Fan-Favorite Aquarium Screen Saver Is Leaving Roku",
+                                {"type": "news", "relevance": 1, "importance": 1, "topics": '["consumer"]'}),
+        # A relevant, Top-worthy copy of an IPO member, held thin before the outage; its stored passage vector is
+        # the original's, so only the vector check can tell.
+        ex + "nyt/ipo-paydays": ("nyt", "Big Tech's Windfall: What the Listing Means for Two Backers",
+                                 {"type": "news", "relevance": 3, "importance": 7,
+                                  "topics": '["ai_business"]'}),
+    }
+    new = {   # first seen during the outage, never classified
+        ex + "cnbc/ipo-unvectored": ("cnbc", "Anthropic IPO: Amazon and Google stand to gain billions"),
+        ex + "bbc/outage-chargers": ("bbc", "Apple recalls chargers in Europe"),
+        ex + "guardian/outage-chip": ("guardian", "Samsung opens a chip plant in Texas"),
+    }
+    try:
+        for u, (src, title, w) in judged.items():
+            _held_item(db, u, src, title, end - timedelta(hours=1), w,
+                       vec_of=tc.url("Amazon and Google Will See Big Paydays") if "ipo" in u else None)
+        for u, (src, title) in new.items():
+            _held_item(db, u, src, title, end - timedelta(minutes=10))
+        ed, report, _, tabs = build(db, outage)
+        top = tabs["top"]
+        assert len(top) >= 15, len(top)
+        urls = {c.data["lead"]["url_canonical"] for c, _ in top}
+        assert toyota not in urls and not urls & set(judged)
+        assert ex + "cnbc/ipo-unvectored" not in urls
+        assert {ex + "bbc/outage-chargers", ex + "guardian/outage-chip"} <= urls
+        ipo_events = {tc.event_of(db, u) for u in tc.IPO_FILING}
+        assert sum(c.id in ipo_events for c, _ in top) == 1
+        for c, _ in top:
+            if c.classified:    # the normal Top-contents rules
+                assert c.relevance >= 2 and c.type not in rank.NEVER_TYPES and c.importance >= 6, c.id
+            else:               # only never-judged tier-1 items from the outage itself
+                assert c.lead_tier1 and c.data["lead"]["first_seen_at"] >= tc.iso(end - timedelta(hours=3))
+        # Pairwise dedup: recorded headline vectors below T_join; cards without one share < 2 title keywords
+        # with every other Top card's members.
+        vecs = [embed.unpack_int8(HEADLINES[h]) for h in (c.data["headline"] or c.data["lead"]["title"]
+                                                          for c, _ in top) if h in HEADLINES]
+        assert max((float(a @ b) for a, b in itertools.combinations(vecs, 2)), default=0) < T_JOIN
+        for c, _ in top:
+            if c.data.get("singleton"):
+                k = publish_v1._keywords(c.data["lead"]["title"])
+                for o, _ in top:
+                    if o is not c:
+                        assert all(len(k & publish_v1._keywords(m["title"])) < 2 for m in o.data["members"]), \
+                            (c.data["lead"]["title"], o.data["lead"]["title"])
+    finally:
+        db.conn.execute("DELETE FROM write_log")
+        for t in ("items", "writes", "embeddings"):
+            db.conn.execute(f"DELETE FROM {t} WHERE url_canonical LIKE 'https://example.com/%'")
+
+
 def test_held_lead_with_two_publishers_still_publishes_degraded(replayed):
     db = replayed
     ev = db.one("SELECT * FROM events WHERE status = 'live' AND n_publishers >= 2 AND headline IS NOT NULL"
