@@ -14,7 +14,7 @@ import threading
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from urllib import robotparser
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import requests
 
@@ -26,7 +26,8 @@ EXCERPT_WORDS = 60
 # Counted after stripping, so a newsletter's "subscribe" footer can't make thin text look long enough.
 BOILERPLATE = re.compile(r"subscribe|subscriber|sign up|newsletter|podcast feed|members-only|support our journalism",
                          re.I)
-_SENTENCE = re.compile(r"(?<=[.!?…])[\"'”’)]?\s+(?=[\"'“‘(]?[A-Z0-9])")
+# The closing quote stays with its sentence (a lookbehind, not a consumed match).
+_SENTENCE = re.compile(r"(?:(?<=[.!?…])|(?<=[.!?…][\"'”’)]))\s+(?=[\"'“‘(]?[A-Z0-9])")
 
 
 def words(s):
@@ -56,6 +57,7 @@ class ArticleText:
     text: str
     origin: str                 # page | feed | og+feed | none
     paragraphs: list = field(default_factory=list)
+    og_image: str = None        # the page's og:image, when the page was fetched (images.py uses it first)
 
     @property
     def words(self):
@@ -118,6 +120,23 @@ _OG = [re.compile(rx, re.I | re.S) for rx in (
     r'<meta[^>]+content=["\']([^"\']*)["\'][^>]*property=["\']og:description["\']',
     r'<meta[^>]+name=["\']description["\'][^>]*content=["\']([^"\']*)["\']',
 )]
+
+
+_OG_IMAGE = [re.compile(rx, re.I | re.S) for rx in (
+    r'<meta[^>]+property=["\']og:image(?::secure_url|:url)?["\'][^>]*content=["\']([^"\']+)["\']',
+    r'<meta[^>]+content=["\']([^"\']+)["\'][^>]*property=["\']og:image(?::secure_url|:url)?["\']',
+    r'<meta[^>]+name=["\']twitter:image(?::src)?["\'][^>]*content=["\']([^"\']+)["\']',
+)]
+
+
+def og_image(page_html, base_url=None):
+    head = page_html[:200_000]
+    for rx in _OG_IMAGE:
+        m = rx.search(head)
+        if m and m.group(1).strip():
+            u = html_mod.unescape(m.group(1)).strip()
+            return urljoin(base_url, u) if base_url else u
+    return None
 
 
 def og_description(page_html):
@@ -223,21 +242,25 @@ class Robots:
         return rp
 
 
-def fetch_page(url, source, user_agent, robots, session=None, timeout=15):
-    """Returns (paragraphs, og_description). Paragraphs only for fetch_page sources; paywalled ones
-    (fetch_page: false) still give their og:description."""
+def fetch_page(url, source, user_agent, robots, session=None, timeout=15, with_image=False):
+    """Returns (paragraphs, og_description), plus og_image when `with_image`. Paragraphs only for fetch_page
+    sources; paywalled ones (fetch_page: false) still give their og tags."""
+    empty = ([], None, None) if with_image else ([], None)
     if not robots.allowed(url):
-        return [], None
+        return empty
     try:
         r = (session or requests).get(url, headers={"User-Agent": user_agent}, timeout=timeout)
     except requests.RequestException:
-        return [], None
+        return empty
     if not r.ok or "html" not in r.headers.get("content-type", ""):
-        return [], None
+        return empty
     page = r.text
-    return (extract_paragraphs(page) if source.fetch_page else []), og_description(page)
+    out = ((extract_paragraphs(page) if source.fetch_page else []), og_description(page))
+    return out + (og_image(page, r.url),) if with_image else out
 
 
 def article_text(item, source, user_agent, robots, session=None):
-    paragraphs, og = fetch_page(item["url"], source, user_agent, robots, session)
-    return choose(paragraphs, item.get("feed_text") or "", og)
+    paragraphs, og, image = fetch_page(item["url"], source, user_agent, robots, session, with_image=True)
+    t = choose(paragraphs, item.get("feed_text") or "", og)
+    t.og_image = image or ""        # "" = looked, none found; None = never looked
+    return t

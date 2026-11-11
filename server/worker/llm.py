@@ -564,6 +564,8 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
         if result is None:
             auth_failed = True          # left as it was; retried when the key works again
             continue
+        if text is not None and text.og_image is not None:
+            db.conn.execute("UPDATE items SET og_image = ? WHERE url_canonical = ?", (text.og_image, url))
         if result.output is not None or result.status == "failed":
             db.save_write(url, now, result, text, attr)
         if result.status == "ok":

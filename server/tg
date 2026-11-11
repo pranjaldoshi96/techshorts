@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""tg: the owner's controls for the Techgist worker (spec section 7). Edits <state_dir>/editorial.yaml, which the
+worker reloads every tick, so a change shows in the next publish (within about a minute).
+
+  tg status                         edition age, LLM state, alerts, and the Top list with event ids
+  tg find <words>                   events whose headline or lead title contains the words
+  tg pin <event> [--tab TAB] [--hours H]   put an event at the head of a tab (default top), optionally for H hours
+  tg bury <event>                   push an event down (score x 0.1)
+  tg boost <event> <factor>         multiply an event's score
+  tg kill <event>                   never publish an event
+  tg override <event> --headline TEXT [--summary TEXT]   replace the AI text with your own
+  tg block <source or url part>     leave out a source (id, name or v1 name) or matching links
+  tg clear <event or block entry>   undo every pin/bury/boost/kill/override/block for it
+  tg push <event>                   recorded for R3 (server push); nothing is sent before then
+
+TECHGIST_STATE picks the state dir (e.g. ~/.techshorts-r1 for the test copy), as for the worker.
+"""
+import argparse
+import json
+import os
+import sqlite3
+import sys
+from datetime import datetime, timedelta, timezone
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import yaml  # noqa: E402
+
+from worker import config, editorial  # noqa: E402
+
+TABS = ("top", "ai", "startups", "india", "dev", "reads")
+
+
+def now():
+    return datetime.now(timezone.utc).replace(microsecond=0)
+
+
+def load(cfg):
+    p = editorial.path(cfg)
+    data = (yaml.safe_load(open(p)) or {}) if os.path.exists(p) else {}
+    return p, data
+
+
+def save(p, data):
+    tmp = p + ".tmp"
+    with open(tmp, "w") as f:
+        f.write("# Edited by server/tg; the worker reloads it every tick. See worker/editorial.py.\n")
+        yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+    os.replace(tmp, p)
+
+
+def db(cfg):
+    p = os.path.join(cfg["state_dir"], "state.db")
+    if not os.path.exists(p):
+        return None
+    c = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
+    c.row_factory = sqlite3.Row
+    return c
+
+
+def resolve(cfg, eid):
+    """Follows merges, and warns about an id the worker doesn't know (a typo would silently do nothing)."""
+    c = db(cfg)
+    if c is None:
+        return eid
+    row = c.execute("SELECT id FROM event_alias WHERE old_id = ?", (eid,)).fetchone()
+    if row:
+        print(f"{eid} was merged into {row['id']}; using that")
+        eid = row["id"]
+    ev = c.execute("SELECT headline, lead_url FROM events WHERE id = ?", (eid,)).fetchone()
+    if ev is None:
+        print(f"warning: no event {eid} in {cfg['state_dir']}/state.db (saved anyway)")
+    else:
+        print(f"{eid}: {ev['headline'] or ev['lead_url']}")
+    return eid
+
+
+def status(cfg, args):
+    h_path = os.path.join(cfg["state_dir"], "health.json")
+    if not os.path.exists(h_path):
+        sys.exit(f"no health.json in {cfg['state_dir']}; is the worker running?")
+    h = json.load(open(h_path))
+    e = h.get("edition") or {}
+    print(f"health {h.get('generatedAt')}  edition age {e.get('editionAgeMin')} min  articles {e.get('articles')}"
+          f"  Top {e.get('top')}  degraded {e.get('degraded') or 'no'}  LLM outage {h.get('llmOutage') or 'no'}")
+    print(f"alerts: {', '.join(h.get('alerts') or []) or 'none'}")
+    v = h.get("validation") or {}
+    print(f"validation 24h: pass rate {v.get('passRate')}  skips {v.get('skipReasons')}")
+    fr = (h.get("freshness") or {}).get("publisherToAppMin") or {}
+    print(f"publisher->app lag: p50 {fr.get('p50')} min, p95 {fr.get('p95')} min")
+    failed = (h.get("sourceCheck") or {}).get("failed") or []
+    if failed:
+        print(f"sources failing check: {', '.join(failed)}")
+    out = args.out or (cfg.get("publish") or {}).get("out_dir") or os.path.join(cfg["state_dir"], "edition")
+    ep = os.path.join(os.path.expanduser(out), "edition.json")
+    if os.path.exists(ep):
+        ed = json.load(open(ep))
+        top = sorted((a for a in ed["articles"] if a.get("topRank") is not None), key=lambda a: a["topRank"])
+        print(f"\nTop ({len(top)}), edition {ed['publishedAt']}:")
+        for a in top[:args.n]:
+            flag = "" if a.get("aiText", True) else "  [degraded]"
+            more = f" +{len(a['alsoCoveredBy'])}" if a.get("alsoCoveredBy") else ""
+            print(f"{a['topRank'] + 1:>3}. {a.get('eventId', '?')}  {a['title'][:72]}  ({a['source']}{more}){flag}")
+    _, data = load(cfg)
+    active = {k: v for k, v in data.items() if v}
+    if active:
+        print(f"\neditorial: {json.dumps(active, default=str)}")
+
+
+def find(cfg, args):
+    c = db(cfg)
+    if c is None:
+        sys.exit("no state.db")
+    q = f"%{' '.join(args.words)}%"
+    rows = c.execute("SELECT e.id, e.headline, e.importance, e.n_publishers, e.published_at, i.title FROM events e"
+                     " LEFT JOIN items i ON i.url_canonical = e.lead_url WHERE e.status = 'live' AND"
+                     " (e.headline LIKE ? OR i.title LIKE ?) ORDER BY e.published_at DESC LIMIT 20", (q, q)).fetchall()
+    for r in rows:
+        print(f"{r['id']}  imp {r['importance']}  pubs {r['n_publishers']}  {r['published_at']}  "
+              f"{(r['headline'] or r['title'] or '')[:80]}")
+    if not rows:
+        print("no live event matches")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="tg", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("status")
+    s.add_argument("--out", help="published directory (default publish.out_dir)")
+    s.add_argument("-n", type=int, default=30)
+    sub.add_parser("find").add_argument("words", nargs="+")
+    p = sub.add_parser("pin")
+    p.add_argument("event")
+    p.add_argument("--tab", default="top", choices=TABS)
+    p.add_argument("--hours", type=float)
+    for name in ("bury", "kill", "push"):
+        sub.add_parser(name).add_argument("event")
+    b = sub.add_parser("boost")
+    b.add_argument("event")
+    b.add_argument("factor", type=float)
+    o = sub.add_parser("override")
+    o.add_argument("event")
+    o.add_argument("--headline", required=True)
+    o.add_argument("--summary")
+    sub.add_parser("block").add_argument("what")
+    sub.add_parser("clear").add_argument("what")
+    args = ap.parse_args()
+    cfg = config.load()
+
+    if args.cmd == "status":
+        return status(cfg, args)
+    if args.cmd == "find":
+        return find(cfg, args)
+    path, data = load(cfg)
+    if args.cmd == "pin":
+        eid = resolve(cfg, args.event)
+        entry = {"event": eid, "tab": args.tab}
+        if args.hours:
+            entry["until"] = (now() + timedelta(hours=args.hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        data["pin"] = [x for x in data.get("pin") or [] if not (isinstance(x, dict) and x.get("event") == eid
+                                                                and x.get("tab", "top") == args.tab)] + [entry]
+    elif args.cmd in ("bury", "kill", "push"):
+        eid = resolve(cfg, args.event)
+        data[args.cmd] = sorted(set(data.get(args.cmd) or []) | {eid})
+        if args.cmd == "push":
+            print("push arrives in R3 (app 2.1); recorded in editorial.yaml, nothing sent")
+    elif args.cmd == "boost":
+        eid = resolve(cfg, args.event)
+        data.setdefault("boost", {})
+        data["boost"] = {**(data["boost"] or {}), eid: args.factor}
+    elif args.cmd == "override":
+        eid = resolve(cfg, args.event)
+        if len(args.headline) > 72:
+            sys.exit("headline is over 72 characters (the card limit)")
+        entry = {"headline": args.headline}
+        if args.summary:
+            entry["summary"] = args.summary
+        data["override"] = {**(data.get("override") or {}), eid: entry}
+    elif args.cmd == "block":
+        data["block"] = sorted(set(data.get("block") or []) | {args.what})
+    elif args.cmd == "clear":
+        w = args.what
+        data["pin"] = [x for x in data.get("pin") or [] if (x.get("event") if isinstance(x, dict) else x) != w]
+        for k in ("bury", "kill", "push", "block"):
+            data[k] = [x for x in data.get(k) or [] if x != w]
+        for k in ("boost", "override"):
+            data[k] = {e: v for e, v in (data.get(k) or {}).items() if e != w}
+    save(path, data)
+    print(f"saved {path}; the worker applies it on its next tick")
+
+
+if __name__ == "__main__":
+    main()

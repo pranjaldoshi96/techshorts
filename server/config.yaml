@@ -59,3 +59,20 @@ cluster:
   alias_days: 30
   max_candidates: 5
   rewrite_cap_h: 2
+
+# v1 publish (WP4, spec 2.13). The worker writes edition.json, health.json and img/ into out_dir (default
+# <state_dir>/edition; `--out` overrides). base_url is where that directory is served from: image URLs in the edition
+# point there. Nothing is pushed until git_remote is set, which happens at cutover (WP5); until then publish.sh
+# owns the edition branch.
+publish:
+  out_dir: null
+  base_url: https://raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/
+  # Rewritten when the content changes, and at least this often so editionAgeMin stays honest.
+  every_min: 5
+  git_remote: null              # git@github.com:pranjaldoshi96/techshorts.git at cutover
+  git_branch: edition
+  git_every_min: 10
+  deploy_key: ~/.ssh/techshorts_deploy
+images:
+  # Source pictures downloaded per tick (best-ranked events first); the rest get theirs on later ticks.
+  max_downloads_per_tick: 60

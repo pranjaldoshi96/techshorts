@@ -1,6 +1,7 @@
 """health.json and owner alerts (spec section 7).
 
-R1 WP1 fills the source and prefilter sections; later work packages add freshness, LLM and content metrics.
+Written to the state dir every tick and next to edition.json on every publish (the R2 safe-mode Action will read
+the published copy). Alerts go to ntfy at most once per condition per 6 h; without NTFY_TOPIC they are logged.
 """
 import json
 import logging
@@ -48,8 +49,8 @@ def source_status(db, srcs):
     return out
 
 
-def build(db, srcs):
-    now = utcnow()
+def build(db, srcs, publish=None, now=None):
+    now = now or utcnow()
     status = source_status(db, srcs)
     counts = db.prefilter_counts(now - timedelta(hours=24))
     polls = db.q("SELECT status, COUNT(*) n FROM polls WHERE at >= ? GROUP BY status", iso(now - timedelta(hours=1)))
@@ -64,6 +65,8 @@ def build(db, srcs):
         "validation": validation_stats(db, now - timedelta(hours=24)),
         "events": event_stats(db, now - timedelta(hours=24)),
         "importance": importance_drift(db, now - timedelta(hours=24)),
+        "edition": edition_stats(db, now, publish),
+        "freshness": freshness(db, now - timedelta(hours=24)),
     }
 
 
@@ -122,6 +125,62 @@ def importance_drift(db, since):
             "rawShareAtLeast8": share}
 
 
+def edition_stats(db, now, publish):
+    """The last publish attempt's report (tabs, degraded cards, held events) plus the edition's age."""
+    last_ok = db.one("SELECT * FROM publishes WHERE ok = 1 ORDER BY at DESC LIMIT 1")
+    rejected = db.one("SELECT COUNT(*) n FROM publishes WHERE ok = 0 AND at >= ?", iso(now - timedelta(hours=24)))["n"]
+    out = {"lastPublishAt": last_ok["at"] if last_ok else None,
+           "editionAgeMin": round((now - from_iso(last_ok["at"])).total_seconds() / 60, 1) if last_ok else None,
+           "degraded": last_ok["degraded"] if last_ok else None,
+           "articles": last_ok["articles"] if last_ok else 0, "top": last_ok["top"] if last_ok else 0,
+           "rejected24h": rejected}
+    if publish:
+        out["last"] = publish
+    return out
+
+
+def freshness(db, since):
+    """Publisher-to-app lag (event_published_at -> first edition with the event) and pipeline lag (first seen ->
+    first edition), over events first published in the window. A post that was already old when the worker first
+    saw it (a Reads item after downtime) counts in the first only for what it is: old."""
+    rows = db.q("SELECT published_at, first_at, first_seen_at FROM shipped WHERE first_at >= ?", iso(since))
+    pub = sorted((from_iso(r["first_at"]) - from_iso(r["published_at"])).total_seconds() / 60 for r in rows)
+    seen = sorted((from_iso(r["first_at"]) - from_iso(r["first_seen_at"])).total_seconds() / 60
+                  for r in rows if r["first_seen_at"])
+    rnd = lambda v: None if v is None else round(v, 1)  # noqa: E731
+    return {"window": "24h", "events": len(rows),
+            "publisherToAppMin": {"p50": rnd(_pct(pub, 0.5)), "p95": rnd(_pct(pub, 0.95))},
+            "firstSeenToAppMin": {"p50": rnd(_pct(seen, 0.5)), "p95": rnd(_pct(seen, 0.95))}}
+
+
+def alerts(db, now, started_at=None, top_min=12):
+    """Spec section 7 conditions that the tick can see (the per-source and drift alerts fire where they're
+    measured). Returns the names that are currently true."""
+    on = []
+    last_ok = db.one("SELECT MAX(at) at FROM publishes WHERE ok = 1")["at"]
+    ref = from_iso(last_ok) if last_ok else started_at
+    if ref is not None and now - ref > timedelta(minutes=20):
+        on.append(("no_publish", f"no edition published for {int((now - ref).total_seconds() // 60)} min"))
+    last = db.one("SELECT top, ok FROM publishes ORDER BY at DESC LIMIT 1")
+    if last is not None and last["ok"] and (last["top"] or 0) < top_min:
+        on.append(("top_low", f"Top has {last['top']} stories (minimum {top_min})"))
+    items = db.q("SELECT outcome FROM write_log WHERE at >= ? AND kind = 'item' AND outcome IN ('ok', 'failed')",
+                 iso(now - timedelta(hours=1)))
+    if len(items) >= 10:
+        rate = sum(r["outcome"] == "ok" for r in items) / len(items)
+        if rate < 0.8:
+            on.append(("pass_rate", f"validation pass rate {rate:.0%} over 1 h (minimum 80%)"))
+    calls = db.q("SELECT outcome FROM write_log WHERE at >= ? AND kind != 'item'", iso(now - timedelta(hours=1)))
+    n429 = sum(r["outcome"] == "http_429" for r in calls)
+    if n429 > 20:
+        on.append(("rate_limited", f"{n429} LLM 429s in 1 h"))
+    if any(r["outcome"] in ("http_401", "http_403") for r in calls):
+        on.append(("llm_auth", "LLM API returned 401/403 in the last hour"))
+    for name, msg in on:
+        notify(db, name, msg)
+    return [name for name, _ in on]
+
+
 def _count(rows, key):
     out = {}
     for r in rows:
@@ -129,8 +188,11 @@ def _count(rows, key):
     return out
 
 
-def write(db, srcs, path):
+def write(db, srcs, path, publish=None, now=None, extra=None):
+    data = build(db, srcs, publish, now)
+    data.update(extra or {})
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
-        json.dump(build(db, srcs), f, indent=1)
+        json.dump(data, f, indent=1)
     os.replace(tmp, path)
+    return data

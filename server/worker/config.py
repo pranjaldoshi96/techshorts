@@ -28,6 +28,10 @@ DEFAULTS = {
     "embed": {"model": None, "dims": None, "lead_words": 120},
     # Placeholders only; the real thresholds are calibrated into config.yaml (tools/label_pairs.py).
     "cluster": {"t_cand": 0.5, "t_join": 0.6, "t_signal": 0.5},
+    "publish": {"out_dir": None, "base_url": "https://raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/",
+                "every_min": 5, "git_remote": None, "git_branch": "edition", "git_every_min": 10,
+                "deploy_key": "~/.ssh/techshorts_deploy"},
+    "images": {"max_downloads_per_tick": 60},
 }
 
 

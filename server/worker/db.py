@@ -130,6 +130,25 @@ CREATE INDEX IF NOT EXISTS event_members_ev ON event_members(event_id);
 -- Merged ids keep resolving for 30 days (push taps, Saved, /e/ links).
 CREATE TABLE IF NOT EXISTS event_alias (old_id TEXT PRIMARY KEY, id TEXT NOT NULL, at TEXT NOT NULL);
 
+-- Source images tried for cards (WP4, images.py), by source URL. status: ok | rejected | failed. sha8 names the
+-- derived files img/<sha8>_std.jpg and _thumb.webp; dhash finds the same picture used twice in a tab's top 10.
+CREATE TABLE IF NOT EXISTS images (
+  src TEXT PRIMARY KEY, status TEXT NOT NULL, reason TEXT, sha8 TEXT, width INTEGER, height INTEGER, bytes INTEGER,
+  dhash TEXT, at TEXT NOT NULL
+);
+
+-- First and last publish of each event (WP4), for the publisher-to-app lag in health.json.
+CREATE TABLE IF NOT EXISTS shipped (
+  event_id TEXT PRIMARY KEY, published_at TEXT NOT NULL, first_at TEXT NOT NULL, last_at TEXT NOT NULL,
+  first_seen_at TEXT
+);
+
+-- One row per publish attempt (WP4). ok = 0 when check_edition refused it.
+CREATE TABLE IF NOT EXISTS publishes (
+  at TEXT NOT NULL, ok INTEGER NOT NULL, degraded TEXT, articles INTEGER, top INTEGER, sha TEXT, problem TEXT
+);
+CREATE INDEX IF NOT EXISTS publishes_at ON publishes(at);
+
 -- Techmeme / HN sightings attached to an event (exact URL or cosine >= T_signal).
 CREATE TABLE IF NOT EXISTS event_signals (
   event_id TEXT NOT NULL, url_canonical TEXT NOT NULL, source_id TEXT NOT NULL, how TEXT, points INTEGER,
@@ -139,7 +158,7 @@ CREATE TABLE IF NOT EXISTS event_signals (
 """
 
 # Columns added after a table first shipped; added in place so an existing state.db keeps working.
-MIGRATIONS = {"items": [("hold_reason", "TEXT")]}
+MIGRATIONS = {"items": [("hold_reason", "TEXT"), ("og_image", "TEXT")]}
 
 
 # Held items retry at +30 min and +2 h, then drop (spec 2.5 and 2.8).

@@ -15,7 +15,8 @@ StartLimitBurst=5
 Type=simple
 WorkingDirectory=%h/TechShorts/server
 EnvironmentFile=-%h/.techshorts/env
-ExecStart=/usr/bin/python3 -m worker.main
+# Publishes edition.json, health.json and img/ into ~/.techshorts/edition (publish.out_dir); see README.md.
+ExecStart=/usr/bin/python3 -m worker.main --out %h/.techshorts/edition
 Restart=always
 RestartSec=10
 
