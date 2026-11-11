@@ -103,6 +103,8 @@ def tick(db, cfg, poll_all=False, client=None, embedder=None, out_dir=None, star
     srcs = sources_mod.load()
     maybe_check_sources(db, srcs, cfg)
     counts = fetch_due(db, srcs, cfg, poll_all)
+    if client is not None:
+        degraded.key_check(db, cfg, client.key, utcnow())
     # A revoked key (401/403) would fail every call; the LLM stages wait for a probe to see it work again.
     if client is not None and degraded.llm_outage(db, utcnow()) == "auth":
         if degraded.needs_probe(db, utcnow()):

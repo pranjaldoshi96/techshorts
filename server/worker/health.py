@@ -174,7 +174,9 @@ def alerts(db, now, started_at=None, top_min=12):
     n429 = sum(r["outcome"] == "http_429" for r in calls)
     if n429 > 20:
         on.append(("rate_limited", f"{n429} LLM 429s in 1 h"))
-    if any(r["outcome"] in ("http_401", "http_403") for r in calls):
+    key_failed = db.get_meta("key_auth_failed_at")
+    if any(r["outcome"] in ("http_401", "http_403") for r in calls) or (
+            key_failed and key_failed >= iso(now - timedelta(hours=1))):
         on.append(("llm_auth", "LLM API returned 401/403 in the last hour"))
     for name, msg in on:
         notify(db, name, msg)

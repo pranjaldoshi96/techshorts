@@ -12,6 +12,8 @@ because the AI text failed.
 import re
 from datetime import timedelta
 
+import requests
+
 from .db import iso
 from . import text as text_mod
 
@@ -21,13 +23,44 @@ PASS_WINDOW, PASS_MIN_OUTCOMES, PASS_FLOOR = timedelta(minutes=30), 6, 0.5
 PROBE_EVERY = timedelta(minutes=10)
 
 
+def key_check(db, cfg, key, now, session=None):
+    """One 1-input embedding call with a 5 s timeout, every tick: the cheapest way to learn that the key was
+    revoked even when nothing needs writing (embeddings share the key but not the chat budget). Only a 401/403 or
+    a 200 is recorded; a timeout or 5xx says nothing about the key."""
+    model = (cfg.get("embed") or {}).get("model")
+    if not key or not model:
+        return None
+    try:
+        r = (session or requests).post(cfg["llm"]["base_url"].rstrip("/") + "/embeddings", timeout=5,
+                                       headers={"Authorization": f"Bearer {key}"},
+                                       json={"model": model, "input": ["ping"], "input_type": "query"})
+    except requests.RequestException:
+        return None
+    if r.status_code in (401, 403):
+        db.set_meta("key_auth_failed_at", iso(now))
+        return False
+    if r.status_code == 200:
+        db.set_meta("key_ok_at", iso(now))
+        return True
+    return None
+
+
 def llm_outage(db, now, have_client=True):
     """The outage reason, or None when the LLM is working."""
     if not have_client:
         return "no_key"
-    last = db.one("SELECT outcome FROM write_log WHERE kind NOT IN ('item') AND outcome IS NOT NULL"
-                  " AND outcome NOT IN ('http_429') ORDER BY at DESC, rowid DESC LIMIT 1")
-    if last is not None and last["outcome"] in ("http_401", "http_403"):
+    # Auth: whichever came last of the latest chat outcome and the per-tick key check.
+    signals = []
+    last = db.one("SELECT at, outcome FROM write_log WHERE kind NOT IN ('item') AND outcome IS NOT NULL"
+                  " AND outcome IN ('ok', 'http_401', 'http_403') ORDER BY at DESC, rowid DESC LIMIT 1")
+    if last is not None:
+        signals.append((last["at"], last["outcome"] != "ok"))
+    for key, failed in (("key_auth_failed_at", True), ("key_ok_at", False)):
+        at = db.get_meta(key)
+        if at:
+            signals.append((at, failed))
+    # On a tie (same second) the failure wins: a call that failed is proof, an older success isn't.
+    if signals and max(signals, key=lambda x: (x[0], x[1]))[1]:
         return "auth"
     calls = db.q("SELECT outcome FROM write_log WHERE at >= ? AND kind != 'item'", iso(now - STORM_WINDOW))
     n429 = sum(r["outcome"] == "http_429" for r in calls)

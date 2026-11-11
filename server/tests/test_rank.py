@@ -242,6 +242,28 @@ def test_outage_auth_until_a_call_succeeds():
     assert degraded.llm_outage(db, NOW + timedelta(minutes=2)) is None
 
 
+def test_outage_from_the_per_tick_key_check():
+    class R:
+        def __init__(self, code):
+            self.status_code = code
+
+    class S:
+        def __init__(self, code):
+            self.code = code
+
+        def post(self, *a, **k):
+            return R(self.code)
+    cfg = {"llm": {"base_url": "https://llm.test/v1"}, "embed": {"model": "m"}}
+    db = DB(":memory:")
+    log(db, NOW - timedelta(minutes=5), "write", "ok")
+    assert degraded.key_check(db, cfg, "k", NOW, S(403)) is False
+    assert degraded.llm_outage(db, NOW) == "auth"           # nothing to write, yet the revoked key is noticed
+    assert degraded.key_check(db, cfg, "k", NOW + timedelta(minutes=1), S(500)) is None
+    assert degraded.llm_outage(db, NOW + timedelta(minutes=1)) == "auth"
+    assert degraded.key_check(db, cfg, "k", NOW + timedelta(minutes=2), S(200)) is True
+    assert degraded.llm_outage(db, NOW + timedelta(minutes=2)) is None
+
+
 def test_outage_on_429_storm_and_low_pass_rate():
     db = DB(":memory:")
     for i in range(12):
