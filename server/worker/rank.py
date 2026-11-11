@@ -42,6 +42,17 @@ TABS = {
     "reads": Tab("reads", "Reads", frozenset(("analysis", "opinion", "interview", "other")), 5, 14 * 24, 96, 15),
 }
 TAB_ORDER = ("top", "ai", "startups", "india", "dev", "reads")
+TUNABLE = ("min_importance", "window_h", "tau_h", "max")
+
+
+def tabs_for(cfg):
+    """TABS with any `tabs.<id>.<field>` overrides from config.yaml (spec values when there are none)."""
+    over = (cfg or {}).get("tabs") or {}
+    out = {}
+    for tid, tab in TABS.items():
+        o = {k: v for k, v in (over.get(tid) or {}).items() if k in TUNABLE}
+        out[tid] = Tab(**{**tab.__dict__, **o}) if o else tab
+    return out
 
 
 @dataclass
@@ -228,12 +239,13 @@ def _count(stats, key):
         stats[key] = stats.get(key, 0) + 1
 
 
-def build_tabs(cands, now, degraded=False, dup_threshold=None, stats=None):
+def build_tabs(cands, now, degraded=False, dup_threshold=None, stats=None, tabs=None):
     """{tab id: [(candidate, score)]} for every tab. `stats` collects per-tab filter counts."""
+    tabs = tabs or TABS
     out = {}
     for tid in TAB_ORDER:
         s = {} if stats is not None else None
-        out[tid] = assemble(cands, TABS[tid], now, degraded, dup_threshold, s)
+        out[tid] = assemble(cands, tabs[tid], now, degraded, dup_threshold, s)
         if stats is not None:
             stats[tid] = s
     return out

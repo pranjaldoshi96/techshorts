@@ -292,8 +292,9 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
     cands, held = load_candidates(ctx)
     degraded = bool(ctx.outage)
     # Only events some tab could take need vectors and pictures; best first, so per-tick caps go to likely cards.
-    live = [c for c in cands if any(rank.eligible(c, rank.TABS[t], now) is None or t in c.pin for t in rank.TAB_ORDER)]
-    live.sort(key=lambda c: -rank.cand_score(c, rank.TABS["top"], now, degraded))
+    tab_specs = rank.tabs_for(ctx.cfg)
+    live = [c for c in cands if any(rank.eligible(c, tab_specs[t], now) is None or t in c.pin for t in rank.TAB_ORDER)]
+    live.sort(key=lambda c: -rank.cand_score(c, tab_specs["top"], now, degraded))
     headline_vectors(ctx.db, embedder, live, now)
     pictures = {}
     if image_store is not None:
@@ -312,7 +313,7 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
             row = pictures.get(c.id)
             c.image_hash = row["dhash"] if row else None
     stats = {}
-    tabs = rank.build_tabs(live, now, degraded, ctx.cfg["cluster"]["t_join"], stats)
+    tabs = rank.build_tabs(live, now, degraded, ctx.cfg["cluster"]["t_join"], stats, tab_specs)
     tabs = title_duplicates(tabs)
 
     base = (ctx.cfg.get("publish") or {}).get("base_url", "").rstrip("/") + "/"

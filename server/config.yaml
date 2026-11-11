@@ -73,6 +73,11 @@ publish:
   git_branch: edition
   git_every_min: 10
   deploy_key: ~/.ssh/techshorts_deploy
+# Tab rules are the spec's (worker/rank.py, spec 2.12). Any of min_importance, window_h, tau_h and max can be
+# overridden per tab here, e.g. `tabs: {reads: {min_importance: 4}}`. Note: the LLM rates essays 4 (the 2.6
+# anchors put strong analysis at 4-5), so with the spec's Reads minimum of 5, Reads (1.2's Blogs tab) is nearly
+# empty; that is the lead's call, so the spec value stands until changed here.
+tabs: {}
 images:
   # Source pictures downloaded per tick (best-ranked events first); the rest get theirs on later ticks.
   max_downloads_per_tick: 60

@@ -310,3 +310,11 @@ def test_tg_cli_round_trips_through_the_worker_loader(tmp_path):
     tg("clear", "ev_a")
     ed = editorial.load({"state_dir": str(tmp_path)}, datetime.now(timezone.utc))
     assert ed.kill == set() and ed.pins == {}
+
+
+def test_tab_overrides_from_config():
+    tabs = rank.tabs_for({"tabs": {"reads": {"min_importance": 4, "bogus": 1}}})
+    assert tabs["reads"].min_importance == 4 and tabs["top"] is rank.TABS["top"]
+    essay = cand(type="analysis", importance=4, is_news=False, lead_reads=True)
+    assert rank.eligible(essay, rank.TABS["reads"], NOW) == "importance"
+    assert rank.eligible(essay, tabs["reads"], NOW) is None
