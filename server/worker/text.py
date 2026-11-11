@@ -165,10 +165,16 @@ class _Paragraphs(HTMLParser):
             self.buf.append(data)
 
 
+# trafilatura is not safe to call from several threads at once: a 6-thread replay died with "double free or
+# corruption" inside it. Extraction takes milliseconds next to the fetch, so one lock costs nothing.
+_EXTRACT_LOCK = threading.Lock()
+
+
 def extract_paragraphs(page_html):
     try:
         import trafilatura
-        out = trafilatura.extract(page_html, include_comments=False, include_tables=False, favor_precision=True)
+        with _EXTRACT_LOCK:
+            out = trafilatura.extract(page_html, include_comments=False, include_tables=False, favor_precision=True)
         if out:
             return [re.sub(r"\s+", " ", p).strip() for p in out.split("\n") if p.strip()]
     except ImportError:

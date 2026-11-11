@@ -427,7 +427,8 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
         entailed = None
         if entail.needed(out):
             try:
-                e = entail.check(client, llm_cfg["model"], item["title"], text.lead(), out.headline, out.s1)
+                e = entail.check(client, llm_cfg["model"], item["title"], entail.context(out, text, attribution),
+                                 out.headline, out.s1)
             except AuthError:
                 raise
             except (LLMError, ValueError) as err:

@@ -193,6 +193,18 @@ def test_select_picks_the_variant_combination_that_fits():
     assert o.s1 == DAYLIGHT["s1"] and o.s3 == DAYLIGHT["s3"]
 
 
+def test_select_prefers_a_clean_variant_over_a_banned_word():
+    s3_bad = "Investors expect the home storage landscape to triple by 2030, giving battery suppliers a larger market."
+    o = out(DAYLIGHT, s3=s3_bad, s3_alt=DAYLIGHT["s3"], headline="Daylight raises $80M?",
+            headline_alt="Daylight raises $80M Series B")
+    validate.select(o)
+    assert o.s3 == DAYLIGHT["s3"] and o.headline == "Daylight raises $80M Series B"
+    # With no clean version, the problem stays and becomes retry feedback.
+    o = out(DAYLIGHT, s3=s3_bad)
+    validate.select(o)
+    assert o.s3 == s3_bad
+
+
 def test_select_labels_analysis_but_not_attributed_opinion():
     o = validate.select(out(DAYLIGHT, type="analysis", headline="Home batteries are the next grid"))
     assert o.headline == "Analysis: Home batteries are the next grid"
@@ -430,16 +442,26 @@ def test_entailment_failure_retries_with_the_unsupported_claim():
     assert "does not support: a record raise" in client.calls[2][2][-1]["content"]
 
 
-def test_entailment_only_for_top_or_push_candidates():
-    assert entail.needed(out(DAYLIGHT, importance=6, relevance=2))
+def test_entailment_gate_is_spec_2_8_or_rule():
+    # Spec 2.8: importance >= 6, OR relevance >= 2, OR breaking; any one is enough.
+    assert entail.needed(out(DAYLIGHT, importance=6, relevance=1))
+    assert entail.needed(out(DAYLIGHT, importance=4, relevance=2))
     assert entail.needed(out(DAYLIGHT, importance=3, relevance=1, breaking=True))
-    # Top needs both importance >= 6 and relevance >= 2; neither alone reaches Top or a push.
-    assert not entail.needed(out(DAYLIGHT, importance=6, relevance=1))
-    assert not entail.needed(out(DAYLIGHT, importance=4, relevance=3))
-    assert not entail.needed(out(DAYLIGHT, importance=3, relevance=1))
+    assert not entail.needed(out(DAYLIGHT, importance=5, relevance=1))
     client = FakeClient([{**DAYLIGHT, "importance": 3, "relevance": 1}])
     r = llm.write_item(client, CFG, ITEM, "Example News", text.choose([DAYLIGHT_SRC], ""))
     assert r.status == "ok" and r.entailed is None and [c[0] for c in client.calls] == ["write"]
+
+
+def test_essay_is_judged_on_whole_text_news_on_the_opening():
+    paras = ["Opening line one."] * 3 + ["Longer paragraph " * 60] * 3 + ["The essay's actual point is here."]
+    t = text.choose(paras, "")
+    news = out(DAYLIGHT, importance=4, relevance=2)
+    assert entail.context(news, t) == t.lead() and "actual point" not in entail.context(news, t)
+    essay = out({**DAYLIGHT, "type": "analysis", "is_news": False}, importance=4, relevance=2)
+    assert "actual point" in entail.context(essay, t)
+    labelled = out({**DAYLIGHT, "headline": "Analysis: Nvidia's lead is shrinking"}, importance=4, relevance=2)
+    assert "actual point" in entail.context(labelled, t)
 
 
 def test_bad_json_and_schema_errors_get_feedback():

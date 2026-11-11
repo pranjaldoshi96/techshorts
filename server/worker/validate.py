@@ -112,6 +112,16 @@ def select(out, attribution=None):
                 out_.append(v)
         return out_
 
+    # A retry with "don't use 'landscape'" mostly came back unchanged (fixture run 5), while another offered
+    # version of that sentence was often clean. So style problems count like a length miss: a clean, fitting
+    # combination wins. The gates themselves still run on whatever is picked.
+    styled = {}
+
+    def style(sent):
+        if sent not in styled:
+            styled[sent] = len(summary_problems(sent, None))
+        return styled[sent]
+
     best = None
     for s1 in options("s1"):
         for s2 in options("s2"):
@@ -119,7 +129,8 @@ def select(out, attribution=None):
                 n_short, n_full = word_count(join(s1, s2)), word_count(join(s1, s2, s3))
                 miss = (max(0, SHORT_MIN - n_short, n_short - SHORT_MAX)
                         + max(0, FULL_MIN - n_full, n_full - FULL_MAX))
-                key = (miss, abs(n_full - FULL_TARGET) + abs(n_short - SHORT_TARGET))
+                bad = style(s1) + style(s2) + (style(s3) if s3 else 0)
+                key = ((bad > 0) + (miss > 0), bad, miss, abs(n_full - FULL_TARGET) + abs(n_short - SHORT_TARGET))
                 if best is None or key < best[0]:
                     best = (key, s1, s2, s3)
     _, out.s1, out.s2, out.s3 = best
@@ -143,7 +154,7 @@ def select(out, attribution=None):
             rest = says.sub("", lead.sub("", h))
             return f"{attribution.prefix} {rest[:1].upper()}{rest[1:]}"
         candidates = [prefixed(h) for h in candidates]
-    fitting = [h for h in candidates if len(h) <= HEADLINE_MAX]
+    fitting = [h for h in candidates if not headline_problems(h)] or [h for h in candidates if len(h) <= HEADLINE_MAX]
     out.headline = fitting[0] if fitting else candidates[0] if candidates else out.headline
     return out
 

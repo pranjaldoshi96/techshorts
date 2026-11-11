@@ -116,7 +116,11 @@ def report(items, out_path):
     print(f"Text origin: {by_origin}")
     if full:
         print(f"Pass within one retry: {len(within_one)}/{len(full)} = {len(within_one) / len(full):.1%}; "
-              f"with fallback: {len(ok)}/{len(full)} = {len(ok) / len(full):.1%}")
+              f"with fallback: {len(ok)}/{len(full)} = {len(ok) / len(full):.1%}  (items with >= 60 words)")
+        # Thin items (paywall stubs) can never pass, since they never get text (spec 2.5). Whether the AC counts them
+        # is an open spec question, so both denominators are printed.
+        print(f"Pass within one retry, all eligible incl. thin: {len(within_one)}/{len(rows)} = "
+              f"{len(within_one) / len(rows):.1%}; with fallback: {len(ok)}/{len(rows)} = {len(ok) / len(rows):.1%}")
     fails = {}
     for r in full:
         if r["status"] != "ok":
