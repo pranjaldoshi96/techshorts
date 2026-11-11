@@ -164,6 +164,21 @@ def test_publisher_diversity_2_in_top10_4_per_tab():
     assert [c.lead_publisher for c, _ in ranked].count("Same") <= 4
 
 
+def test_capped_cards_wait_for_a_later_rank_instead_of_ending_the_tab():
+    # Three busy publishers: 2 each fill ranks 1-6; then the 4-per-tab cap applies rather than stopping at 6.
+    cs = [cand(f"ev_{p}{i}", importance=7, n=2, age_h=i * 0.5 + j * 0.1, publisher=p)
+          for j, p in enumerate("ABC") for i in range(6)]
+    ranked = rank.assemble(cs, TOP, NOW)
+    pubs = [c.lead_publisher for c, _ in ranked]
+    assert len(ranked) == 12 and all(pubs.count(p) == 4 for p in "ABC")
+    assert all(pubs[:6].count(p) == 2 for p in "ABC")
+    # With enough publishers, a third card from one waits until rank 11 rather than being dropped.
+    cs = [cand(f"ev_s{i}", importance=8, n=3, age_h=i * 0.1, publisher="Same") for i in range(3)]
+    cs += [cand(f"ev_o{i:02}", importance=7, n=2, age_h=1 + i * 0.1, publisher=f"O{i}") for i in range(9)]
+    ids = [c.id for c, _ in rank.assemble(cs, TOP, NOW)]
+    assert ids.index("ev_s2") == 10
+
+
 def test_dev_allows_one_tutorial_per_10():
     dev = rank.TABS["dev"]
     cs = [cand(f"ev_t{i}", type="tutorial", topics=("dev_tools",), importance=5, is_news=False,

@@ -171,31 +171,53 @@ def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None):
     for c, _ in pinned:
         pub = c.lead_publisher or c.lead_source
         per_pub[pub] = per_pub.get(pub, 0) + 1
-    for c, s in pool:
-        if len(out) >= tab.max:
-            break
-        # Duplicate guard: the merge pass should have joined these, but the feed must never show one story twice
-        # (spec 8 WP4 AC). Headline vectors are query embeddings, where no labelled different-event fixture pair
-        # reaches T_join (tools/label_pairs.py data; WP4 notes in README).
-        if dup_threshold is not None and c.headline_vec is not None and any(
-                o.headline_vec is not None and float(c.headline_vec @ o.headline_vec) >= dup_threshold
-                for o, _ in out):
-            _count(stats, "duplicate")
-            continue
+
+    def is_duplicate(c):
+        # The merge pass should have joined these, but the feed must never show one story twice (spec 8 WP4 AC).
+        # Headline vectors are query embeddings, where no labelled different-event fixture pair reaches T_join.
+        return dup_threshold is not None and c.headline_vec is not None and any(
+            o.headline_vec is not None and float(c.headline_vec @ o.headline_vec) >= dup_threshold for o, _ in out)
+
+    def blocked(c, relax):
+        """Why `c` can't take the next rank now (it may later), or None."""
         pub = c.lead_publisher or c.lead_source
-        cap = DIVERSITY_TOP10 if len(out) < 10 else DIVERSITY_TAB
+        cap = DIVERSITY_TAB if relax or len(out) >= 10 else DIVERSITY_TOP10
         if per_pub.get(pub, 0) >= cap:
-            _count(stats, "diversity")
-            continue
-        if tab.id == "dev" and c.type == "tutorial":
-            if tutorials >= TUTORIAL_PER_10 * (1 + len(out) // 10):
-                _count(stats, "tutorial_cap")
-                continue
+            return "diversity"
+        if tab.id == "dev" and c.type == "tutorial" and tutorials >= TUTORIAL_PER_10 * (1 + len(out) // 10):
+            return "tutorial_cap"
         if len(out) < 10 and c.image_hash and any(
                 o.image_hash and hamming(c.image_hash, o.image_hash) <= IMAGE_HAMMING for o, _ in out[:10]):
-            _count(stats, "image_duplicate")
-            continue
+            return "image_duplicate"
+        return None
+
+    # Greedy, one rank at a time: a card held back by the top-10 caps (publisher, tutorial, repeated picture) waits
+    # for a later rank instead of being dropped. If only capped cards are left before rank 10, the 2-per-publisher
+    # rule yields to the 4-per-tab one rather than ending the tab early.
+    remaining = list(pool)
+    while remaining and len(out) < tab.max:
+        pick = None
+        for relax in (False, True):
+            for i, (c, s) in enumerate(remaining):
+                if is_duplicate(c):
+                    continue
+                if blocked(c, relax) is None:
+                    pick = i
+                    break
+            if pick is not None:
+                break
+        dups = [x for x in remaining if is_duplicate(x[0])]
+        for _ in dups:
+            _count(stats, "duplicate")
+        if pick is None:
+            for c, _ in remaining:
+                if not is_duplicate(c):
+                    _count(stats, blocked(c, True) or "capped")
+            break
+        c, s = remaining[pick]
+        remaining = [x for j, x in enumerate(remaining) if j != pick and not is_duplicate(x[0])]
         out.append((c, s))
+        pub = c.lead_publisher or c.lead_source
         per_pub[pub] = per_pub.get(pub, 0) + 1
         tutorials += c.type == "tutorial"
     return out
