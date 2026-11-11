@@ -70,12 +70,17 @@ class WriteOutput(BaseModel):
     s2: str
     s3: str = ""
     notif_line: str = ""
-    # Shorter versions to pick from (validate.select): the model can't count, so it offers two lengths and code
-    # picks the combination that fits. Not in the spec's schema; absent alts just mean one choice.
+    # Other lengths to pick from (validate.select): the model can't count, so it offers short and long versions and
+    # code picks the combination that fits. On the fixture it ran short and long about equally often, and a retry
+    # asking for "N words" mostly came back unchanged. Not in the spec's schema; absent ones just mean fewer choices.
     headline_alt: str = ""
+    headline_short: str = ""
     s1_alt: str = ""
     s2_alt: str = ""
     s3_alt: str = ""
+    s1_long: str = ""
+    s2_long: str = ""
+    s3_long: str = ""
 
     @field_validator("topics", mode="before")
     @classmethod
@@ -93,8 +98,8 @@ class WriteOutput(BaseModel):
         except (TypeError, ValueError):
             return v
 
-    @field_validator("headline", "s1", "s2", "s3", "notif_line", "headline_alt", "s1_alt", "s2_alt", "s3_alt",
-                     mode="before")
+    @field_validator("headline", "s1", "s2", "s3", "notif_line", "headline_alt", "headline_short", "s1_alt",
+                     "s2_alt", "s3_alt", "s1_long", "s2_long", "s3_long", mode="before")
     @classmethod
     def strip(cls, v, info):
         v = re.sub(r"\s+", " ", v or "").strip()
@@ -185,8 +190,8 @@ class Client:
             out, self.events = self.events, []
         return out
 
-    def chat(self, model, messages, max_tokens=900, kind="write", tries=3):
-        body = {"model": model, "messages": messages, "temperature": 0.2, "max_tokens": max_tokens,
+    def chat(self, model, messages, max_tokens=1100, kind="write", tries=3, temperature=0.2):
+        body = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens,
                 "response_format": {"type": "json_object"},
                 # Straight answer, no reasoning trace (Nemotron); other models ignore it.
                 "chat_template_kwargs": {"enable_thinking": False}}
@@ -242,8 +247,9 @@ PROMPT = """Return this JSON object:
  "topics": [...], "region": "in|us|global",
  "entities": {"orgs": [], "people": [], "products": [], "amounts": []},
  "event": "new", "material_update": false,
- "headline": "...", "headline_alt": "...", "s1": "...", "s1_alt": "...", "s2": "...", "s2_alt": "...",
- "s3": "...", "s3_alt": "...", "notif_line": "..."}
+ "headline": "...", "headline_alt": "...", "headline_short": "...",
+ "s1": "...", "s1_alt": "...", "s1_long": "...", "s2": "...", "s2_alt": "...", "s2_long": "...",
+ "s3": "...", "s3_alt": "...", "s3_long": "...", "notif_line": "..."}
 
 Classification:
 - is_news: true when it reports something that happened or was announced; false for evergreen how-tos, \
@@ -287,20 +293,28 @@ company or person. Numbers as digits ($80M, $1.4T, 3x). No question, teaser, emo
 - s2 (16 to 20 words): the most important detail or context. S1 and S2 together stand alone as a summary.
 - s3 (15 to 19 words): the concrete consequence for builders, investors or operators.
 - Each fact once across the three sentences.
-- Also give a shorter version of each: headline_alt (at most 55 characters), and s1_alt, s2_alt, s3_alt (11 to 14 \
-words each, same facts, still complete sentences). Techgist picks the versions that fit the card.
+- Also give other lengths of each, same facts, still complete sentences: headline_alt (at most 55 characters) and \
+headline_short (at most 40 characters); s1_alt, s2_alt, s3_alt (11 to 14 words each); s1_long, s2_long, s3_long \
+(24 to 28 words each, adding one more specific fact from the text). Techgist picks the versions that fit the card.
 - notif_line: one complete sentence of at most 12 words (under 90 characters), with new information that is \
 not in the headline.
 Length example only (its facts are invented; never reuse them):
 {"headline": "Acme raises $40M to build battery packs for delivery vans",
  "headline_alt": "Acme raises $40M for delivery van batteries",
+ "headline_short": "Acme raises $40M for van batteries",
  "s1": "Acme, a Berlin battery startup, raised $40M in a Series B round led by Index Ventures on Tuesday.",
  "s1_alt": "Berlin battery startup Acme raised $40M in a Series B round.",
+ "s1_long": "Acme, a Berlin startup that makes battery packs for delivery vans, raised $40M in a Series B round led \
+by Index Ventures on Tuesday.",
  "s2": "The company makes swappable battery packs for electric delivery vans and already supplies two of Germany's \
 largest parcel carriers.",
  "s2_alt": "Its swappable packs power electric delivery vans for two large parcel carriers.",
+ "s2_long": "The company's swappable packs can be changed in five minutes, and it already supplies electric delivery \
+vans for two of Germany's largest parcel carriers.",
  "s3": "Fleet operators get a cheaper way to electrify vans without waiting hours for each vehicle to recharge.",
  "s3_alt": "Fleet operators can electrify their vans without waiting for long charging stops.",
+ "s3_long": "Fleet operators get a cheaper way to electrify their vans, since a swap takes minutes instead of the hours \
+each vehicle would spend at a charger.",
  "notif_line": "Acme already supplies two of Germany's largest parcel carriers."}
 
 Accuracy:
@@ -384,7 +398,8 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
                          {"role": "user", "content": "Your answer failed these checks:\n- " + "\n- ".join(feedback)
                           + "\nFix them and reply with the whole JSON object again."}]
         try:
-            reply = client.chat(model, messages, kind="write")
+            # A retry at the first call's low temperature mostly came back word for word, ignoring the feedback.
+            reply = client.chat(model, messages, kind="write", temperature=0.5 if rung == 2 else 0.2)
         except ModelGone:
             gone.add(model)
             steps.append(Step(rung, model, "llm_error", "model_gone"))

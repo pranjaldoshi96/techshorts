@@ -1,7 +1,10 @@
 """Entailment gate (spec 2.8): a second LLM call that asks whether the source's own opening supports the headline
 and S1. It replaces the old cosine "faithfulness" check, which passed fluent headlines that added facts.
 
-Only items that can reach Top or a push are judged: importance ≥ 6, relevance ≥ 2, or breaking.
+Only items that can reach Top or a push are judged (spec 2.1 "entailment gate if Top/push-eligible"): importance
+≥ 6 with relevance ≥ 2, or breaking. Top needs both, and a push needs importance ≥ 8, so spec 2.8's "importance ≥ 6,
+relevance ≥ 2 or breaking" is read that way. Read as three alternatives, relevance ≥ 2 alone would send nearly every
+item, essays included, to a judge that only sees the opening, and an essay's point is rarely in its first paragraphs.
 """
 import json
 import re
@@ -34,7 +37,7 @@ class Entailment:
 
 
 def needed(output):
-    return output.importance >= 6 or output.relevance >= 2 or output.breaking
+    return (output.importance >= 6 and output.relevance >= 2) or output.breaking
 
 
 def fill(template, **values):

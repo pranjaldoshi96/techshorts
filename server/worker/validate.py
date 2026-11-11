@@ -106,8 +106,11 @@ def select(out, attribution=None):
     inside both ranges that is closest to the 52/36 targets, else the closest one (whose problems then become
     retry feedback). Likewise the headline. Mutates and returns `out`; text is chosen, never cut."""
     def options(name):
-        main, alt = getattr(out, name), getattr(out, name + "_alt", "")
-        return [main] + ([alt] if alt and alt != main else [])
+        out_ = [getattr(out, name)]
+        for v in (getattr(out, name + "_alt", ""), getattr(out, name + "_long", "")):
+            if v and v not in out_:
+                out_.append(v)
+        return out_
 
     best = None
     for s1 in options("s1"):
@@ -120,17 +123,26 @@ def select(out, attribution=None):
                 if best is None or key < best[0]:
                     best = (key, s1, s2, s3)
     _, out.s1, out.s2, out.s3 = best
-    candidates = [h for h in (out.headline, out.headline_alt) if h]
+    candidates = [h for h in options("headline") + [out.headline_short] if h]
     # Analysis, opinion and interview pieces carry a label (spec 3). The model rarely adds one even when told, and
     # the label states no fact, so code adds it: "Analysis: ...". A deterministic attribution (Cramer:) is the
-    # model's job instead, since the claims must be rewritten as that person's view.
-    if attribution is None and out.type in LABELLED_TYPES and not any(PREFIX.match(h) for h in candidates):
-        candidates = [f"{out.type.capitalize()}: {h}" for h in candidates]
-    elif attribution is not None and not any(attribution_mod.has_prefix(h, attribution) for h in candidates):
+    # model's job instead, since the claims must be rewritten as that person's view. Each candidate is labelled on
+    # its own: a prefixed long headline and an unprefixed short one must not let the short one ship bare.
+    if attribution is None and out.type in LABELLED_TYPES:
+        candidates = [h if PREFIX.match(h) else f"{out.type.capitalize()}: {h}" for h in candidates]
+    elif attribution is not None:
         # The item is this person's opinion whatever the model wrote, so the prefix is a fact about the source;
-        # ", Cramer says" endings become the prefix instead of doubling it.
-        says = re.compile(rf",?\s+(?:{re.escape(attribution.full)}|{re.escape(attribution.name)})\s+(?:says|argues|warns)$")
-        candidates = [f"{attribution.prefix} {says.sub('', h)}" for h in candidates]
+        # "Jim Cramer:", "Cramer says ..." and ", Cramer says" become the prefix instead of doubling it.
+        who = rf"(?:{re.escape(attribution.full)}|{re.escape(attribution.name)})"
+        says = re.compile(rf",?\s+{who}\s+(?:says|argues|warns)$")
+        lead = re.compile(rf"^{who}(?::|\s+(?:says|argues|warns)(?:\s+that)?)\s+")
+
+        def prefixed(h):
+            if attribution_mod.has_prefix(h, attribution):
+                return h
+            rest = says.sub("", lead.sub("", h))
+            return f"{attribution.prefix} {rest[:1].upper()}{rest[1:]}"
+        candidates = [prefixed(h) for h in candidates]
     fitting = [h for h in candidates if len(h) <= HEADLINE_MAX]
     out.headline = fitting[0] if fitting else candidates[0] if candidates else out.headline
     return out

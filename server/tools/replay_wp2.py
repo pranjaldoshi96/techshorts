@@ -87,6 +87,9 @@ def run(items, srcs, cfg, out_path, fetch_pages=True, workers=6):
                        region=o.region, topics=o.topics, breaking=o.breaking, sensitive=o.sensitive)
             if res.status == "ok":
                 row.update(headline=o.headline, summary=res.full, summary_short=res.short, notif_line=o.notif_line)
+            elif res.status == "failed":     # the rejected text, so a held item's failure can be read, not guessed
+                row.update(rejected={"headline": o.headline, "s1": o.s1, "s2": o.s2, "s3": o.s3,
+                                     "notif_line": o.notif_line})
         with lock:
             with open(out_path, "a") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")

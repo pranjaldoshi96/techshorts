@@ -211,6 +211,34 @@ def test_select_adds_the_attribution_prefix():
     assert o.headline == "Cramer: Wall Street is too gloomy"
 
 
+def test_select_uses_long_variants_when_the_model_writes_short():
+    # Fixture replays: too_short (41-44 words) was the commonest failure, and the retry rarely fixed it.
+    o = out(DAYLIGHT, s1="Daylight raised $80M in a Series B round.", s2="It builds solar batteries for homes.",
+            s3="Home storage demand may triple by 2030.",
+            s1_long=DAYLIGHT["s1"], s2_long=DAYLIGHT["s2"], s3_long=DAYLIGHT["s3"])
+    validate.select(o)
+    assert validate.trim(o.s1, o.s2, o.s3)[2] == []
+    assert validate.check(o, DAYLIGHT_SRC, "Original title", "Example News").ok
+
+
+def test_select_prefixes_every_headline_candidate():
+    # Live failure: the long headline had "Cramer:", the fitting alt didn't, and the alt shipped bare 3 times.
+    attr = attribution.Attribution("Cramer", "Jim Cramer", "cramer")
+    long = "Cramer: Wall Street is focusing far too much on what could go wrong for the market"
+    o = validate.select(out(DAYLIGHT, type="opinion", headline=long, headline_alt="Wall Street is too gloomy"), attr)
+    assert o.headline == "Cramer: Wall Street is too gloomy"
+    for h in ("Jim Cramer: Wall Street is too gloomy", "Cramer says Wall Street is too gloomy",
+              "Jim Cramer says that Wall Street is too gloomy"):
+        assert validate.select(out(DAYLIGHT, type="opinion", headline=h), attr).headline == \
+            "Cramer: Wall Street is too gloomy"
+    long = "Analysis: Home batteries are about to become the most important part of the power grid"
+    o = validate.select(out(DAYLIGHT, type="analysis", headline=long, headline_alt="Home batteries win"))
+    assert o.headline == "Analysis: Home batteries win"
+    o = validate.select(out(DAYLIGHT, headline=long + " in America", headline_alt=long,
+                            headline_short="Daylight raises $80M"))
+    assert o.headline == "Daylight raises $80M"
+
+
 def test_prompt_lists_the_sources_hedges():
     msgs = llm.build_messages(ITEM, "Example News", HUANG_SRC)
     assert "suspected Chinese spy" in msgs[1]["content"].split("Hedged claims in this text")[1]
@@ -341,10 +369,11 @@ class FakeClient:
 
     def __init__(self, writes, entail=("yes",)):
         self.writes, self.entail = list(writes), list(entail)
-        self.calls = []
+        self.calls, self.temperatures = [], []
 
-    def chat(self, model, messages, max_tokens=900, kind="write"):
+    def chat(self, model, messages, max_tokens=900, kind="write", temperature=0.2):
         self.calls.append((kind, model, messages))
+        self.temperatures.append(temperature)
         if kind == "entail":
             v = self.entail.pop(0) if len(self.entail) > 1 else self.entail[0]
             return json.dumps({"entailed": v, "unsupported": "" if v == "yes" else "a record raise"})
@@ -375,6 +404,15 @@ def test_feedback_retry_passes_at_rung_2():
     assert client.calls[1][2][-2]["role"] == "assistant"
 
 
+def test_feedback_retry_runs_warmer():
+    # At the first call's temperature the retry mostly repeated itself word for word.
+    long_s2 = DAYLIGHT["s2"] + " It also plans new offices across the United States next year with Benchmark."
+    client = FakeClient([{**DAYLIGHT, "s2": long_s2}, {**DAYLIGHT, "s2": long_s2}, DAYLIGHT])
+    llm.write_item(client, CFG, ITEM, "Example News", text.choose([DAYLIGHT_SRC], ""))
+    writes = [t for (kind, _, _), t in zip(client.calls, client.temperatures) if kind == "write"]
+    assert writes == [0.2, 0.5, 0.2]
+
+
 def test_fallback_model_is_rung_3_then_failure():
     bad = {**DAYLIGHT, "headline": "Daylight raises $80M in November"}
     client = FakeClient([bad, bad, DAYLIGHT])
@@ -393,9 +431,11 @@ def test_entailment_failure_retries_with_the_unsupported_claim():
 
 
 def test_entailment_only_for_top_or_push_candidates():
-    assert entail.needed(out(DAYLIGHT, importance=6, relevance=1))
-    assert entail.needed(out(DAYLIGHT, importance=3, relevance=2))
+    assert entail.needed(out(DAYLIGHT, importance=6, relevance=2))
     assert entail.needed(out(DAYLIGHT, importance=3, relevance=1, breaking=True))
+    # Top needs both importance >= 6 and relevance >= 2; neither alone reaches Top or a push.
+    assert not entail.needed(out(DAYLIGHT, importance=6, relevance=1))
+    assert not entail.needed(out(DAYLIGHT, importance=4, relevance=3))
     assert not entail.needed(out(DAYLIGHT, importance=3, relevance=1))
     client = FakeClient([{**DAYLIGHT, "importance": 3, "relevance": 1}])
     r = llm.write_item(client, CFG, ITEM, "Example News", text.choose([DAYLIGHT_SRC], ""))
