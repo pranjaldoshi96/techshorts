@@ -138,7 +138,7 @@ def event_candidate(ctx, ev):
         classified=ev["type"] is not None, boost=ctx.editorial.boost.get(ev["id"], 1.0),
         pin=frozenset(ctx.editorial.pins.get(ev["id"], ())))
     c.data = {"lead": lead, "members": members, "publishers": publishers, "headline": headline, "summary": summary,
-              "hn": hn, "title_words": _words(lead["title"]),
+              "hn": hn, "parent_id": ev["parent_id"], "title_words": _words(lead["title"]),
               "first_seen_at": min(m["first_seen_at"] for m in members),
               "images": image_sources(ctx, lead, members)}
     return c, None
@@ -179,7 +179,7 @@ def outage_singletons(ctx, taken):
                                   "published_at", "first_seen_at", "text")}
         c.data = {"lead": lead, "members": [lead], "publishers": [s.v1_name], "headline": r["headline"] if ok else None,
                   "summary": r["summary"] if ok else None, "hn": {}, "title_words": _words(r["title"]),
-                  "first_seen_at": r["first_seen_at"], "images": image_sources(ctx, lead, [lead])}
+                  "first_seen_at": r["first_seen_at"], "images": image_sources(ctx, lead, [lead]), "parent_id": None}
         out.append(c)
     return out
 
@@ -227,6 +227,26 @@ def headline_vectors(db, embedder, cands, now, limit=60):
         for c in cs:
             c.headline_vec = v
     return len(todo)
+
+
+def suppress_duplicates(cands, threshold):
+    """One card per event across the whole edition: when two events' headlines are within T_join (a clustering
+    miss, e.g. a single-source ET Tech report of the Ring drone launch that four other outlets ran as one event),
+    only the better-covered one stays, in every tab. Without this the weaker copy can reach a tab the real event
+    doesn't qualify for. A follow-up and its parent are both kept: the follow-up is the new fact (spec 2.9)."""
+    order = sorted(cands, key=lambda c: (-c.n_publishers, -c.importance, c.published_at, c.id))
+    kept, dropped = [], []
+    for c in order:
+        v = c.headline_vec
+        twin = None if v is None else next(
+            (k for k in kept if k.headline_vec is not None and float(v @ k.headline_vec) >= threshold
+             and c.data.get("parent_id") != k.id and k.data.get("parent_id") != c.id), None)
+        if twin is None:
+            kept.append(c)
+        else:
+            dropped.append((c.id, twin.id))
+    keep = {c.id for c in kept}
+    return [c for c in cands if c.id in keep], dropped
 
 
 def title_duplicates(tabs):
@@ -296,6 +316,7 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
     live = [c for c in cands if any(rank.eligible(c, tab_specs[t], now) is None or t in c.pin for t in rank.TAB_ORDER)]
     live.sort(key=lambda c: -rank.cand_score(c, tab_specs["top"], now, degraded))
     headline_vectors(ctx.db, embedder, live, now)
+    live, twins = suppress_duplicates(live, ctx.cfg["cluster"]["t_join"])
     pictures = {}
     if image_store is not None:
         need_page = [c.data["lead"] for c in live[:120] if c.data["lead"]["og_image"] is None]
@@ -342,6 +363,7 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
     edition = {"publishedAt": iso(now), "articles": articles, "degraded": ctx.outage or False}
     report = {
         "degraded": ctx.outage, "candidates": len(cands), "held": held, "leftOut": left_out,
+        "duplicatesSuppressed": len(twins),
         "degradedCards": sum(not a["aiText"] for a in articles), "articles": len(articles),
         "tabs": {tid: _tab_report(ranked, now) for tid, ranked in tabs.items()},
         "filtered": stats, "topScores": [round(scores[c.id], 4) for c, _ in tabs["top"][:5]],

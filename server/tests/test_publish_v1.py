@@ -13,6 +13,7 @@ import shutil
 import subprocess
 from datetime import timedelta
 
+import numpy as np
 import pytest
 
 import test_cluster as tc
@@ -118,6 +119,26 @@ def test_top_headlines_are_pairwise_below_t_join(edition):
         vecs.append(embed.unpack_int8(HEADLINES[h]))
     worst = max((float(a @ b) for a, b in itertools.combinations(vecs, 2)), default=0)
     assert worst < T_JOIN, worst
+
+
+def test_a_weaker_copy_of_an_event_is_suppressed_everywhere():
+    """The live Ring case: four outlets' event (importance 5, not Top) and a single-source copy at 6 that the
+    clusterer missed. The copy must not reach Top in the event's place; a follow-up is never suppressed."""
+    now = tc.EDITION_AT
+    v = np.array([1.0, 0.0])
+    near = np.array([0.7, 0.714])
+
+    def c(eid, n, imp, vec, parent=None):
+        x = rank.Candidate(id=eid, importance=imp, type="launch", is_news=True, relevance=3, topics=["hardware"],
+                           region="global", n_publishers=n, on_techmeme=False, hn_points=0, authority=1.0,
+                           published_at=now, lead_source=eid, lead_publisher=eid, headline_vec=vec)
+        x.data = {"parent_id": parent}
+        return x
+    ring, copy, other = c("ev_ring", 4, 5, v), c("ev_copy", 1, 6, near), c("ev_x", 1, 6, np.array([0.0, 1.0]))
+    kept, dropped = publish_v1.suppress_duplicates([copy, ring, other], T_JOIN)
+    assert [k.id for k in kept] == ["ev_ring", "ev_x"] and dropped == [("ev_copy", "ev_ring")]
+    follow = c("ev_follow", 1, 9, near, parent="ev_ring")
+    assert len(publish_v1.suppress_duplicates([ring, follow], T_JOIN)[0]) == 2
 
 
 def test_one_card_for_the_ipo(replayed, edition):
