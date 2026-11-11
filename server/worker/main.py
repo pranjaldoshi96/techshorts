@@ -1,7 +1,7 @@
 """Techgist worker: one long-running loop with a 60 s tick (spec section 2.1).
 
-R1 so far: fetch (conditional GET) → prefilter → timestamps, with state in SQLite and health.json.
-Later stages (text, LLM, validation, clustering, ranking, v1 publish) plug in after `fetch_due`.
+R1 so far: fetch (conditional GET) → prefilter → timestamps → article text → LLM write → validate → entailment,
+with state in SQLite and health.json. Later stages (clustering, ranking, v1 publish) plug in after `write_pending`.
 
 Run from server/:
   python3 -m worker.main              # loop forever (the systemd service)
@@ -18,7 +18,7 @@ from datetime import timedelta
 
 import requests
 
-from . import config, fetch, health, sources as sources_mod
+from . import config, fetch, health, llm, sources as sources_mod
 from .db import DB, from_iso, utcnow
 
 log = logging.getLogger("techgist")
@@ -72,12 +72,23 @@ def maybe_check_sources(db, srcs, cfg):
              f"; failed {failed}" if failed else "")
 
 
-def tick(db, cfg, poll_all=False):
+def make_client(cfg):
+    key = llm.api_key()
+    if not cfg["llm"].get("model") or not key:
+        log.warning("no LLM model or NVIDIA_API_KEY; card writing is off")
+        return None
+    bucket = llm.TokenBucket(rate=cfg["llm"]["rate_per_min"], per=60.0)
+    return llm.Client(cfg["llm"]["base_url"], key, bucket, timeout=cfg["llm"]["timeout_s"])
+
+
+def tick(db, cfg, poll_all=False, client=None):
     # Reloaded every tick so a sources.yaml edit applies without a restart.
     srcs = sources_mod.load()
     maybe_check_sources(db, srcs, cfg)
     counts = fetch_due(db, srcs, cfg, poll_all)
-    # WP2+: article text → embed → LLM write → validate → cluster → rank → publish v1.
+    if client is not None:
+        counts.update({f"write_{k}": v for k, v in llm.write_pending(db, srcs, cfg, client).items()})
+    # WP3+: embed → cluster → rank → publish v1.
     health.write(db, srcs, config.state_path(cfg, "health.json"))
     db.commit()
     return counts
@@ -92,10 +103,11 @@ def main():
     cfg = config.load()
     db = DB(config.state_path(cfg, "state.db"))
     log.info("worker start, state in %s", cfg["state_dir"])
+    client = make_client(cfg)
     while True:
         started = time.monotonic()
         try:
-            counts = tick(db, cfg, args.all)
+            counts = tick(db, cfg, args.all, client)
             if counts:
                 log.info("tick: %s", dict(sorted(counts.items())))
         except Exception:

@@ -128,7 +128,9 @@ def parse_entries(body, source, limit):
             feed_published_at=_struct_to_dt(e.get("published_parsed") or e.get("updated_parsed")),
             text=text,
             image=_image(e),
-            extra=_signal_extra(source.id, e, summary_html) if source.is_signal else {},
+            # The byline names the writer for attribution prefixes on opinion pieces (attribution.py).
+            extra=_signal_extra(source.id, e, summary_html) if source.is_signal else (
+                {"author": plain(e.get("author"))} if e.get("author") else {}),
             tags=tuple(t.get("term") for t in e.get("tags") or () if t.get("term")),
         ))
     # Archive feeds (OpenAI lists 1,300+ posts) are not always newest-first; keep the newest `limit`.

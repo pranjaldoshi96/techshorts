@@ -22,13 +22,16 @@ The server is on a private network, so phones never connect to it. It only pushe
 
 `server/worker/` is the Python worker that replaces `publish.sh` and `enrich.py` at cutover (docs/V2_SPEC.md).
 So far it polls every source in `sources.yaml` with conditional GETs, applies the prefilter and timestamp rules,
-and keeps its state in SQLite. It doesn't publish anything yet. To try it beside the live publisher:
+extracts article text, and has the LLM classify each item and write its card (headline, 3-sentence summary,
+notification line), which is validated and entailment-checked before it's kept. State is in SQLite. It doesn't
+publish anything yet. To try it beside the live publisher:
 
 ```bash
 cd server && pip install --user -r requirements.txt
 python3 -m pytest -q tests                                   # unit tests, no network
 TECHGIST_STATE=~/.techshorts-r1 python3 tools/check_sources.py   # every feed must return 200 with items
 TECHGIST_STATE=~/.techshorts-r1 python3 -m worker.main --once     # one tick; drop --once to loop every 60 s
+python3 tools/replay_wp2.py --out ~/.techshorts-r1/replay-wp2.jsonl  # card writing over the 2026-11-11 fixture
 ```
 
 ## Your own stories and blocking

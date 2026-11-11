@@ -4,7 +4,7 @@ Times are stored as ISO-8601 UTC strings ("2026-11-11T03:30:00Z"), which sort co
 """
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sources (
@@ -65,7 +65,41 @@ CREATE TABLE IF NOT EXISTS polls (
 CREATE INDEX IF NOT EXISTS polls_at ON polls(at);
 
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+
+-- LLM triage + card text per item (WP2). status: ok (validated text), thin (classification only, text too short
+-- to lead), failed (last ladder run failed; the item is held or dropped in `items`).
+CREATE TABLE IF NOT EXISTS writes (
+  url_canonical TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  written_at TEXT NOT NULL,
+  model TEXT,
+  passed_at INTEGER,
+  reason TEXT,
+  text_origin TEXT,
+  text_words INTEGER,
+  text TEXT,
+  attribution TEXT,
+  type TEXT, is_news INTEGER, relevance INTEGER, importance INTEGER, breaking INTEGER, sensitive INTEGER,
+  region TEXT, topics TEXT, entities TEXT, event TEXT, material_update INTEGER,
+  headline TEXT, summary TEXT, summary_short TEXT, notif_line TEXT, s1 TEXT, s2 TEXT, s3 TEXT,
+  entailed INTEGER,
+  output TEXT,
+  steps TEXT
+);
+
+-- One row per LLM call (kind write|entail|triage) and per item outcome (kind item), for health.json.
+CREATE TABLE IF NOT EXISTS write_log (
+  at TEXT NOT NULL, url_canonical TEXT, kind TEXT NOT NULL, model TEXT, outcome TEXT, reason TEXT, ms INTEGER
+);
+CREATE INDEX IF NOT EXISTS write_log_at ON write_log(at);
 """
+
+# Columns added after a table first shipped; added in place so an existing state.db keeps working.
+MIGRATIONS = {"items": [("hold_reason", "TEXT")]}
+
+
+# Held items retry at +30 min and +2 h, then drop (spec 2.5 and 2.8).
+HOLD_RETRIES = (timedelta(minutes=30), timedelta(hours=2))
 
 
 def iso(dt):
@@ -87,6 +121,12 @@ class DB:
         # WAL lets check_sources and `sqlite3` readers look in while the worker writes.
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
+        for table, cols in MIGRATIONS.items():
+            have = {r["name"] for r in self.q(f"PRAGMA table_info({table})")}
+            for name, decl in cols:
+                if name not in have:
+                    self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+        self.conn.commit()
 
     def close(self):
         self.conn.close()
@@ -165,3 +205,66 @@ class DB:
 
     def set_meta(self, key, value):
         self.conn.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (key, value))
+
+    # Writing (WP2)
+
+    def pending_writes(self, now):
+        """Items waiting for text + LLM: new ones, and held ones whose retry time has come."""
+        return self.q("SELECT * FROM items WHERE status = 'new' OR (status = 'held' AND retry_at <= ?)", iso(now))
+
+    def hold(self, url_canonical, reason, now):
+        """Holds an item for a retry at +30 min, then +2 h; the third failure drops it. Never a permanent skip
+        on the first failure, so a page that was briefly down or a model hiccup gets another chance."""
+        row = self.item(url_canonical)
+        attempts = (row["attempts"] or 0) + 1
+        if attempts > len(HOLD_RETRIES):
+            self.conn.execute("UPDATE items SET status = 'dropped', drop_rule = ?, attempts = ?, retry_at = NULL,"
+                              " hold_reason = ? WHERE url_canonical = ?",
+                              (f"held_out:{reason}", attempts, reason, url_canonical))
+            return "dropped"
+        self.conn.execute("UPDATE items SET status = 'held', attempts = ?, retry_at = ?, hold_reason = ?"
+                          " WHERE url_canonical = ?",
+                          (attempts, iso(now + HOLD_RETRIES[attempts - 1]), reason, url_canonical))
+        return "held"
+
+    def mark_written(self, url_canonical):
+        self.conn.execute("UPDATE items SET status = 'written', retry_at = NULL, hold_reason = NULL"
+                          " WHERE url_canonical = ?", (url_canonical,))
+
+    def save_write(self, url_canonical, now, result, text, attribution):
+        o = result.output
+        row = dict(
+            url_canonical=url_canonical, status=result.status, written_at=iso(now), model=result.model,
+            passed_at=result.passed_at, reason=result.reason, text_origin=text.origin, text_words=text.words,
+            text=text.text, attribution=attribution.prefix if attribution else None,
+            entailed=None if result.entailed is None else int(result.entailed),
+            steps=json.dumps([s.__dict__ for s in result.steps]))
+        if o is not None:
+            row.update(
+                type=o.type, is_news=int(o.is_news), relevance=o.relevance, importance=o.importance,
+                breaking=int(o.breaking), sensitive=int(o.sensitive), region=o.region, topics=json.dumps(o.topics),
+                entities=o.entities.model_dump_json(), event=o.event, material_update=int(o.material_update),
+                output=o.model_dump_json())
+            if result.status == "ok":
+                row.update(headline=o.headline, summary=result.full, summary_short=result.short,
+                           notif_line=o.notif_line, s1=o.s1, s2=o.s2, s3=o.s3)
+        old = self.one("SELECT status FROM writes WHERE url_canonical = ?", url_canonical)
+        # A failed retry must not wipe an earlier thin item's classification.
+        if old is not None and o is None and old["status"] == "thin":
+            self.conn.execute("UPDATE writes SET written_at = ?, reason = ?, steps = ? WHERE url_canonical = ?",
+                              (row["written_at"], row["reason"], row["steps"], url_canonical))
+            return
+        cols = ", ".join(row)
+        self.conn.execute(f"INSERT OR REPLACE INTO writes ({cols}) VALUES ({', '.join('?' * len(row))})",
+                          tuple(row.values()))
+
+    def write_row(self, url_canonical):
+        return self.one("SELECT * FROM writes WHERE url_canonical = ?", url_canonical)
+
+    def log_write(self, at, url_canonical, kind, model, outcome, reason=None, ms=None):
+        self.conn.execute("INSERT INTO write_log VALUES (?,?,?,?,?,?,?)",
+                          (iso(at), url_canonical, kind, model, outcome, reason, ms))
+
+    def llm_calls_since(self, since):
+        return self.one("SELECT COUNT(*) n FROM write_log WHERE at >= ? AND kind != 'item'", iso(since))["n"]
+

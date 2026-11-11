@@ -23,7 +23,8 @@ DEFAULTS = {
         "failure_alert_after": 6,
     },
     "check_every_hours": 24,
-    "llm": {"base_url": "https://integrate.api.nvidia.com/v1", "model": None, "fallback_model": None, "daily_budget": 0},
+    "llm": {"base_url": "https://integrate.api.nvidia.com/v1", "model": None, "fallback_model": None, "daily_budget": 0,
+            "rate_per_min": 30, "concurrency": 6, "timeout_s": 30, "max_items_per_tick": 18},
     "embed": {"model": None},
 }
 

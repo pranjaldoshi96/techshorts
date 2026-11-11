@@ -3,3 +3,7 @@ feedparser>=6.0
 requests>=2.31
 PyYAML>=6.0
 pytest>=7.4
+pydantic>=2.0
+# Article text (spec 2.5). trafilatura 2.x needs lxml's html cleaner, which now ships separately.
+trafilatura>=1.12
+lxml_html_clean>=0.4

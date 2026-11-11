@@ -22,11 +22,21 @@ fetch:
 # check_sources runs at worker start and then every check_every_hours (the "nightly" check).
 check_every_hours: 24
 
-# Used from WP2 on; listed here so the endpoint can be swapped without code changes (section 2.1).
+# Any OpenAI-compatible endpoint can be swapped in here without code changes (section 2.1). Models checked against
+# the NVIDIA key on 2026-11-11: many listed models return 404/410, so test before changing one.
 llm:
   base_url: https://integrate.api.nvidia.com/v1
   model: nvidia/nemotron-3.5-lightning-30b-a3b
-  fallback_model: null
+  # Third rung of the retry ladder (section 2.8): a larger model gets one try after a failed feedback retry.
+  fallback_model: nvidia/nemotron-3-ultra-550b-a55b
+  # Chat calls (write + entailment + triage) per rolling 24 h; writing pauses past it.
   daily_budget: 3000
+  rate_per_min: 30
+  concurrency: 6
+  timeout_s: 30
+  # Caps one tick's LLM stage at about a minute of the rate limit, so polling isn't starved during a backlog.
+  max_items_per_tick: 18
 embed:
-  model: null
+  # The only embedding model that answered for this key (2048-d); nv-embedqa-e5-v5 and llama-3.2-nv-embedqa
+  # return 410. Used from WP3.
+  model: nvidia/nemotron-3.5-embed-1b

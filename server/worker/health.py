@@ -60,7 +60,44 @@ def build(db, srcs):
         "polls1h": {str(r["status"]): r["n"] for r in polls},
         "prefilter": {"window": "24h", "total": sum(counts.values()), "byRule": counts},
         "items": {r["status"]: r["n"] for r in db.q("SELECT status, COUNT(*) n FROM items GROUP BY status")},
+        "llm": llm_stats(db, now - timedelta(hours=24)),
+        "validation": validation_stats(db, now - timedelta(hours=24)),
     }
+
+
+def _pct(sorted_values, p):
+    return sorted_values[min(len(sorted_values) - 1, int(p * len(sorted_values)))] if sorted_values else None
+
+
+def llm_stats(db, since):
+    rows = db.q("SELECT kind, model, outcome, ms FROM write_log WHERE at >= ? AND kind != 'item'", iso(since))
+    ok_ms = sorted(r["ms"] for r in rows if r["outcome"] == "ok" and r["ms"] is not None)
+    by_model = {}
+    for r in rows:
+        by_model[r["model"]] = by_model.get(r["model"], 0) + 1
+    return {
+        "window": "24h", "calls": len(rows), "byKind": _count(rows, "kind"), "byModel": by_model,
+        "http429": sum(r["outcome"] == "http_429" for r in rows),
+        "errors": sum(r["outcome"] not in ("ok", "http_429") for r in rows),
+        "p50ms": _pct(ok_ms, 0.5), "p95ms": _pct(ok_ms, 0.95),
+    }
+
+
+def validation_stats(db, since):
+    """Pass rate over items with enough text; thin (no_text) items are counted separately as skips."""
+    rows = db.q("SELECT outcome, reason FROM write_log WHERE at >= ? AND kind = 'item'", iso(since))
+    ok = sum(r["outcome"] == "ok" for r in rows)
+    failed = sum(r["outcome"] == "failed" for r in rows)
+    skips = _count([r for r in rows if r["outcome"] != "ok"], "reason")
+    return {"window": "24h", "passed": ok, "failed": failed, "thin": sum(r["outcome"] == "thin" for r in rows),
+            "passRate": round(ok / (ok + failed), 3) if ok + failed else None, "skipReasons": skips}
+
+
+def _count(rows, key):
+    out = {}
+    for r in rows:
+        out[r[key]] = out.get(r[key], 0) + 1
+    return out
 
 
 def write(db, srcs, path):
