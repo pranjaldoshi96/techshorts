@@ -147,7 +147,9 @@ def eligible(c, tab, now):
         return "topic"
     if tab.id == "india" and not (c.region == "in" or "india" in topics):
         return "topic"
-    if tab.id == "dev" and not topics & {"dev_tools", "security"}:
+    # Dev is developer news: dev tools, or a real security incident (the LLM also tags "security" for national or
+    # physical safety stories, which don't belong here).
+    if tab.id == "dev" and not ("dev_tools" in topics or ("security" in topics and c.type == "security_incident")):
         return "topic"
     if tab.id == "reads" and not c.lead_reads:
         return "not_reads"

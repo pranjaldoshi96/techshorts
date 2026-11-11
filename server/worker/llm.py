@@ -278,7 +278,9 @@ minor updates. Calibration examples:
 - breaking: true only for sudden, just-happened news of importance 8 or more.
 - sensitive: true when the story involves crime, espionage, sexual conduct, lawsuits, or allegations against a \
 named person.
-- topics: any of ai, startups_funding, bigtech, dev_tools, security, policy, hardware, india, science, consumer.
+- topics: any of ai, startups_funding, bigtech, dev_tools, security, policy, hardware, india, science, consumer. \
+"security" means software and cyber security only (vulnerabilities, breaches, malware); not national, military, \
+physical or child safety. "dev_tools" means things developers build with (languages, frameworks, APIs, coding tools).
 - region: "us" only for US-only policy, US local news or US-market consumer news. Anything about a global company \
 or product is "global" (an Anthropic IPO, CoreWeave earnings and an Nvidia probe are all global). "in" for \
 India-market companies, Indian policy or Indian funding.

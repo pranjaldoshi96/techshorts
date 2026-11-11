@@ -28,12 +28,13 @@ llm:
   base_url: https://integrate.api.nvidia.com/v1
   model: nvidia/nemotron-3.5-lightning-30b-a3b
   # Third rung of the retry ladder (section 2.8): a larger model gets one try after a failed feedback retry.
-  fallback_model: nvidia/nemotron-3-ultra-550b-a55b
+  # Off: on 2026-11-11 nemotron-3-ultra-550b-a55b answered 28 of 132 calls (503s and timeouts) and made ticks slow.
+  fallback_model: null
   # Chat calls (write + entailment + triage) per rolling 24 h; writing pauses past it.
   daily_budget: 3000
   rate_per_min: 30
   concurrency: 6
-  timeout_s: 30
+  timeout_s: 45
   # Caps one tick's LLM stage at about a minute of the rate limit, so polling isn't starved during a backlog.
   max_items_per_tick: 18
 embed:
@@ -77,7 +78,8 @@ publish:
 # overridden per tab here, e.g. `tabs: {reads: {min_importance: 4}}`. Note: the LLM rates essays 4 (the 2.6
 # anchors put strong analysis at 4-5), so with the spec's Reads minimum of 5, Reads (1.2's Blogs tab) is nearly
 # empty; that is the lead's call, so the spec value stands until changed here.
-tabs: {}
+# Reads at 4: with the spec's 5 the Blogs tab was empty in the shadow run (essays are rated 4).
+tabs: {reads: {min_importance: 4}}
 images:
   # Source pictures downloaded per tick (best-ranked events first); the rest get theirs on later ticks.
   max_downloads_per_tick: 60
