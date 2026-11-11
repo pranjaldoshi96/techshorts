@@ -203,6 +203,14 @@ def test_select_labels_analysis_but_not_attributed_opinion():
     assert o.headline == "Opinion: Home batteries win"
 
 
+def test_select_adds_the_attribution_prefix():
+    attr = attribution.Attribution("Cramer", "Jim Cramer", "cramer")
+    o = validate.select(out(DAYLIGHT, type="opinion", headline="Wall Street is too gloomy, Jim Cramer says"), attr)
+    assert o.headline == "Cramer: Wall Street is too gloomy"
+    o = validate.select(out(DAYLIGHT, type="opinion", headline="Cramer: Wall Street is too gloomy"), attr)
+    assert o.headline == "Cramer: Wall Street is too gloomy"
+
+
 def test_prompt_lists_the_sources_hedges():
     msgs = llm.build_messages(ITEM, "Example News", HUANG_SRC)
     assert "suspected Chinese spy" in msgs[1]["content"].split("Hedged claims in this text")[1]

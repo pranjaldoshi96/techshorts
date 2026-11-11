@@ -283,11 +283,11 @@ development of one (then "followup:<id>"). material_update: true when it adds a 
 Writing:
 - headline: 50 to 70 characters. Fact-first, sentence case, active voice, present tense. The subject is the \
 company or person. Numbers as digits ($80M, $1.4T, 3x). No question, teaser, emoji or final period.
-- s1 (16 to 21 words): who did what, with the key number.
-- s2 (14 to 20 words): the most important detail or context. S1 and S2 together stand alone as a summary.
-- s3 (13 to 19 words): the concrete consequence for builders, investors or operators.
+- s1 (18 to 22 words): who did what, with the key number.
+- s2 (16 to 20 words): the most important detail or context. S1 and S2 together stand alone as a summary.
+- s3 (15 to 19 words): the concrete consequence for builders, investors or operators.
 - Each fact once across the three sentences.
-- Also give a shorter version of each: headline_alt (at most 55 characters), and s1_alt, s2_alt, s3_alt (10 to 13 \
+- Also give a shorter version of each: headline_alt (at most 55 characters), and s1_alt, s2_alt, s3_alt (11 to 14 \
 words each, same facts, still complete sentences). Techgist picks the versions that fit the card.
 - notif_line: one complete sentence of at most 12 words (under 90 characters), with new information that is \
 not in the headline.
@@ -300,7 +300,7 @@ Length example only (its facts are invented; never reuse them):
 largest parcel carriers.",
  "s2_alt": "Its swappable packs power electric delivery vans for two large parcel carriers.",
  "s3": "Fleet operators get a cheaper way to electrify vans without waiting hours for each vehicle to recharge.",
- "s3_alt": "Fleet operators can electrify vans without long charging stops.",
+ "s3_alt": "Fleet operators can electrify their vans without waiting for long charging stops.",
  "notif_line": "Acme already supplies two of Germany's largest parcel carriers."}
 
 Accuracy:

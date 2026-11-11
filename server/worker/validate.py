@@ -126,6 +126,11 @@ def select(out, attribution=None):
     # model's job instead, since the claims must be rewritten as that person's view.
     if attribution is None and out.type in LABELLED_TYPES and not any(PREFIX.match(h) for h in candidates):
         candidates = [f"{out.type.capitalize()}: {h}" for h in candidates]
+    elif attribution is not None and not any(attribution_mod.has_prefix(h, attribution) for h in candidates):
+        # The item is this person's opinion whatever the model wrote, so the prefix is a fact about the source;
+        # ", Cramer says" endings become the prefix instead of doubling it.
+        says = re.compile(rf",?\s+(?:{re.escape(attribution.full)}|{re.escape(attribution.name)})\s+(?:says|argues|warns)$")
+        candidates = [f"{attribution.prefix} {says.sub('', h)}" for h in candidates]
     fitting = [h for h in candidates if len(h) <= HEADLINE_MAX]
     out.headline = fitting[0] if fitting else candidates[0] if candidates else out.headline
     return out
