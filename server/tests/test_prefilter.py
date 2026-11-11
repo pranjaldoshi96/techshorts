@@ -11,6 +11,7 @@ ARTICLE = "https://example.com/2026/11/story/"
     ("What is the average lifespan of recordable Blu-ray discs?", "title_question"),
     ("Why your Roku might be plugged into the wrong HDMI port", "title_question"),
     ("Huupe Mini 2 Review", "title_review"),
+    ("Huupe Mini 2 Review: More Game Than It Can Handle", "title_review"),  # the live Wired title
     ("Fragments: November 10", "title_fragments"),
     ("Quoting Nilay Patel", "title_quoting"),
     ("The Pragmatic Summit 2027", "title_summit"),
@@ -67,6 +68,8 @@ def test_keeps_news(title):
     ("https://example.com/partner-content/acme", "url_partner-content"),
     ("https://example.com/podcast/ep-12", "url_podcast"),
     ("https://inc42.com/events/fast42", "url_events"),
+    ("https://www.wired.com/review/huupe-mini-2/", "url_review"),
+    ("https://example.com/reviews/pixel-11", "url_reviews"),
     ("https://example.com/podcast", "url_podcast"),
     ("https://example.com/tech/black-friday-deal-sale-2026", "v1_path"),
 ])

@@ -2,17 +2,18 @@
 
 Bare "deal", "sale" and "review" are deliberately not title rules: "Microsoft closes $69B Activision deal",
 "US bans Nvidia chip sale to China" and "FTC opens antitrust review of OpenAI" are news. Product reviews are
-removed later by the LLM `type`.
+removed later by the LLM `type`. "Review:" mid-title ("Huupe Mini 2 Review: More Game...") and
+/review/ URL segments (Wired) are safe signals, though.
 """
 import re
 from urllib.parse import urlsplit
 
 URL_PATHS = ("/deals/", "/coupons/", "/shopping/", "/gift-guide/", "/sponsored/", "/insights/", "/brandstory/",
-             "/partner-content/", "/podcast/", "/events/")
+             "/partner-content/", "/podcast/", "/events/", "/review/", "/reviews/")
 
 TITLE_RULES = [
     ("title_question", r"^(what|why|how|when) (is|are|your|to|you|do|does)\b"),
-    ("title_review", r"(^review:|\breview$|:\s*review\b)"),
+    ("title_review", r"(^review:|\breview$|\breview:|:\s*review\b)"),
     ("title_fragments", r"^fragments:"),
     ("title_quoting", r"^quoting "),
     ("title_shopping", r"\b(discounted|% off|save \$|best price|lowest price|promo code|coupon)\b"),
