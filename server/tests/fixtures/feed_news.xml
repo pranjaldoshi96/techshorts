@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+<channel>
+<title>Example Tech</title>
+<item>
+  <title>Gilbert + Tobin rethinks the business of law with AI</title>
+  <link>https://example.com/2026/11/gilbert-tobin?utm_source=rss&amp;utm_medium=feed</link>
+  <pubDate>Thu, 12 Nov 2026 00:00:00 GMT</pubDate>
+  <description>&lt;p&gt;A law firm adopts AI.&lt;/p&gt;</description>
+  <media:content url="https://example.com/img/gt.jpg" medium="image" width="1200"/>
+</item>
+<item>
+  <title>Stratechery: the IPO, considered</title>
+  <link>https://example.com/2026/11/ipo-considered/</link>
+  <pubDate>Fri, 06 Nov 2026 03:30:00 GMT</pubDate>
+  <description>Five days old.</description>
+</item>
+<item>
+  <title>An old post nobody needs</title>
+  <link>https://example.com/2026/10/old-post/</link>
+  <pubDate>Wed, 21 Oct 2026 10:00:00 GMT</pubDate>
+  <description>Twenty days old.</description>
+</item>
+<item>
+  <title>Undated launch post</title>
+  <link>https://example.com/2026/11/undated/amp/</link>
+  <description>No date at all.</description>
+</item>
+<item>
+  <title>What is the average lifespan of recordable Blu-ray discs?</title>
+  <link>https://example.com/2026/11/blu-ray/</link>
+  <pubDate>Wed, 11 Nov 2026 01:00:00 GMT</pubDate>
+</item>
+<item>
+  <title>Our favourite headphones, now cheaper</title>
+  <link>https://example.com/deals/headphones/</link>
+  <pubDate>Wed, 11 Nov 2026 01:00:00 GMT</pubDate>
+</item>
+<item>
+  <title>Microsoft closes $69B Activision deal</title>
+  <link>https://example.com/2026/11/activision/</link>
+  <pubDate>Wed, 11 Nov 2026 02:00:00 GMT</pubDate>
+</item>
+</channel>
+</rss>

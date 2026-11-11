@@ -1,0 +1,8 @@
+# Sends an ntfy alert when the unit named by %i fails (OnFailure= in techgist-worker.service).
+[Unit]
+Description=Techgist alert for %i
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.techshorts/env
+ExecStart=/bin/sh -c 'if [ -n "$NTFY_TOPIC" ]; then curl -s -m 10 -H "Title: Techgist: %i failed" -d "%i failed on $(hostname); see journalctl --user -u %i" "https://ntfy.sh/$NTFY_TOPIC"; else echo "%i failed (NTFY_TOPIC unset)"; fi'

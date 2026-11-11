@@ -18,6 +18,19 @@ article pages, so phones don't have to.
 
 The server is on a private network, so phones never connect to it. It only pushes the finished file to GitHub, which serves it.
 
+## R1 worker (in development, not live yet)
+
+`server/worker/` is the Python worker that replaces `publish.sh` and `enrich.py` at cutover (docs/V2_SPEC.md).
+So far it polls every source in `sources.yaml` with conditional GETs, applies the prefilter and timestamp rules,
+and keeps its state in SQLite. It doesn't publish anything yet. To try it beside the live publisher:
+
+```bash
+cd server && pip install --user -r requirements.txt
+python3 -m pytest -q tests                                   # unit tests, no network
+TECHGIST_STATE=~/.techshorts-r1 python3 tools/check_sources.py   # every feed must return 200 with items
+TECHGIST_STATE=~/.techshorts-r1 python3 -m worker.main --once     # one tick; drop --once to loop every 60 s
+```
+
 ## Your own stories and blocking
 
 Create `~/.techshorts/editorial.json` on the server (see `editorial.example.json`):

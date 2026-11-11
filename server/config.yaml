@@ -1,0 +1,32 @@
+# Techgist worker settings (docs/V2_SPEC.md section 2). Sources live in sources.yaml.
+# TECHGIST_STATE overrides state_dir, so a test copy can run beside the live publisher.
+state_dir: ~/.techshorts
+tick_seconds: 60
+
+fetch:
+  timeout_s: 15
+  parallel: 8
+  # Generic, honest UA; feeds that refuse it are left out rather than spoofed.
+  user_agent: "Mozilla/5.0 (compatible; TechgistBot/1.0; +https://pranjaldoshi96.github.io/apps/techgist/)"
+  # Archive feeds (OpenAI, Hugging Face) list 1,000+ posts; only the newest matter.
+  max_items_per_feed: 100
+  # Ignored at first sight when older than the longest tab window the item could reach:
+  # Dev is 7 d for news, Reads is 14 d for `reads` sources (section 2.12).
+  max_age_days: 7
+  max_age_days_reads: 14
+  # A source's first poll marks older items as seen, so a new source doesn't flood the LLM.
+  first_run_skip_hours: 36
+  # ntfy alert after this many failed polls in a row (section 7).
+  failure_alert_after: 6
+
+# check_sources runs at worker start and then every check_every_hours (the "nightly" check).
+check_every_hours: 24
+
+# Used from WP2 on; listed here so the endpoint can be swapped without code changes (section 2.1).
+llm:
+  base_url: https://integrate.api.nvidia.com/v1
+  model: nvidia/nemotron-3.5-lightning-30b-a3b
+  fallback_model: null
+  daily_budget: 3000
+embed:
+  model: null

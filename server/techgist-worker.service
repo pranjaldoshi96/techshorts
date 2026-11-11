@@ -1,0 +1,23 @@
+# systemd user unit for the Techgist worker (spec 2.1). Install (owner, at cutover):
+#   cp techgist-worker.service techgist-alert@.service ~/.config/systemd/user/
+#   loginctl enable-linger $USER && systemctl --user daemon-reload && systemctl --user enable --now techgist-worker
+# NVIDIA_API_KEY and NTFY_TOPIC come from ~/.techshorts/env (KEY=value lines, chmod 600).
+[Unit]
+Description=Techgist worker (fetch, write, rank, publish)
+After=network-online.target
+Wants=network-online.target
+OnFailure=techgist-alert@%n.service
+# Restart forever, but if it crash-loops (5 starts in 10 min) give up so OnFailure alerts the owner.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/TechShorts/server
+EnvironmentFile=-%h/.techshorts/env
+ExecStart=/usr/bin/python3 -m worker.main
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

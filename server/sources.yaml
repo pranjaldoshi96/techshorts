@@ -1,0 +1,76 @@
+# The single source list (docs/V2_SPEC.md section 2.2). Every URL here returned 200 with items from the
+# server on 2026-11-11 using the worker's generic UA; tools/check_sources.py re-checks them at start and daily,
+# and a source that fails it loses tier-1 status until it passes again.
+#
+# Fields: id, name, v1_name (exact 1.2 FeedSource name, or `name` for new sources), url,
+# tier (1 | 2 | signal), authority (0.5-1.2), reads, region (in | us | global), poll (3m | 10m),
+# fetch_page, images (source | generated). Optional: include_tags (keep only entries with one of these
+# feed categories, for site-wide feeds).
+#
+# Left out because they fail from the server today: Moneycontrol Tech (403 to a non-browser UA),
+# ETtech's own site (tech.economictimes.indiatimes.com times out; the ET Tech section feed below works),
+# Anthropic's site (no RSS; a community-built mirror is used instead).
+
+defaults:
+  tier: 2
+  authority: 1.0
+  reads: false
+  region: global
+  poll: 10m
+  fetch_page: true
+  images: source
+
+domain_blocklist: []
+
+sources:
+  # News, 3 min poll, tier-1 for global/us.
+  - {id: techcrunch, name: TechCrunch, v1_name: TechCrunch, url: "https://techcrunch.com/feed/", tier: 1, authority: 1.2, poll: 3m}
+  # Shares links with the main feed; same publisher, so it keeps the 1.2 name for per-source toggles.
+  - {id: techcrunch_ai, name: TechCrunch AI, v1_name: TechCrunch, url: "https://techcrunch.com/category/artificial-intelligence/feed/", tier: 1, authority: 1.2, poll: 3m}
+  - {id: verge, name: The Verge, v1_name: The Verge, url: "https://www.theverge.com/rss/index.xml", tier: 1, authority: 1.1, poll: 3m}
+  - {id: cnbc, name: CNBC Tech, v1_name: CNBC Tech, url: "https://www.cnbc.com/id/19854910/device/rss/rss.html", tier: 1, authority: 1.1, poll: 3m}
+  - {id: bbc, name: BBC Technology, v1_name: BBC Technology, url: "https://feeds.bbci.co.uk/news/technology/rss.xml", tier: 1, authority: 1.1, poll: 3m}
+  - {id: nyt, name: New York Times, v1_name: New York Times, url: "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml", tier: 1, authority: 1.1, poll: 3m, fetch_page: false}
+  - {id: guardian, name: The Guardian, v1_name: The Guardian, url: "https://www.theguardian.com/uk/technology/rss", tier: 1, authority: 1.1, poll: 3m}
+
+  # News, 10 min poll.
+  - {id: ars, name: Ars Technica, v1_name: Ars Technica, url: "https://feeds.arstechnica.com/arstechnica/index"}
+  - {id: wired, name: Wired, v1_name: Wired, url: "https://www.wired.com/feed/rss"}
+  - {id: engadget, name: Engadget, v1_name: Engadget, url: "https://www.engadget.com/rss.xml", authority: 0.8}
+  - {id: decoder, name: The Decoder, v1_name: The Decoder, url: "https://the-decoder.com/feed/"}
+  - {id: mittr_ai, name: MIT Tech Review, v1_name: MIT Tech Review, url: "https://www.technologyreview.com/topic/artificial-intelligence/feed"}
+  # Semafor has no tech-only feed; the site feed is filtered to its Technology category.
+  - {id: semafor, name: Semafor Tech, v1_name: Semafor Tech, url: "https://www.semafor.com/rss.xml", include_tags: [Technology]}
+  - {id: 404media, name: 404 Media, v1_name: 404 Media, url: "https://www.404media.co/rss/"}
+  - {id: platformer, name: Platformer, v1_name: Platformer, url: "https://www.platformer.news/rss/"}
+
+  # India, 3 min poll, tier-1 for region=in (ET Tech, Inc42; Moneycontrol is unavailable, see top).
+  - {id: ettech, name: ET Tech, v1_name: ET Tech, url: "https://economictimes.indiatimes.com/tech/rssfeeds/13357270.cms", tier: 1, region: in, poll: 3m}
+  - {id: inc42, name: Inc42, v1_name: Inc42, url: "https://inc42.com/feed/", tier: 1, region: in, poll: 3m}
+  - {id: yourstory, name: YourStory, v1_name: YourStory, url: "https://yourstory.com/feed", region: in, poll: 3m}
+  - {id: entrackr, name: Entrackr, v1_name: Entrackr, url: "https://entrackr.com/rss", region: in, poll: 3m}
+  - {id: medianama, name: MediaNama, v1_name: MediaNama, url: "https://www.medianama.com/feed/", region: in, poll: 3m, authority: 0.9}
+
+  # Lab and company blogs, 10 min poll.
+  - {id: openai, name: OpenAI, v1_name: OpenAI, url: "https://openai.com/news/rss.xml"}
+  - {id: google_ai, name: Google AI, v1_name: Google AI, url: "https://blog.google/technology/ai/rss/"}
+  # Community-built feed of anthropic.com/news (github.com/Olshansk/rss-feeds); Anthropic publishes none.
+  - {id: anthropic, name: Anthropic, v1_name: Anthropic, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_news.xml"}
+  - {id: huggingface, name: Hugging Face, v1_name: Hugging Face, url: "https://huggingface.co/blog/feed.xml"}
+  - {id: github, name: GitHub Blog, v1_name: GitHub Blog, url: "https://github.blog/feed/"}
+  - {id: cloudflare, name: Cloudflare, v1_name: Cloudflare, url: "https://blog.cloudflare.com/rss/"}
+
+  # Reads, 10 min poll.
+  - {id: stratechery, name: Stratechery, v1_name: Stratechery, url: "https://stratechery.com/feed/", reads: true, authority: 0.9, fetch_page: false}
+  - {id: simonw, name: Simon Willison, v1_name: Simon Willison, url: "https://simonwillison.net/atom/everything/", reads: true, authority: 0.9}
+  - {id: pragmatic, name: Pragmatic Engineer, v1_name: Pragmatic Engineer, url: "https://newsletter.pragmaticengineer.com/feed", reads: true, authority: 0.9}
+  - {id: lenny, name: Lenny's Newsletter, v1_name: Lenny's Newsletter, url: "https://www.lennysnewsletter.com/feed", reads: true, authority: 0.9}
+  - {id: latent_space, name: Latent Space, v1_name: Latent Space, url: "https://www.latent.space/feed", reads: true, authority: 0.9}
+  - {id: fowler, name: Martin Fowler, v1_name: Martin Fowler, url: "https://martinfowler.com/feed.atom", reads: true, authority: 0.9}
+  - {id: jvns, name: Julia Evans, v1_name: Julia Evans, url: "https://jvns.ca/atom.xml", reads: true, authority: 0.9}
+
+  # Signal, 3 min poll. They attach to events (section 2.9) and never lead on their own in R1.
+  - {id: techmeme, name: Techmeme, v1_name: Techmeme, url: "https://www.techmeme.com/feed.xml", tier: signal, authority: 0.8, poll: 3m, fetch_page: false}
+  - {id: hn, name: Hacker News, v1_name: Hacker News, url: "https://hnrss.org/frontpage", tier: signal, authority: 0.8, poll: 3m, fetch_page: false}
+  - {id: hn_100, name: Hacker News, v1_name: Hacker News, url: "https://hnrss.org/newest?points=100", tier: signal, authority: 0.8, poll: 3m, fetch_page: false}
+  - {id: the_information, name: The Information, v1_name: The Information, url: "https://www.theinformation.com/feed", tier: signal, authority: 0.8, poll: 3m, fetch_page: false}

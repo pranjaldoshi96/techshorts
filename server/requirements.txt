@@ -1,0 +1,5 @@
+# Worker dependencies (Python 3.10+). Install on the box with: pip install --user -r requirements.txt
+feedparser>=6.0
+requests>=2.31
+PyYAML>=6.0
+pytest>=7.4

@@ -10,3 +10,7 @@ xcuserdata/
 
 # Node (web prototype)
 node_modules/
+
+# Python
+__pycache__/
+.pytest_cache/
