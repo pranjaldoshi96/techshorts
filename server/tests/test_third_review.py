@@ -694,3 +694,39 @@ def test_a_title_with_no_report_under_it_is_not_written_as_a_card():
     calls = len(client.calls)
     llm.write_pending(db, _sources(), WRITE_CFG, client, fetch_text=fetch_text, now=now + timedelta(minutes=31))
     assert len(client.calls) == calls                               # the same short text is not written again
+
+
+# 9. Generated pictures: no two cards share one
+
+def test_cards_without_a_photo_each_get_their_own_generated_picture(tmp_path):
+    """Twelve cards of the review edition shared two generated pictures (one per topic)."""
+    from PIL import Image
+    names = {images.generated(str(tmp_path), "ai", k) for k in range(images.GEN_VARIANTS)}
+    assert len(names) == images.GEN_VARIANTS == 24
+    looks = {Image.open(tmp_path / "img" / f"{n}_std.jpg").tobytes() for n in names}
+    assert len(looks) == images.GEN_VARIANTS                    # 24 different pictures, not 24 names for one
+    assert images.generated(str(tmp_path), "no_such_topic", 30) == "gen_default_06"
+    # A card keeps its own look from publish to publish, and yields only when another card already shows it.
+    k = images.pick_variant("ev_a", {})
+    assert images.pick_variant("ev_a", {}) == k and images.pick_variant("ev_a", {k: 1}) != k
+    assert images.pick_variant("ev_a", {i: 1 for i in range(24) if i != 5}) == 5
+
+    db = _db()
+    items = [_item(f"https://site{i}.test/story", [1, 0.01 * i, 0], f"Lab{i} ships model{i} for task{i} at price{i}", people=(),
+                   source_id=s, pub=NOW - timedelta(minutes=10 * i), imp=7, spice=7)
+             for i, s in enumerate(("verge", "cnbc", "bbc", "guardian", "ars", "wired", "engadget", "decoder",
+                                    "register", "axios", "fortune", "gizmodo", "futurism", "electrek"))]
+    for it in items:
+        it.topics = ["ai"]
+    _written(db, items)
+    db.conn.execute("UPDATE items SET og_image = ''")           # looked, none found: every card needs a picture
+    store = cluster.Store(db, SRCS, S, NOW)
+    for it in items:
+        eid, _ = cluster.create(store, it)
+        cluster.refresh(store, store.events[eid], lambda s: True)
+    ctx = publish_v1.Ctx(db, {**CTX_CFG, "publish": {"base_url": "https://cdn.test/"}}, SRCS, NOW)
+    edition = publish_v1.build(ctx, None, str(tmp_path))[0]
+    pictures = [a["image"] for a in edition["articles"]]
+    assert len(pictures) == len(items) and len(set(pictures)) == len(pictures)
+    assert all("/img/gen_ai_" in p for p in pictures)
+    assert publish_v1.build(ctx, None, str(tmp_path))[0]["articles"] == edition["articles"]      # and stable

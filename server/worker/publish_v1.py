@@ -703,6 +703,7 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
     by_id = {c.id: c for ranked in tabs.values() for c, _ in ranked}
     scores = {c.id: s for c, s in tabs["top"]}
     articles, used_images, left_out = [], set(), 0
+    gen_taken = {}          # topic -> {variant: cards showing it}, so no two cards share a generated picture
     order = [c.id for c, _ in tabs["top"]] + [eid for eid in by_id if eid not in top_rank]
     for eid in order:
         c = by_id[eid]
@@ -713,7 +714,16 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
         image_url = None
         if out_dir is not None:
             row = pictures.get(eid)
-            name = row["sha8"] if row else images_mod.generated(out_dir, (c.topics or ["default"])[0])
+            if row:
+                name = row["sha8"]
+            else:
+                # In rank order (Top first, then each tab), each card takes a look no earlier card of its topic
+                # has: with 24 looks a topic, the first screen of any tab never shows one twice.
+                topic = (c.topics or ["default"])[0]
+                taken = gen_taken.setdefault(topic if topic in images_mod.TOPIC_COLORS else "default", {})
+                k = images_mod.pick_variant(eid, taken)
+                taken[k] = taken.get(k, 0) + 1
+                name = images_mod.generated(out_dir, topic, k)
             used_images.add(name)
             image_url = f"{base}img/{name}_std.jpg"
         articles.append(article(c, cat, top_rank.get(eid), image_url))
