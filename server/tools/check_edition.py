@@ -104,7 +104,9 @@ def decoder_path(cfg):
     os.makedirs(bindir, exist_ok=True)
     files = [os.path.join(SWIFT_DIR, f) for f in SWIFT_FILES]
     if shutil.which("swiftc"):
-        cmd = ["swiftc", "-O", "-swift-version", "5", "-o", binary, *files]
+        # On Linux link the stdlib in, so the binary runs for a service user with no toolchain on its PATH.
+        static = ["-static-stdlib"] if sys.platform.startswith("linux") else []
+        cmd = ["swiftc", "-O", "-swift-version", "5", *static, "-o", binary, *files]
     elif shutil.which("docker"):
         cmd = ["docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/tmp",
                "-v", f"{SWIFT_DIR}:/src:ro", "-v", f"{bindir}:/out", "-w", "/src", SWIFT_IMAGE,

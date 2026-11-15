@@ -1,0 +1,36 @@
+# System unit for the Techgist worker on the public VPS (deploy/README.md). Installed by deploy/setup_vps.sh as
+# /etc/systemd/system/techgist-worker.service. The user unit one directory up is for the old private box.
+[Unit]
+Description=Techgist worker (fetch, write, rank, publish)
+After=network-online.target
+Wants=network-online.target
+OnFailure=techgist-alert@%n.service
+# Restart forever, but if it crash-loops (5 starts in 10 min) give up so OnFailure alerts the owner.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=techgist
+Group=techgist
+WorkingDirectory=/opt/techgist
+Environment=TECHGIST_STATE=/var/lib/techgist
+Environment=PYTHONUNBUFFERED=1
+# The key is read from the file at start; it is never in the environment, the unit or the journal.
+Environment=NVIDIA_API_KEY_FILE=/etc/techgist/nvidia_key
+# Optional NTFY_TOPIC=... (root:techgist, mode 640).
+EnvironmentFile=-/etc/techgist/env
+ExecStart=/opt/techgist/venv/bin/python -m worker.main --out /var/lib/techgist/edition
+Restart=always
+RestartSec=10
+# The worker only needs its state directory, outbound HTTPS and the key files.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/lib/techgist
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

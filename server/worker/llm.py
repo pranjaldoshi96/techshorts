@@ -34,7 +34,15 @@ TOPICS = ("ai", "startups_funding", "bigtech", "dev_tools", "security", "policy"
 
 
 def api_key():
+    """NVIDIA_API_KEY, else the file named by NVIDIA_API_KEY_FILE (a root-owned file the service's group can read, so
+    the key never sits in a unit file or the journal), else the last export in ~/.bashrc."""
     key = os.environ.get("NVIDIA_API_KEY")
+    path = os.environ.get("NVIDIA_API_KEY_FILE")
+    if not key and path:
+        try:
+            key = open(path).read().strip() or None
+        except OSError as e:
+            log.error("cannot read NVIDIA_API_KEY_FILE: %s", e.strerror)
     if not key:  # systemd and cron don't load ~/.bashrc; take the last export there
         try:
             lines = [l for l in open(os.path.expanduser("~/.bashrc")) if l.startswith("export NVIDIA_API_KEY=")]
