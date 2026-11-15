@@ -57,6 +57,13 @@ def max_age(source, cfg):
     return timedelta(days=min(days, 14))
 
 
+def seed_horizon(source, cfg):
+    """How old an item may be at a source's first poll and still be written."""
+    if source.seed_days:
+        return min(timedelta(days=float(source.seed_days)), max_age(source, cfg))
+    return timedelta(hours=cfg["fetch"]["first_run_skip_hours"])
+
+
 def is_stale(published_at, now, source, cfg):
     return now - published_at > max_age(source, cfg)
 
@@ -258,9 +265,9 @@ def classify(entry, source, sources, now, first_seen, first_run, cfg):
     published = resolve_published(entry.feed_published_at, first_seen)
     if is_stale(published, now, source, cfg):
         return "stale", None, published
-    # On a source's first poll, anything older than 36 h (or undated, so of unknown age) already existed.
-    if first_run and (entry.feed_published_at is None
-                      or now - published > timedelta(hours=cfg["fetch"]["first_run_skip_hours"])):
+    # On a source's first poll, anything older than 36 h (or undated, so of unknown age) already existed. A source
+    # may reach further back (seed_days), capped at the age limit above.
+    if first_run and (entry.feed_published_at is None or now - published > seed_horizon(source, cfg)):
         return "seen", None, published
     if sources.blocked(entry.url):
         return "dropped", "domain_blocklist", published

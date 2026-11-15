@@ -6,7 +6,8 @@
 # tier (1 | 2 | signal), authority (0.5-1.2), reads, region (in | us | global), poll (3m | 10m),
 # fetch_page, images (source | generated). Optional: include_tags (keep only entries with one of these
 # feed categories, for site-wide feeds); format (rss | hn_algolia | lobsters); kind (techmeme | hn | lobsters,
-# what a signal source is); domains (hosts whose articles are this publisher's, for an article imported from a
+# what a signal source is); seed_days (how far back the first poll reaches, for essays and developer posts;
+# default fetch.first_run_skip_hours); domains (hosts whose articles are this publisher's, for an article imported from a
 # Techmeme or Hacker News link). A source with domains and no url is never polled: it only names the publisher.
 #
 # Scope (the owner's direction, 2026-11-15): anything with a tech angle that makes a good headline, so the list
@@ -132,48 +133,48 @@ sources:
   - {id: sifted, name: Sifted, v1_name: Sifted, url: "https://sifted.eu/feed", domains: [sifted.eu]}
   - {id: techeu, name: Tech.eu, v1_name: Tech.eu, url: "https://tech.eu/feed/", authority: 0.9, domains: [tech.eu]}
   - {id: eustartups, name: EU-Startups, v1_name: EU-Startups, url: "https://www.eu-startups.com/feed/", authority: 0.8, domains: [eu-startups.com]}
-  - {id: newcomer, name: Newcomer, v1_name: Newcomer, url: "https://www.newcomer.co/feed", reads: true, authority: 0.9, domains: [newcomer.co]}
+  - {id: newcomer, name: Newcomer, v1_name: Newcomer, url: "https://www.newcomer.co/feed", reads: true, authority: 0.9, domains: [newcomer.co], seed_days: 14}
 
   # Developers.
-  - {id: infoq, name: InfoQ, v1_name: InfoQ, url: "https://feed.infoq.com/", domains: [infoq.com]}
-  - {id: thenewstack, name: The New Stack, v1_name: The New Stack, url: "https://thenewstack.io/feed/", domains: [thenewstack.io]}
-  - {id: devclass, name: DevClass, v1_name: DevClass, url: "https://devclass.com/feed/", authority: 0.9, domains: [devclass.com]}
-  - {id: lwn, name: LWN, v1_name: LWN, url: "https://lwn.net/headlines/rss", domains: [lwn.net]}
-  - {id: phoronix, name: Phoronix, v1_name: Phoronix, url: "https://www.phoronix.com/rss.php", authority: 0.9, domains: [phoronix.com]}
-  - {id: changelog, name: Changelog News, v1_name: Changelog News, url: "https://changelog.com/news/feed", authority: 0.9, domains: [changelog.com]}
-  - {id: stackoverflow, name: Stack Overflow Blog, v1_name: Stack Overflow Blog, url: "https://stackoverflow.blog/feed/", authority: 0.9, domains: [stackoverflow.blog]}
-  - {id: github_changelog, name: GitHub Changelog, v1_name: GitHub Blog, url: "https://github.blog/changelog/feed/"}
-  - {id: rust_blog, name: Rust Blog, v1_name: Rust Blog, url: "https://blog.rust-lang.org/feed.xml", domains: [blog.rust-lang.org]}
-  - {id: go_blog, name: Go Blog, v1_name: Go Blog, url: "https://go.dev/blog/feed.atom", domains: [go.dev]}
-  - {id: python_insider, name: Python Insider, v1_name: Python Insider, url: "https://blog.python.org/feeds/posts/default", domains: [blog.python.org]}
-  - {id: k8s, name: Kubernetes Blog, v1_name: Kubernetes Blog, url: "https://kubernetes.io/feed.xml", domains: [kubernetes.io]}
+  - {id: infoq, name: InfoQ, v1_name: InfoQ, url: "https://feed.infoq.com/", domains: [infoq.com], seed_days: 7}
+  - {id: thenewstack, name: The New Stack, v1_name: The New Stack, url: "https://thenewstack.io/feed/", domains: [thenewstack.io], seed_days: 7}
+  - {id: devclass, name: DevClass, v1_name: DevClass, url: "https://devclass.com/feed/", authority: 0.9, domains: [devclass.com], seed_days: 7}
+  - {id: lwn, name: LWN, v1_name: LWN, url: "https://lwn.net/headlines/rss", domains: [lwn.net], seed_days: 7}
+  - {id: phoronix, name: Phoronix, v1_name: Phoronix, url: "https://www.phoronix.com/rss.php", authority: 0.9, domains: [phoronix.com], seed_days: 7}
+  - {id: changelog, name: Changelog News, v1_name: Changelog News, url: "https://changelog.com/news/feed", authority: 0.9, domains: [changelog.com], seed_days: 7}
+  - {id: stackoverflow, name: Stack Overflow Blog, v1_name: Stack Overflow Blog, url: "https://stackoverflow.blog/feed/", authority: 0.9, domains: [stackoverflow.blog], seed_days: 7}
+  - {id: github_changelog, name: GitHub Changelog, v1_name: GitHub Blog, url: "https://github.blog/changelog/feed/", seed_days: 7}
+  - {id: rust_blog, name: Rust Blog, v1_name: Rust Blog, url: "https://blog.rust-lang.org/feed.xml", domains: [blog.rust-lang.org], seed_days: 7}
+  - {id: go_blog, name: Go Blog, v1_name: Go Blog, url: "https://go.dev/blog/feed.atom", domains: [go.dev], seed_days: 7}
+  - {id: python_insider, name: Python Insider, v1_name: Python Insider, url: "https://blog.python.org/feeds/posts/default", domains: [blog.python.org], seed_days: 7}
+  - {id: k8s, name: Kubernetes Blog, v1_name: Kubernetes Blog, url: "https://kubernetes.io/feed.xml", domains: [kubernetes.io], seed_days: 7}
 
   # Lab and company blogs, 10 min poll.
-  - {id: openai, name: OpenAI, v1_name: OpenAI, url: "https://openai.com/news/rss.xml", domains: [openai.com]}
-  - {id: google_ai, name: Google AI, v1_name: Google AI, url: "https://blog.google/technology/ai/rss/", domains: [blog.google]}
-  - {id: deepmind, name: Google DeepMind, v1_name: Google DeepMind, url: "https://deepmind.google/blog/rss.xml", domains: [deepmind.google]}
+  - {id: openai, name: OpenAI, v1_name: OpenAI, url: "https://openai.com/news/rss.xml", domains: [openai.com], seed_days: 7}
+  - {id: google_ai, name: Google AI, v1_name: Google AI, url: "https://blog.google/technology/ai/rss/", domains: [blog.google], seed_days: 7}
+  - {id: deepmind, name: Google DeepMind, v1_name: Google DeepMind, url: "https://deepmind.google/blog/rss.xml", domains: [deepmind.google], seed_days: 7}
   # Community-built feed of anthropic.com/news (github.com/Olshansk/rss-feeds); Anthropic publishes none.
-  - {id: anthropic, name: Anthropic, v1_name: Anthropic, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_news.xml", domains: [anthropic.com]}
-  - {id: huggingface, name: Hugging Face, v1_name: Hugging Face, url: "https://huggingface.co/blog/feed.xml"}
-  - {id: github, name: GitHub Blog, v1_name: GitHub Blog, url: "https://github.blog/feed/", domains: [github.blog]}
-  - {id: cloudflare, name: Cloudflare, v1_name: Cloudflare, url: "https://blog.cloudflare.com/rss/", domains: [blog.cloudflare.com]}
-  - {id: nvidia_blog, name: Nvidia Blog, v1_name: Nvidia Blog, url: "https://blogs.nvidia.com/feed/", domains: [blogs.nvidia.com]}
-  - {id: mistral, name: Mistral AI, v1_name: Mistral AI, url: "https://mistral.ai/rss.xml", domains: [mistral.ai]}
+  - {id: anthropic, name: Anthropic, v1_name: Anthropic, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_news.xml", domains: [anthropic.com], seed_days: 7}
+  - {id: huggingface, name: Hugging Face, v1_name: Hugging Face, url: "https://huggingface.co/blog/feed.xml", seed_days: 7}
+  - {id: github, name: GitHub Blog, v1_name: GitHub Blog, url: "https://github.blog/feed/", domains: [github.blog], seed_days: 7}
+  - {id: cloudflare, name: Cloudflare, v1_name: Cloudflare, url: "https://blog.cloudflare.com/rss/", domains: [blog.cloudflare.com], seed_days: 7}
+  - {id: nvidia_blog, name: Nvidia Blog, v1_name: Nvidia Blog, url: "https://blogs.nvidia.com/feed/", domains: [blogs.nvidia.com], seed_days: 7}
+  - {id: mistral, name: Mistral AI, v1_name: Mistral AI, url: "https://mistral.ai/rss.xml", domains: [mistral.ai], seed_days: 7}
 
   # Reads, 10 min poll.
-  - {id: stratechery, name: Stratechery, v1_name: Stratechery, url: "https://stratechery.com/feed/", reads: true, authority: 0.9, fetch_page: false, domains: [stratechery.com]}
-  - {id: simonw, name: Simon Willison, v1_name: Simon Willison, url: "https://simonwillison.net/atom/everything/", reads: true, authority: 0.9, domains: [simonwillison.net]}
-  - {id: pragmatic, name: Pragmatic Engineer, v1_name: Pragmatic Engineer, url: "https://newsletter.pragmaticengineer.com/feed", reads: true, authority: 0.9}
-  - {id: lenny, name: Lenny's Newsletter, v1_name: Lenny's Newsletter, url: "https://www.lennysnewsletter.com/feed", reads: true, authority: 0.9}
-  - {id: latent_space, name: Latent Space, v1_name: Latent Space, url: "https://www.latent.space/feed", reads: true, authority: 0.9}
-  - {id: fowler, name: Martin Fowler, v1_name: Martin Fowler, url: "https://martinfowler.com/feed.atom", reads: true, authority: 0.9}
-  - {id: jvns, name: Julia Evans, v1_name: Julia Evans, url: "https://jvns.ca/atom.xml", reads: true, authority: 0.9}
-  - {id: bigtechnology, name: Big Technology, v1_name: Big Technology, url: "https://www.bigtechnology.com/feed", reads: true, authority: 0.9}
-  - {id: oneusefulthing, name: One Useful Thing, v1_name: One Useful Thing, url: "https://www.oneusefulthing.org/feed", reads: true, authority: 0.9}
-  - {id: understandingai, name: Understanding AI, v1_name: Understanding AI, url: "https://www.understandingai.org/feed", reads: true, authority: 0.9}
-  - {id: garymarcus, name: Gary Marcus, v1_name: Gary Marcus, url: "https://garymarcus.substack.com/feed", reads: true, authority: 0.8}
-  - {id: exponentialview, name: Exponential View, v1_name: Exponential View, url: "https://www.exponentialview.co/feed", reads: true, authority: 0.9}
-  - {id: theatlantic, name: The Atlantic, v1_name: The Atlantic, url: "https://www.theatlantic.com/feed/channel/technology/", reads: true, authority: 0.9, domains: [theatlantic.com]}
+  - {id: stratechery, name: Stratechery, v1_name: Stratechery, url: "https://stratechery.com/feed/", reads: true, authority: 0.9, fetch_page: false, domains: [stratechery.com], seed_days: 14}
+  - {id: simonw, name: Simon Willison, v1_name: Simon Willison, url: "https://simonwillison.net/atom/everything/", reads: true, authority: 0.9, domains: [simonwillison.net], seed_days: 14}
+  - {id: pragmatic, name: Pragmatic Engineer, v1_name: Pragmatic Engineer, url: "https://newsletter.pragmaticengineer.com/feed", reads: true, authority: 0.9, seed_days: 14}
+  - {id: lenny, name: Lenny's Newsletter, v1_name: Lenny's Newsletter, url: "https://www.lennysnewsletter.com/feed", reads: true, authority: 0.9, seed_days: 14}
+  - {id: latent_space, name: Latent Space, v1_name: Latent Space, url: "https://www.latent.space/feed", reads: true, authority: 0.9, seed_days: 14}
+  - {id: fowler, name: Martin Fowler, v1_name: Martin Fowler, url: "https://martinfowler.com/feed.atom", reads: true, authority: 0.9, seed_days: 14}
+  - {id: jvns, name: Julia Evans, v1_name: Julia Evans, url: "https://jvns.ca/atom.xml", reads: true, authority: 0.9, seed_days: 14}
+  - {id: bigtechnology, name: Big Technology, v1_name: Big Technology, url: "https://www.bigtechnology.com/feed", reads: true, authority: 0.9, seed_days: 14}
+  - {id: oneusefulthing, name: One Useful Thing, v1_name: One Useful Thing, url: "https://www.oneusefulthing.org/feed", reads: true, authority: 0.9, seed_days: 14}
+  - {id: understandingai, name: Understanding AI, v1_name: Understanding AI, url: "https://www.understandingai.org/feed", reads: true, authority: 0.9, seed_days: 14}
+  - {id: garymarcus, name: Gary Marcus, v1_name: Gary Marcus, url: "https://garymarcus.substack.com/feed", reads: true, authority: 0.8, seed_days: 14}
+  - {id: exponentialview, name: Exponential View, v1_name: Exponential View, url: "https://www.exponentialview.co/feed", reads: true, authority: 0.9, seed_days: 14}
+  - {id: theatlantic, name: The Atlantic, v1_name: The Atlantic, url: "https://www.theatlantic.com/feed/channel/technology/", reads: true, authority: 0.9, domains: [theatlantic.com], seed_days: 14}
 
   # Publishers with no feed here. An article of theirs that Techmeme or Hacker News links to is imported under
   # their name (fetch.promote_signals); any other host is imported under `web` and shows its host name.

@@ -122,3 +122,29 @@ def test_sources_file_is_wide_and_names_publishers_for_linked_articles():
     # A publisher with no feed has nothing to fail a check on.
     assert sources_mod.effective_tier(by_id["reuters"], False) == 1
     assert sources_mod.effective_tier(by_id["techcrunch"], False) == 2
+
+
+def test_a_source_can_seed_further_back_than_36_hours():
+    # Reads shows 14 days and Dev 7; a source seeded with 36 hours of essays adds nothing to its tab for a week.
+    by_id = SRCS.by_id()
+    cfg = CFG
+    assert by_id["stratechery"].seed_days == 14 and by_id["infoq"].seed_days == 7 and by_id["verge"].seed_days is None
+    assert fetch.seed_horizon(by_id["verge"], cfg) == timedelta(hours=36)
+    assert fetch.seed_horizon(by_id["infoq"], cfg) == timedelta(days=7)
+
+    def status(source_id, age):
+        e = fetch.Entry("https://x.test/a", "https://x.test/a", "A new release of the thing", NOW - age)
+        return fetch.classify(e, by_id[source_id], SRCS, NOW, NOW, True, cfg)[0]
+    assert status("verge", timedelta(days=3)) == "seen" and status("infoq", timedelta(days=3)) == "new"
+    assert status("infoq", timedelta(days=8)) == "stale" and status("stratechery", timedelta(days=10)) == "new"
+
+    from tools import reseed
+    db = _db()
+    for i, (sid, age, st) in enumerate([("infoq", 3, "seen"), ("infoq", 6.5, "seen"), ("verge", 3, "seen"),
+                                        ("stratechery", 12, "seen"), ("infoq", 2, "written")]):
+        u = f"https://x.test/{i}"
+        db.insert_item({"url_canonical": u, "url": u, "source_id": sid, "title": f"Post {i} about a release",
+                        "first_seen_at": NOW, "published_at": NOW - timedelta(days=age),
+                        "feed_published_at": NOW - timedelta(days=age), "status": st})
+    assert reseed.reseed(db, SRCS, cfg, NOW) == {"infoq": 2, "stratechery": 1}
+    assert [db.item(f"https://x.test/{i}")["status"] for i in range(5)] == ["new", "new", "seen", "new", "written"]

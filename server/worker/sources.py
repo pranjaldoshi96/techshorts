@@ -38,6 +38,10 @@ class Source:
     kind: str = ""
     # Hosts whose articles are this publisher's, for articles imported from a signal's link (fetch.promote_signals).
     domains: tuple = field(default_factory=tuple)
+    # How far back this source's first poll reaches, in days, when it should differ from fetch.first_run_skip_hours:
+    # essays (Reads shows 14 days) and developer or lab posts (Dev shows 7 days) are sparse, so a source seeded with
+    # 36 hours of them adds nothing to its tab for a week.
+    seed_days: float = None
 
     @property
     def poll_seconds(self):
