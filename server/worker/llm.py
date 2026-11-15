@@ -1143,6 +1143,7 @@ on a known story is 4 to 5.
   "Novacloud beats on revenue and lifts full-year guidance" = 7, earnings
   "Regulator sues Varnet over hidden fees charged to 12 million customers" = 7, policy
   "Brightloop co-founder and CTO quits to start a rival" = 7, news
+  "Emberfall releases Starfall 2, the most awaited game in a decade" = 7, launch (topics: consumer)
   "Orbitly shares fall 6% a day after its CEO's exit" (a market reaction) = 5, news
   "Brightloop raises $80M Series B for warehouse robots" = 6, funding
   "Zentra releases a 1T-parameter open model for coding agents" = 6, launch
@@ -1164,12 +1165,15 @@ the story's own facts (never on how it could be worded) and separately from impo
 titans; a hack or outage everyone felt; a shocking leak. 7-8 drama, conflict, big money or a real surprise: \
 lawsuits, firings and resignations, layoffs, leaks, bans and government fights, fraud claims, giant valuations \
 or pay packages, embarrassing failures, viral moments, a big-name product reveal, a surprising scientific \
-result. 5-6 solid news with a hook: a notable launch, a round with a twist, a policy move many people will feel. \
+result, a crime, arrest or violence at a tech or games company, and whatever surrounds the year's most awaited \
+game or gadget. 5-6 solid news with a hook: a notable launch, a round with a twist, a policy move many people will feel. \
 3-4 routine: an ordinary funding round, a feature update, earnings in line, a partnership. 1-2 dry: a minor \
 version bump, a press release, a how-to, a conference agenda.
   Examples (invented): "Orbitly board fires founder-CEO over undisclosed relationship with a supplier" = 10; \
 "Leaked memo: Novacloud CEO calls remote staff 'tourists'" = 8 (importance 5); "Varnet sues its former CTO for \
 taking source code to a rival" = 8; "Kestrel AI's chatbot told users to eat rocks, screenshots show" = 7; \
+"Police arrest a suspect after shots are fired at game studio Emberfall's campus" = 8 (importance 5); \
+"Starfall 2 boxes ship without the download code, buyers say" = 7 (importance 4); \
 "Brightloop raises $80M Series B" = 4; "Novacloud prices $2B bond offering" = 3 (importance 7); "Lumen CLI \
 0.36" = 1."""
 PROMPT = PROMPT.replace("<<importance>>", IMPORTANCE).replace("<<spice>>", SPICE)

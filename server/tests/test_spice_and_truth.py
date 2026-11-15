@@ -471,7 +471,7 @@ TOP = rank.TABS["top"]
 def test_spice_multiplies_the_score():
     assert rank.spice_factor(5) == 1 and rank.spice_factor(None) == 1
     assert rank.spice_factor(1) == pytest.approx(0.64) and rank.spice_factor(10) == pytest.approx(1.45)
-    dull, juicy = _cand("d", spice=3), _cand("j", spice=9)
+    dull, juicy = _cand("d", spice=3, n=2), _cand("j", spice=9, n=2)     # two outlets: routine news needs traction
     assert rank.cand_score(juicy, TOP, NOW) / rank.cand_score(dull, TOP, NOW) == pytest.approx(1.36 / 0.82)
     order = [c.id for c, _ in rank.assemble([dull, juicy], TOP, NOW)]
     assert order == ["j", "d"]

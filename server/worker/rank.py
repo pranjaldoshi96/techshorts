@@ -37,6 +37,7 @@ IMAGE_HAMMING = 6       # dHash distance at or under which two images count as t
 STORYLINE_CAP = 3
 STORYLINE_HEAD = 12
 STORYLINE_MAX = 8
+STORYLINE_SHARE = 6     # ... or a sixth of the tab when that is more (storyline_limit)
 STORYLINE_MAJOR = 7     # a development of this importance also counts ("Huang agrees to testify", one outlet)
 # The story's own main event is never the card the cap cuts: with eight fresher developments of the saga in Top,
 # "Jensen Huang resigns as Nvidia CEO" (importance 9, spice 10, a day old) was the one left out.
@@ -51,6 +52,12 @@ SPICY_IMPORTANCE_GAP = 2
 SPICY_MAX_H = 36
 DRY = 2                 # at or below: not Top material unless importance >= DRY_TOP_IMPORTANCE
 DRY_TOP_IMPORTANCE = 8
+# Routine news (spice 3-4: "an ordinary funding round, a feature update, earnings in line") that one outlet
+# carries and nobody is sharing is not Top material below importance 7; it keeps its place in its own tab. The
+# third review's Top had "EaseMyTrip cuts Q2 net loss" and an Urban Company shareholder vote (both spice 4,
+# importance 6, one outlet) while spicier stories of importance 5 were cut for room.
+ROUTINE = 4
+ROUTINE_TOP_IMPORTANCE = 7
 # Words that mark a publisher title as tech, for the one case with no classification at all (an LLM outage).
 TECH_TITLE = re.compile(
     r"\b(ai|a\.i\.|openai|anthropic|nvidia|google|apple|microsoft|meta|amazon|tesla|spacex|chatgpt|gemini|claude|"
@@ -399,6 +406,8 @@ def eligible(c, tab, now, degraded=False):
         return "unvetted"
     if tab.id == "top" and c.spice <= DRY and c.importance < DRY_TOP_IMPORTANCE:
         return "dry"
+    if tab.id == "top" and c.spice <= ROUTINE and c.importance < ROUTINE_TOP_IMPORTANCE and not has_traction(c):
+        return "routine"
     if c.relevance < tab.min_relevance:
         return "relevance"
     topics = set(c.topics)
@@ -424,6 +433,45 @@ def eligible(c, tab, now, degraded=False):
     if tab.id == "reads" and not (c.lead_reads or (widely_shared(c) and c.ai_text)):
         return "not_reads"
     return None
+
+
+def storyline_worth(c, now):
+    """What a card is worth to its storyline when the cap must choose: spice x importance x traction, recency
+    counted (notification_score). Commentary on the story counts half: the cap is there to show developments."""
+    return notification_score(c, now) * (0.5 if c.type in LABELLED else 1)
+
+
+def storyline_limit(tab):
+    """The most cards one storyline may take in `tab`: STORYLINE_MAX, a sixth of a long tab (10 of Top's 60)."""
+    return max(STORYLINE_MAX, tab.max // STORYLINE_SHARE)
+
+
+def storyline_cut(cands, tab, now):
+    """The ids the storyline cap cuts from `tab`, decided before any rank is given.
+
+    A storyline with more than STORYLINE_CAP eligible cards keeps its best by spice x importance x traction
+    (notification_score, the owner's ranking, with its recency term): the best STORYLINE_CAP whatever they are,
+    the story's main event always, and further cards that are worth a rank of their own (traction, a major
+    development, or spice) up to storyline_limit. The cap used to take cards in the tab's score order, which is
+    mostly freshness, and stop: in the third review's Top the Nvidia saga's eight places went to the eight
+    freshest developments while "Huang told Nvidia exec 'I hope you die,' Post reports" (spice 8, Techmeme) and
+    the resignation report itself (spice 9, 4 publishers) were cut."""
+    groups = {}
+    for c in cands:
+        if c.storyline:
+            groups.setdefault(c.storyline, []).append(c)
+    limit, cut = storyline_limit(tab), set()
+    for members in groups.values():
+        if len(members) <= STORYLINE_CAP:
+            continue
+        kept = 0
+        for i, c in enumerate(sorted(members, key=lambda c: (-storyline_worth(c, now), c.id))):
+            if i < STORYLINE_CAP or c.importance >= STORYLINE_EVENT or (kept < limit and (
+                    strong_traction(c) or c.importance >= STORYLINE_MAJOR or c.spice >= SPICY)):
+                kept += 1
+            else:
+                cut.add(c.id)
+    return cut
 
 
 def hamming(a, b):
@@ -476,9 +524,9 @@ def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None, ru
         if per_pub.get(pub, 0) >= cap:
             return "diversity"
         n_story = per_story.get(c.storyline, 0) if c.storyline else 0
-        if n_story >= STORYLINE_CAP and not (len(out) >= STORYLINE_HEAD and (
-                c.importance >= STORYLINE_EVENT or (n_story < STORYLINE_MAX and (
-                    strong_traction(c) or c.importance >= STORYLINE_MAJOR)))):
+        # The cap's cut (story_cut, decided up front by spice x importance x traction), and its head rule: at
+        # most STORYLINE_CAP of a storyline's kept cards in the tab's first ranks; the others wait for a later one.
+        if c.id in story_cut or (n_story >= STORYLINE_CAP and len(out) < STORYLINE_HEAD):
             return "storyline"
         if n_story and c.age_eff(now) > (STORYLINE_SECOND_STRONG_H if strong_traction(c)
                                          else STORYLINE_SECOND_MAX_H):
@@ -490,11 +538,17 @@ def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None, ru
             return "image_duplicate"
         return None
 
+    story_cut = storyline_cut([c for c, _ in pool], tab, now)
+
     # Greedy, one rank at a time: a card held back by the top-10 caps (publisher, tutorial, repeated picture) waits
     # for a later rank instead of being dropped. If only capped cards are left before rank 10, the 2-per-publisher
     # rule yields to the 4-per-tab one rather than ending the tab early.
     remaining = list(pool)
     while remaining and len(out) < tab.max:
+        if story_cut and all(c.id in story_cut or is_duplicate(c) or blocked(c, True) for c, _ in remaining):
+            # Nothing else can take a rank and the tab has room: the cap exists to leave room for other stories,
+            # so with none left waiting its cut cards take the remaining places, after everything else.
+            story_cut = set()
         pick = None
         for relax in (False, True):
             for i, (c, s) in enumerate(remaining):

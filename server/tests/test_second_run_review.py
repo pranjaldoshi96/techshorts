@@ -240,7 +240,7 @@ def test_a_saga_shows_its_real_developments_past_the_head_of_a_tab():
     """Storyline ev_4c525e5e54 (Nvidia): "Megaspeed opens internal probe" (8 publishers, Techmeme), the petition
     and the investors' letter were cut by the cap of 3 while spice-4 single-source items filled Top."""
     saga = [_cand(f"saga{i}", importance=7, spice=8, n=4, techmeme=True, age_h=1 + i * 0.2) for i in range(6)]
-    weak = _cand("saga_weak", importance=6, spice=8, n=1, age_h=1.1)
+    weak = _cand("saga_weak", importance=6, spice=5, n=1, age_h=1.1)
     for c in saga + [weak]:
         c.storyline = "nvidia"
     others = [_cand(f"o{i:02}", importance=6, spice=6, n=1, age_h=2 + i * 0.1) for i in range(20)]
@@ -248,7 +248,10 @@ def test_a_saga_shows_its_real_developments_past_the_head_of_a_tab():
     head = ranked[:rank.STORYLINE_HEAD]
     assert sum(i.startswith("saga") for i in head) == rank.STORYLINE_CAP == 3
     assert all(f"saga{i}" in ranked for i in range(6))          # each well-covered development is shown
-    assert "saga_weak" not in ranked                            # a single-source angle still waits its turn
+    # A plain single-source angle is what the cap cuts: last when the tab has room left, out when it is full.
+    assert ranked[-1] == "saga_weak"
+    full = rank.Tab(**{**TOP.__dict__, "max": 20})
+    assert "saga_weak" not in [c.id for c, _ in rank.assemble(saga + [weak] + others, full, NOW)]
     # A major development counts even from one outlet ("Huang agrees to testify", Bloomberg, importance 7).
     major = _cand("saga_major", importance=7, spice=9, n=1, age_h=1.2)
     major.storyline = "nvidia"
@@ -258,8 +261,12 @@ def test_a_saga_shows_its_real_developments_past_the_head_of_a_tab():
         c.storyline = "x"
     event = _cand("m_event", importance=9, spice=10, n=3, techmeme=True, age_h=27)
     event.storyline = "x"
-    got = [c.id for c, _ in rank.assemble(many + [event] + others, TOP, NOW)]
-    assert sum(i.startswith("m") and i != "m_event" for i in got) == rank.STORYLINE_MAX == 8
+    short = rank.Tab(**{**TOP.__dict__, "max": 30})
+    more = others + [_cand(f"p{i:02}", importance=6, spice=6, n=1, age_h=10 + i * 0.1) for i in range(10)]
+    got = [c.id for c, _ in rank.assemble(many + [event] + more, short, NOW)]
+    # 8, or a sixth of a long tab (10 of Top's 60): the third review found the eight freshest took every place.
+    assert sum(i.startswith("m") and i != "m_event" for i in got) == rank.storyline_limit(short) == 8
+    assert rank.storyline_limit(TOP) == 10 and rank.STORYLINE_MAX == 8
     assert "m_event" in got                 # the saga's main event is never the one the cap cuts
 
 

@@ -217,3 +217,64 @@ def test_the_rewrite_states_the_newest_account_and_is_checked_against_the_newest
     signed.status = "failed"                # so the first report still leads
     cluster.refresh(store, ev, lambda s: True)
     assert ev.row["lead_url"] == will.url and "newer_report" in ev.row["rewrite_reason"]
+
+
+# 2. The storyline cap keeps by spice x importance x traction; routine single-source news is not Top material
+
+TOP = rank.TABS["top"]
+
+
+def _saga(cards):
+    for c in cards:
+        c.storyline = "nvidia"
+    return cards
+
+
+def test_the_cap_cuts_the_weakest_cards_of_a_saga_not_the_oldest():
+    """The third review's Top gave the Nvidia saga's eight places to its eight freshest developments and cut
+    ev_b3a83c99ba "Huang told Nvidia exec 'I hope you die,' Post reports" (spice 8, Techmeme, 29 h) and the
+    resignation report itself (spice 9, 4 publishers, 31 h), while drier fresh cards stayed."""
+    fresh = _saga([_cand(f"dry{i:02}", importance=7, spice=6, n=1, age_h=2 + i) for i in range(10)])
+    spicy = _saga([_cand("hope_you_die", importance=6, spice=8, n=2, techmeme=True, age_h=29),
+                   _cand("resigns", importance=7, spice=9, n=4, age_h=31)])
+    others = [_cand(f"o{i:02}", importance=6, spice=6, n=1, age_h=1 + i * 0.5) for i in range(55)]
+    stats = {}
+    got = [c.id for c, _ in rank.assemble(fresh + spicy + others, TOP, NOW, stats=stats)]
+    assert len(got) == TOP.max and {"hope_you_die", "resigns"} <= set(got)
+    kept = [i for i in got if i.startswith("dry")]
+    assert len(kept) + 2 == rank.storyline_limit(TOP) == 10
+    # What the cap cut are the saga's least valuable cards by spice x importance x traction (with recency): the
+    # two oldest of the dry single-source ones, not whichever came last in the tab's order.
+    cut = rank.storyline_cut(fresh + spicy, TOP, NOW)
+    assert cut == {"dry08", "dry09"}
+    worth = sorted(fresh + spicy, key=lambda c: -rank.storyline_worth(c, NOW))
+    assert {c.id for c in worth[-2:]} == cut
+    # Commentary on the saga counts half against a development with the same numbers.
+    news, column = _cand("n", spice=8, n=2), _cand("c", spice=8, n=2, type="analysis")
+    assert rank.storyline_worth(column, NOW) == pytest.approx(rank.storyline_worth(news, NOW) / 2)
+    # A storyline within the cap of 3 is never cut, and a short tab keeps the old limit of 8.
+    assert rank.storyline_cut(fresh[:3], TOP, NOW) == set()
+    assert rank.storyline_limit(rank.TABS["reads"]) == rank.STORYLINE_MAX
+
+
+def test_cut_cards_take_the_ranks_nobody_else_wants():
+    saga = _saga([_cand(f"s{i:02}", importance=6, spice=5, n=1, age_h=1 + i) for i in range(6)])
+    others = [_cand(f"o{i:02}", importance=6, spice=6, n=1, age_h=2 + i) for i in range(12)]
+    got = [c.id for c, _ in rank.assemble(saga + others, TOP, NOW)]
+    assert len(got) == 18 and [i for i in got[-3:]] == ["s03", "s04", "s05"]       # after everything else
+    assert sum(i.startswith("s") for i in got[:rank.STORYLINE_HEAD]) == rank.STORYLINE_CAP
+
+
+@pytest.mark.parametrize("kw,why", [
+    (dict(importance=6, spice=4, n=1), "routine"),              # "EaseMyTrip cuts Q2 FY27 net loss 98.4%"
+    (dict(importance=6, spice=3, n=1), "routine"),
+    (dict(importance=6, spice=5, n=1), None),
+    (dict(importance=7, spice=4, n=1), None),                   # major news needs no hook
+    (dict(importance=6, spice=4, n=2), None),                   # a second outlet is traction
+    (dict(importance=6, spice=4, n=1, techmeme=True), None),
+    (dict(importance=6, spice=4, n=1, hn=150), None),
+])
+def test_routine_single_source_news_is_not_top_material(kw, why):
+    c = _cand("ev", topics=("startups_funding", "india"), type="funding", **kw)
+    assert rank.eligible(c, TOP, NOW) == why
+    assert rank.eligible(c, rank.TABS["startups"], NOW) is None        # it keeps its place in its own tab
