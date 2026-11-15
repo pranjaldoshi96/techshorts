@@ -522,11 +522,7 @@ material_update: true when it adds a major new fact to that event, above all whe
 headline describes as coming has now happened (an IPO that was "upcoming" has priced or listed, a planned launch \
 has shipped, a deal "in talks" is signed, a resignation has taken effect, a vote or ruling has been made). \
 False for reactions, analysis, background and smaller details.
-- news_date: when the news itself happened, if the text shows that was before the article's Published date \
-("began selling on Friday", "announced on Tuesday", "on Nov. 13", "last week"): that day as YYYY-MM-DD, worked \
-out from the Published date. A late write-up of older news is common; date the news, not the article. Empty \
-when the text presents the news as new (today or yesterday) or gives no day, and never the date of mere \
-background ("founded in 2019", "resigned on Thursday" in a story about what followed).
+- news_date: <<news_date>>
 
 Writing. The card must make a tech reader want to tap, using only what the article states:
 - headline: 50 to 70 characters. Lead with the story's most striking true fact: the conflict, the name, the \
@@ -978,7 +974,8 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
         attempt = (row["attempts"] or 0) + 1
         published = backdate(db, row, text)
         if result.status == "ok":
-            result.news_at = newsdate.news_at(result.output.news_date, published, row["title"], text.text)
+            result.news_at = newsdate.news_at(result.output.news_date, published, row["title"], text.text,
+                                               result.output.type)
         if result.output is not None or result.status == "failed":
             db.save_write(url, now, result, text, attr)
         if result.status == "ok":
@@ -1237,7 +1234,42 @@ taking source code to a rival" = 8; "Kestrel AI's chatbot told users to eat rock
 "Starfall 2 boxes ship without the download code, buyers say" = 7 (importance 4); \
 "Brightloop raises $80M Series B" = 4; "Novacloud prices $2B bond offering" = 3 (importance 7); "Lumen CLI \
 0.36" = 1."""
-PROMPT = PROMPT.replace("<<importance>>", IMPORTANCE).replace("<<spice>>", SPICE)
+# When the news happened (newsdate.py). One wording for the write prompt and for `date_news`, which asks the same
+# question about a card written before the writer was asked it (tools/reexamine.py).
+NEWS_DATE = """the day the news the headline reports happened, when the text says that was two or more days \
+before the article's Published date ("began selling on Friday", "announced on Tuesday", "on Nov. 13", "last \
+week"): that day as YYYY-MM-DD, worked out from the Published date. A late write-up of older news is common; \
+date the news, not the article. Empty when the text presents the news as new (today or yesterday) or gives no \
+day for it. Empty when the article is itself the news: an exclusive, an investigation or a leak that first \
+reports something ("according to people familiar", "the Journal reported"), or a new development about an \
+earlier incident (a new finding, statement, reaction, arrest or lawsuit after "Friday's outage"); the day of the \
+incident is then background. Never the date of background ("founded in 2019", "resigned on Thursday" in a \
+story about what followed), and never for analysis, opinion or explainer pieces."""
+PROMPT = PROMPT.replace("<<importance>>", IMPORTANCE).replace("<<spice>>", SPICE).replace("<<news_date>>", NEWS_DATE)
+DATE_PROMPT = """An article and the card a news app shows for it. Reply with only JSON: {"news_date": "..."}
+
+- news_date: <<news_date>> The news is what the card's headline reports.
+
+Published: <<published>>
+Original title: <<title>>
+Card headline: <<headline>>
+Text:
+<<text>>""".replace("<<news_date>>", NEWS_DATE)
+DATE_WORDS = 250
+
+
+def date_news(client, cfg, published_at, title, headline, text):
+    """The writer's `news_date` for a card that was written before the write prompt asked for one: one small
+    call on the article's opening. Returns "" (the article's own time stands) or a YYYY-MM-DD string, which
+    newsdate.news_at then accepts only when the text itself carries that day. Raises LLMError."""
+    reply = client.chat(role_model(cfg, "write"), [{"role": "user", "content": entail.fill(
+        DATE_PROMPT, published=published_at, title=title, headline=headline or title,
+        text=text_mod.cap_words(text or "", DATE_WORDS))}], kind="date", max_tokens=400, temperature=0.0, tries=2)
+    try:
+        day = json.loads(re.search(r"\{.*\}", reply or "", re.S).group(0)).get("news_date")
+    except (AttributeError, ValueError):
+        raise LLMError("date: unreadable reply")
+    return day.strip() if isinstance(day, str) and newsdate.parse_day(day) else ""
 REWRITE_PROMPT = REWRITE_PROMPT.replace("<<importance>>", IMPORTANCE).replace("<<spice>>", SPICE)
 
 REWRITE_MEMBERS = 4

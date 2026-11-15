@@ -36,7 +36,6 @@ _PAST = (r"(?:began|started|announced|launched|released|unveiled|introduced|said
 LEDE_DAY = re.compile(rf"\b{_PAST}\b((?:\s+[\w$%'’.,-]+){{0,6}}?)\s+(?:on\s+|late\s+|early\s+)?{_DAY}\b", re.I)
 SUBORDINATE = re.compile(r"\b(who|which|that|after|since|following|when|while|as|because|amid|whose|where|if|"
                          r"before|until|will|would|could|may|might|to|next|this coming)\b", re.I)
-VAGUE = re.compile(r"\b(last week|earlier this week|earlier this month|last month|days ago|weeks ago)\b", re.I)
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"“])")
 
 
@@ -56,10 +55,17 @@ def _noon(day, published_at):
     return min(datetime.combine(day, time(12), timezone.utc), published_at)
 
 
-def grounded(day, text):
-    """Does `text` itself carry `day`: its weekday by name, its day of the month next to its month, or a vague
-    "last week" that a date in that range can stand for? The writer's date is used only when this holds, so an
-    invented date never moves a card."""
+# A vague phrase stands only for a day in the stretch it names, counted back from the article, and only in the
+# article's opening: "last week's election" deep in a piece about a patent dated nothing.
+VAGUE_RANGES = (("earlier this week", 1, 7), ("days ago", 1, 7), ("last week", 2, 14), ("weeks ago", 7, 31),
+                ("earlier this month", 1, 31), ("last month", 7, 62))
+VAGUE_WORDS = 60
+
+
+def grounded(day, text, published_at=None):
+    """Does `text` itself carry `day`: its weekday by name, its day of the month next to its month, or, in its
+    opening, a vague "last week" that a date that far before `published_at` can stand for? The writer's date is
+    used only when this holds, so an invented date never moves a card."""
     low = (text or "").lower()
     if re.search(rf"\b{WEEKDAYS[day.weekday()]}\b", low):
         return True
@@ -67,7 +73,11 @@ def grounded(day, text):
     names = rf"(?:{month}|{month[:3]}\.?|{month[:4]}\.?)"
     if re.search(rf"\b{names}\s+{day.day}(?:st|nd|rd|th)?\b|\b{day.day}(?:st|nd|rd|th)?\s+(?:of\s+)?{names}\b", low):
         return True
-    return bool(VAGUE.search(low))
+    if published_at is None:
+        return False
+    opening = " ".join(low.split()[:VAGUE_WORDS])
+    back = (published_at.date() - day).days
+    return any(phrase in opening and lo <= back <= hi for phrase, lo, hi in VAGUE_RANGES)
 
 
 def lede_date(text, published_at):
@@ -90,13 +100,20 @@ def lede_date(text, published_at):
     return day
 
 
-def news_at(claimed, published_at, title, text):
+# Only a report has a news date: an analysis or a profile published two days after a resignation is two-day-old
+# news of nothing; it is dated as what it is, a piece published when it was.
+DATED_TYPES = ("news", "launch", "funding", "acquisition", "earnings", "policy", "security_incident")
+
+
+def news_at(claimed, published_at, title, text, type=None):
     """When the news of one item happened, or None when the article's own time stands: the writer's `claimed`
     date (YYYY-MM-DD) when the text carries it, else the first sentence's own statement, and only when that is
-    MIN_LAG to MAX_LAG before the article."""
+    MIN_LAG to MAX_LAG before the article. `type` is the item's type when known: only hard news is dated."""
+    if type is not None and type not in DATED_TYPES:
+        return None
     opening = " ".join((text or "").split()[:LEDE_WORDS])
     day = parse_day(claimed)
-    if day is not None and not grounded(day, f"{title} {opening}"):
+    if day is not None and not grounded(day, f"{title} {opening}", published_at):
         day = None
     if day is None:
         day = lede_date(opening, published_at)

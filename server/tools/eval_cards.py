@@ -22,7 +22,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from worker import attribution, config, llm, sources as sources_mod, text as text_mod  # noqa: E402
+from worker import attribution, config, llm, newsdate, sources as sources_mod, text as text_mod  # noqa: E402
+from worker.db import from_iso, iso  # noqa: E402
 
 
 def main():
@@ -92,6 +93,10 @@ def main():
                 print(f"HEAD    {o.headline}")
                 print(f"SUMMARY {res.full or ' '.join([o.s1, o.s2, o.s3])}")
                 print(f"ALERT   {o.notif_title} | {o.notif_line}")
+                # When the news happened (newsdate.py): the writer's date, and the date the card would carry.
+                at = newsdate.news_at(o.news_date, from_iso(r["published_at"]), r["title"], r["text"], o.type)
+                print(f"DATED   article {r['published_at']}; news_date {o.news_date or '-'}; "
+                      f"card {iso(at) if at else 'the article time'}")
     calls = client.drain()
     by = {}
     for kind, model, outcome, ms, tin, tout in calls:
