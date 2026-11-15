@@ -1093,7 +1093,11 @@ context), s3 15-19 words (one more fact from the reports: what happens next, a r
 own inference); _alt versions 11-14 words (headline_alt at most 55 characters, headline_short at most 40); \
 notif_title at most 40 characters (who or what, and the gist); notif_line one sentence of at most 110 characters \
 written to be tapped: the most striking concrete fact, worded differently from the headline.
-- Lead with the newest material fact.
+- Lead with the newest material fact. Each report carries its publication time. Where reports give different \
+accounts of the same thing (a cause, a status, a count, whether something planned has happened), the newest \
+report's account is the one the card states, attributed to whoever gives it; an older account is left out or \
+given as what was said earlier ("after first blaming ..."). Never state as still to come what a newer report \
+says has happened.
 - Numbers: use a number only if REPORT 1 states it or at least two reports state it. When reports disagree, use \
 REPORT 1's value with "up to" or "about", or leave the number out. A number keeps the meaning the reports give it.
 - Tense and certainty match the reports: planned, expected, proposed or reported-to-be-coming stays that way; \
@@ -1210,20 +1214,34 @@ def rewrite_event(client, cfg, store, ev):
         return False
     # The newest material update goes in as REPORT 2: the representative members are the most central ones, so the
     # report that the "upcoming" IPO had listed was left out and the rewrite kept saying "upcoming".
-    newest = sorted((m for m in ev.members if m is not lead and m.material_update and m.hard and not m.thin
-                     and m.text), key=lambda m: m.published_at, reverse=True)[:1]
+    # Failing that, the newest hard-news report when it is hours newer than the lead: the FAA outage card kept the
+    # first day's cause ("routine maintenance on a copper line") while a member from the next day reported the
+    # secretary blaming a router, and two follow-up cards gave two more causes.
+    hard = [m for m in ev.members if m is not lead and m.hard and not m.thin and m.text]
+    newest = sorted((m for m in hard if m.material_update), key=lambda m: m.published_at, reverse=True)[:1]
+    material = bool(newest)
+    if not newest:
+        newest = sorted((m for m in hard if m.published_at - lead.published_at >= cluster.NEWER_REPORT),
+                        key=lambda m: m.published_at, reverse=True)[:1]
     picked = [lead] + newest + [m for m in representative(ev.members)
                                 if m is not lead and all(m is not n for n in newest)]
     picked = picked[:REWRITE_MEMBERS]
-    note = (f"REPORT 2 is the newest development ({cluster.iso(newest[0].published_at)}); lead with it.\n\n"
-            if newest else "")
+    note = ""
+    if newest:
+        note = (f"REPORT 2 is the newest {'development' if material else 'report'} "
+                f"({cluster.iso(newest[0].published_at)}); lead with {'it' if material else 'what it adds'}.\n\n")
     reports = note + "\n\n".join(
         f"REPORT {i}: {store.by_id[m.source_id].name if m.source_id in store.by_id else m.source_id}\n"
+        f"Published: {cluster.iso(m.published_at)}\n"
         f"Title: {m.title}\nText: {text_mod.cap_words(m.text, REWRITE_WORDS)}" for i, m in enumerate(picked, 1))
     base = [{"role": "system", "content": SYSTEM},
             {"role": "user", "content": entail.fill(REWRITE_PROMPT, reports=reports)}]
     model = role_model(cfg, "write")
-    source_text = "\n".join(m.text for m in picked)
+    # The titles are part of what the card may state (a member's title often carries the newest fact), and the
+    # tense rule reads the newest report's title: the lead's "says he will sign" must not bind a card whose
+    # newest report says he signed.
+    source_text = "\n".join(f"{m.title}. {m.text}" for m in picked)
+    tense_title = newest[0].title if newest else lead.title
     feedback, reply = None, None
     now = store.now
     row["rewritten_at"] = cluster.iso(now)
@@ -1249,7 +1267,7 @@ def rewrite_event(client, cfg, store, ev):
             log.info("rewrite %s: %s", ev.id, type(e).__name__)
             return False
         validate.select(out)
-        v = validate.check(out, source_text, lead.title, "", None, None, " ".join(lead.text.split()[:200]))
+        v = validate.check(out, source_text, tense_title, "", None, None, " ".join(lead.text.split()[:200]))
         bad = rewrite_numbers_ok(out, lead.text, [m.text for m in picked])
         if bad:
             v.fail("ungrounded", f"'{bad}' is not in REPORT 1 or in two reports; use REPORT 1's figure or drop it.")
@@ -1341,12 +1359,18 @@ already in the feed.
 statement, deal, incident, ruling or leak, perhaps from another outlet, with another angle or more detail.
 - "followup": the same ongoing story, but a different development: a new statement, a new revelation, a new \
 actor reacting, a consequence, a next step. Also an overview, analysis, profile or opinion piece about the story.
+- "supersedes": a followup whose news makes the event's card wrong or out of date, so that showing both would \
+mislead: the outcome of what the event reports as under way or planned (a rocket reported launched is now \
+reported lost; a deal reported agreed is called off), a correction or retraction, or a newer official account \
+that replaces the one the event gives (a different stated cause, toll or status of the same incident). Only a \
+news report can supersede, never an analysis or opinion piece. When the event's card is still true as far as it \
+goes, the answer is "followup".
 - "different": another story, even if it shares a company or person.
 Two reports about the same company or the same scandal are "same" only when they report the same development. \
 "Investors urge the board to bring the CEO back" and "A minister urges the company to hire an outside CEO" are \
 followups of one story, not the same development.
 
-Reply with only JSON: {"relations": {"<event id>": "same" | "followup" | "different"}}
+Reply with only JSON: {"relations": {"<event id>": "same" | "followup" | "supersedes" | "different"}}
 
 NEW ARTICLE
 Title: <<title>>
@@ -1354,7 +1378,7 @@ Text: <<text>>
 
 EVENTS
 <<events>>"""
-RELATIONS = ("same", "followup", "different")
+RELATIONS = ("same", "followup", "supersedes", "different")
 
 
 def judge_events(client, cfg, title, text, events):

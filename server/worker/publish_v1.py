@@ -350,9 +350,34 @@ def load_candidates(ctx):
             held[why] = held.get(why, 0) + 1
         else:
             out.append(c)
+    out, dropped = drop_superseded(ctx, out)
+    if dropped:
+        held["superseded"] = dropped
     if ctx.outage:
         out += outage_singletons(ctx, out)
     return out, held
+
+
+def drop_superseded(ctx, cands):
+    """Leaves out a card that a later development of its story has overtaken (cluster.supersede: the judge's
+    "supersedes" ruling, or a reversal such as "launches" -> "fails, payload lost"), as long as the newer event
+    has a written card in this edition. "ULA launches Vulcan with 40 Amazon internet satellites" sat at rank 21
+    beside the card reporting the rocket lost. Returns (kept candidates, number dropped)."""
+    rows = {r["id"]: r["superseded_by"] for r in ctx.db.q(
+        "SELECT id, superseded_by FROM events WHERE superseded_by IS NOT NULL")}
+    if not rows:
+        return cands, 0
+    written = {c.id for c in cands if c.ai_text}
+
+    def overtaken(eid, seen=()):
+        """Some later event in the chain eid -> superseded_by -> ... has a written card that is itself kept."""
+        if eid not in rows or eid in seen:
+            return False
+        nxt = _resolve(ctx.db, rows[eid])
+        later = overtaken(nxt, (*seen, eid))
+        return later or nxt in written
+    kept = [c for c in cands if not overtaken(c.id) or c.pin]
+    return kept, len(cands) - len(kept)
 
 
 # Headline vectors for the duplicate guard

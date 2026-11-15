@@ -176,7 +176,9 @@ MIGRATIONS = {
     "write_log": [("attempt", "INTEGER"), ("tok_in", "INTEGER"), ("tok_out", "INTEGER")],
     # Spice and the push alert's title (owner's direction, 2026-11-15); NULL spice on older rows reads as 5.
     "writes": [("spice", "INTEGER"), ("notif_title", "TEXT")],
-    "events": [("spice", "INTEGER"), ("notif_title", "TEXT"), ("rewrite_spice", "INTEGER"), ("social", "TEXT")],
+    # superseded_by: the event whose newer report overtook this one's card (cluster.supersede).
+    "events": [("spice", "INTEGER"), ("notif_title", "TEXT"), ("rewrite_spice", "INTEGER"), ("social", "TEXT"),
+               ("superseded_by", "TEXT")],
 }
 # Run once, right after a migration adds the column.
 BACKFILL = {("write_log", "attempt"): (

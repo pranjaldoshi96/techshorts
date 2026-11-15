@@ -52,6 +52,8 @@ JOIN_ONLY_IF_PICKED = {frozenset(("launch", "funding"))}
 # after the follow-up anchors), and one inflated member lifts the event median.
 FOLLOWUP_AFTER_H = 24
 FOLLOWUP_CAP = 6
+# A hard-news member this much newer than the lead goes into the rewrite as its newest report (llm.rewrite_event).
+NEWER_REPORT = timedelta(hours=3)
 # A planned event that happened: the event's headline is about what is coming ("set to become billionaires in
 # upcoming IPO") and a new hard-news member reports it done ("Anthropic's IPO prices", "Acme ships X"). Ambiguous
 # verbs are left out: CNBC's "Anthropic's IPO lands as the AI trade looks for a bright spot" meant the IPO week had
@@ -74,6 +76,50 @@ def realizes(event_headline, item_title):
         return False
     return bool(PROSPECTIVE.search(event_headline)) and bool(REALIZED.search(item_title)) \
         and not PROSPECTIVE.search(item_title)
+
+
+# A later report that overtakes an earlier card: the outcome that makes it wrong or out of date. In the third
+# review's edition "ULA launches Vulcan with 40 Amazon internet satellites" (rank 21) sat beside "ULA reportedly
+# sees first total failure, losing 40 Amazon satellites" (rank 2): the failure was ruled a follow-up, rightly a
+# new development, and the launch card stayed. The judge can now rule "supersedes" (llm.JUDGE_PROMPT); this word
+# rule is the backstop for a follow-up it rules plain "followup": a reversal in the new title that the old one
+# lacks, on titles that are plainly about the same thing.
+REVERSAL = re.compile(
+    r"\b(fail(?:s|ed|ure|ures)?|lost|loses?|loss of|destroy(?:s|ed|ing)?|explod(?:es|ed)|blows? up|blew up|"
+    r"crash(?:es|ed)?|abort(?:s|ed)?|scrub(?:s|bed)?|cancel(?:s|led|ed)?|calls? off|called off|collaps(?:es|ed)|"
+    r"falls? through|fell through|withdraw(?:s|n)?|withdrew|pulls? out|pulled out|retract(?:s|ed)?|"
+    r"revers(?:es|ed)|rescind(?:s|ed)?|overturn(?:s|ed)|postpon(?:es|ed)|delay(?:s|ed))\b", re.I)
+OVERTAKE_SHARED = 3
+OVERTAKE_SHARE = 0.4
+
+
+def overtakes(old_title, new_title):
+    """True when `new_title` reports a reversal of what `old_title` reports: see REVERSAL."""
+    if not old_title or not new_title or not REVERSAL.search(new_title) or REVERSAL.search(old_title):
+        return False
+    old, new = _title_words(old_title), _title_words(new_title)
+    shared = old & new
+    return len(shared) >= OVERTAKE_SHARED and len(shared) >= OVERTAKE_SHARE * len(old)
+
+
+def overtaken(members):
+    """The members whose report a later hard-news member of the same event has overtaken: it reports done what
+    they describe as coming ("says he will sign" -> "signs petition", validate.realized_by), or a reversal of it
+    (`overtakes`). The event's card must not be written from them: "Musk says he will sign petition" led a
+    4-publisher event in which two members reported that he had signed."""
+    return set(_overtaken_by(members))
+
+
+def _overtaken_by(members):
+    """{overtaken member's url: [the later members that overtook it]}."""
+    out = {}
+    hard = [m for m in members if m.hard and not m.thin]
+    for m in members:
+        newer = [n for n in hard if n is not m and n.published_at > m.published_at and (
+            validate.realized_by(m.title, n.title) or overtakes(m.title, n.title))]
+        if newer:
+            out[m.url] = newer
+    return out
 
 
 def event_id(url_canonical):
@@ -465,12 +511,39 @@ def assign_judged(store, item, ranked, picked):
         # A thin item is classification only: it can back an event up, never start one.
         return None, "thin_unmatched"
     for cos, ev in cands:
-        if rel.get(ev.id) == "followup":
+        if rel.get(ev.id) in ("followup", SUPERSEDES):
             # The parent is the story's first event, so every development of a saga hangs off one root.
-            return create(store, item, parent_id=ev.row.get("parent_id") or ev.id, how="followup_judge")
+            eid, how = create(store, item, parent_id=ev.row.get("parent_id") or ev.id, how="followup_judge")
+            # Every candidate the new report overtakes leaves the edition once this one has a card.
+            for _, old in cands:
+                if item.hard and not item.thin and (rel.get(old.id) == SUPERSEDES or (
+                        rel.get(old.id) == "followup" and _overtakes_event(old, item))):
+                    supersede(store, old, eid)
+                    how = "supersedes_judge"
+            return eid, how
     if too_old is not None and item.material_update and item.importance >= 8:
         return create(store, item, parent_id=too_old.id, how="followup_material")
     return create(store, item, how="thin_seed" if item.thin else "new")
+
+
+SUPERSEDES = "supersedes"
+
+
+def _overtakes_event(old, item):
+    return overtakes(old.row.get("headline"), item.title) or overtakes(old.anchor.title if old.anchor else "",
+                                                                       item.title)
+
+
+def supersede(store, old, new_id):
+    """Marks `old` as overtaken by the event `new_id`: the edition drops it while the newer event has a card
+    (publish_v1.load_candidates). A report about the story, never an analysis or opinion, may do this."""
+    new = store.events.get(new_id)
+    if old.id == new_id or old.row.get("superseded_by") == new_id or (
+            new is not None and new.row.get("superseded_by") == old.id):
+        return
+    old.row["superseded_by"] = new_id
+    store.db.conn.execute("UPDATE events SET superseded_by = ? WHERE id = ?", (new_id, old.id))
+    log.info("superseded: %s by %s", old.id, new_id)
 
 
 # A paywalled outlet's scoop arrives as a title and a sentence. Such an item used to wait for an event to join
@@ -503,6 +576,9 @@ def create(store, item, parent_id=None, how="new"):
     ev = Event(row, [], item)
     store.events[eid] = ev
     _add_member(store, ev, item, 1.0, how)
+    parent = store.events.get(parent_id) if parent_id else None
+    if parent is not None and item.hard and not item.thin and _overtakes_event(parent, item):
+        supersede(store, parent, eid)
     return eid, how
 
 
@@ -530,12 +606,21 @@ def join(store, ev, item, cos, how):
 
 
 def mark_realized(store, ev, item):
-    """Marks `item` a material update when it reports done what the event's headline describes as coming.
+    """Marks `item` a material update when it reports done what the event's headline describes as coming, on the
+    same verb ("says he will sign petition" -> "signs petition"; validate.realized_by), or a reversal of it
+    (`overtakes`). The rewrite then gets it as the newest report.
 
-    Off: in the shadow run this word-list rule was wrong for 4 of the 6 members it marked, and each wrong mark gave
-    a day-old card a fresh publishedAt. The LLM's own material_update judgement (the write prompt) still applies."""
-    return False
-    if item.material_update or not item.hard or not realizes(ev.row.get("headline"), item.headline or item.title):
+    The first version matched any prospective word in the headline against any "done" word in the title
+    (`realizes`); in the shadow run it was wrong for 4 of the 6 members it marked, each wrong mark giving a
+    day-old card a fresh publishedAt, and it was switched off. This one needs the same verb in both."""
+    if item.material_update or not item.hard or item.thin:
+        return False
+    title = item.title
+    if not any(validate.realized_by(old, title) or overtakes(old, title)
+               for old in (ev.row.get("headline"), ev.anchor.title if ev.anchor and ev.anchor is not item else None)
+               if old):
+        return False
+    if ev.anchor is not None and item.published_at <= ev.anchor.published_at:
         return False
     item.material_update = True
     store.db.conn.execute("UPDATE writes SET material_update = 1 WHERE url_canonical = ?", (item.url,))
@@ -634,6 +719,13 @@ def merge(store, src, dst):
     db.conn.execute("UPDATE OR IGNORE event_signals SET event_id = ? WHERE event_id = ?", (dst.id, src.id))
     db.conn.execute("DELETE FROM event_signals WHERE event_id = ?", (src.id,))
     db.conn.execute("UPDATE events SET parent_id = ? WHERE parent_id = ?", (dst.id, src.id))
+    db.conn.execute("UPDATE events SET superseded_by = ? WHERE superseded_by = ? AND id != ?",
+                    (dst.id, src.id, dst.id))
+    for ev in store.events.values():
+        if ev.row.get("superseded_by") == src.id and ev is not dst:
+            ev.row["superseded_by"] = dst.id
+    if dst.row.get("superseded_by") == src.id:
+        dst.row["superseded_by"] = None     # the two are one event now
     db.conn.execute("UPDATE event_alias SET id = ? WHERE id = ?", (dst.id, src.id))
     db.conn.execute("INSERT OR REPLACE INTO event_alias VALUES (?,?,?)", (src.id, dst.id, now))
     db.conn.execute("UPDATE events SET status = 'merged', updated_at = ? WHERE id = ?", (now, src.id))
@@ -656,6 +748,18 @@ def choose_lead(store, ev):
     """Hard-news members with >= 120 words, ranked by cosine to the anchor x authority, then earliest; a validated
     write beats a failed one. Opinion, analysis and interview lead only when there is no hard-news member."""
     members = ev.members
+    # The card follows the newest material fact the event holds: a member whose report a later member has
+    # overtaken ("says he will sign" once others report "signs") does not lead while a current one can.
+    stale = _overtaken_by(members)
+    if stale:
+        # First the reports that carry the newer fact, else any report that is not overtaken; an overtaken one
+        # leads only when nothing else has a validated card (a stale card beats no card).
+        newer = [n for ns in stale.values() for n in ns if n.url not in stale]
+        current = [m for m in members if m.url not in stale]
+        for pick in (newer, current):
+            if any(m.hard and not m.thin and m.status == "ok" for m in pick):
+                members = pick
+                break
     pool = [m for m in members if m.can_lead]
     if not any(m.status == "ok" for m in pool):
         # No full-length report validated: a shorter hard-news report that did (NY Post's 114 words on Huang's
@@ -707,6 +811,14 @@ def refresh(store, ev, tier1_ok):
     seen = set(json.loads(row.get("rewrite_publishers") or "[]"))
     if len(set(publishers) - seen) >= 2:
         _queue_rewrite(row, "publishers")
+    # A hard-news report hours newer than the lead, published since the card's text was last written: the card
+    # is rewritten with it as the newest report, so it states the newest account the event holds (see
+    # llm.rewrite_event; the usual 2 h cap applies).
+    if lead is not None:
+        since = max(lead.published_at, from_iso(row.get("rewritten_at")) or lead.published_at)
+        if any(m.hard and not m.thin and m is not lead and m.published_at > since
+               and m.published_at - lead.published_at >= NEWER_REPORT for m in members):
+            _queue_rewrite(row, "newer_report")
 
     if lead is not None:
         row.update(type=lead.type, topics=json.dumps(lead.topics), region=lead.region, relevance=lead.relevance,
