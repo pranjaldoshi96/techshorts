@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Re-scores stored items with the current write prompt: importance and topics only, never their card text.
+"""Re-scores stored items with the current write prompt: type, importance and topics only, never their card text.
 
 For a prompt recalibration (the importance anchors, the dev_tools and ai topic rules), so the events still in the
 tab windows are ranked by the new scale instead of waiting days for fresh items. Each item gets one classification
@@ -9,6 +9,7 @@ takes the member median until the next rewrite (with the same anchors) replaces 
 
 Run from server/ against a test copy's state only, with the worker running or not:
   TECHGIST_STATE=~/.techshorts-r1 python3 -m tools.rescore --hours 72 [--rate 15] [--dry-run]
+  ... --hours 168 --from-hours 72 --topics dev_tools,security     # the rest of Dev's 7-day window
 Old values are saved to <state_dir>/rescore-<time>.json first.
 """
 import argparse
@@ -22,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from worker import attribution as attribution_mod, config, llm, sources as sources_mod  # noqa: E402
 from worker.db import DB, iso, utcnow  # noqa: E402
+from worker import rank  # noqa: E402
 from worker.importance import HARD_NEWS  # noqa: E402
 
 SQL = """
@@ -41,10 +43,19 @@ def histogram(rows, key="importance"):
             "share>=8": round(sum(v >= 8 for v in hard) / len(hard), 3) if hard else None}
 
 
+def new_type(row, res):
+    """A new type is taken only when it takes the item out of every tab (explainer, podcast...): a stored card was
+    validated for its old type, so turning news into analysis would ship it without its "Analysis:" label."""
+    return res.type if res.type in rank.NEVER_TYPES else row["type"]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--hours", type=float, default=72)
     ap.add_argument("--rate", type=int, default=15, help="calls per minute (the worker has its own 30)")
+    ap.add_argument("--min-importance", type=int, default=1, help="only items currently scored at least this")
+    ap.add_argument("--from-hours", type=float, default=0, help="only items published at least this long ago")
+    ap.add_argument("--topics", default="", help="only items with one of these comma-separated topics")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     cfg = config.load()
@@ -55,12 +66,16 @@ def main():
     srcs = sources_mod.load()
     by_id = srcs.by_id()
     now = utcnow()
-    rows = [dict(r) for r in db.q(SQL, iso(now - timedelta(hours=args.hours)))]
+    want = set(filter(None, args.topics.split(",")))
+    rows = [dict(r) for r in db.q(SQL, iso(now - timedelta(hours=args.hours)))
+            if (r["importance"] or 0) >= args.min_importance
+            and r["published_at"] <= iso(now - timedelta(hours=args.from_hours))
+            and (not want or want & set(json.loads(r["topics"] or "[]")))]
     print(f"{len(rows)} items; before: {histogram(rows)}")
     if args.dry_run:
         return
     backup = config.state_path(cfg, f"rescore-{now.strftime('%Y%m%dT%H%M%SZ')}.json")
-    json.dump([{k: r[k] for k in ("url_canonical", "importance", "topics")} for r in rows], open(backup, "w"))
+    json.dump([{k: r[k] for k in ("url_canonical", "importance", "topics", "type")} for r in rows], open(backup, "w"))
     key = llm.api_key()
     client = llm.Client(cfg["llm"]["base_url"], key, llm.TokenBucket(rate=args.rate, per=60.0),
                         timeout=cfg["llm"]["timeout_s"])
@@ -88,10 +103,10 @@ def main():
                 failed += 1
                 after.append(r)
                 continue
-            db.conn.execute("UPDATE writes SET importance = ?, topics = ? WHERE url_canonical = ?",
-                            (res.importance, json.dumps(res.topics), r["url_canonical"]))
+            db.conn.execute("UPDATE writes SET importance = ?, topics = ?, type = ? WHERE url_canonical = ?",
+                            (res.importance, json.dumps(res.topics), new_type(r, res), r["url_canonical"]))
             db.commit()
-            after.append({**r, "importance": res.importance, "topics": json.dumps(res.topics)})
+            after.append({**r, "importance": res.importance, "topics": json.dumps(res.topics), "type": new_type(r, res)})
             done += 1
             if done % 50 == 0:
                 print(f"  {done}/{len(rows)}", flush=True)

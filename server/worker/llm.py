@@ -286,12 +286,14 @@ PROMPT = """Return this JSON object:
 Classification:
 - is_news: true when it reports something that happened or was announced; false for evergreen how-tos, \
 explainers, reviews, essays without news, promos.
-- type, one of: news (reporting; the default), launch (a product, model or feature release), funding (a startup \
+- type, one of: news (reporting a new fact; the default), launch (a product, model or feature release), funding (a startup \
 raise or a new VC fund), acquisition, earnings, policy (law, regulation, government action), security_incident \
 (breach, hack, outage, exploited vulnerability), analysis (reported analysis or commentary on news), opinion \
 (a columnist's or pundit's view), interview, review (a product review), tutorial, explainer (evergreen background), \
 release_notes (version notes for a library, tool or app), customer_story (a vendor's story about a customer using \
-its product), podcast, promo, deal (a shopping deal), other.
+its product), podcast, promo, deal (a shopping deal), other. A profile ("Who is ..."), timeline, "what we know" \
+or "what happens next" piece, live blog or round-up of reactions to a known story is explainer or analysis, \
+not news, even when it is current.
 - relevance, how relevant to tech professionals in Bengaluru and the Bay Area: 3 = core tech or business news; \
 2 = adjacent (science, or policy with a tech angle); 1 = tangential; 0 = off-topic (US partisan politics, \
 entertainment, celebrity, cars without a tech angle).
@@ -700,6 +702,8 @@ for a new major development (a resignation, a ruling, a new deal).
   "Kestrel AI releases Kestrel 5, topping every major coding and reasoning benchmark" = 9, launch
   "Hackers steal 80 million customer records from telecom giant Varnet" = 8, security_incident
   "Novacloud beats on revenue and lifts full-year guidance" = 7, earnings
+  "Orbitly shares fall 6% a day after its CEO's exit" (a follow-up with a new fact) = 6, news
+  "Who is Mira Patel, Orbitly's interim CEO?" (a profile after the CEO's exit) = 4, explainer
   "Brightloop raises $80M Series B for warehouse robots" = 6, funding
   "Zentra releases a 1T-parameter open model for coding agents" = 6, launch
   "Markets regulator issues rules for AI use by stock brokers" = 5, policy
