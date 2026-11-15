@@ -186,6 +186,10 @@ def entity_keys(entities):
 
 # Items
 
+NO_TEXT_DROP = "held_out:no_text"
+LOST_TEXT_H = 48
+
+
 @dataclass
 class Item:
     url: str
@@ -219,6 +223,7 @@ class Item:
     feed_text: str = None
     via: str = None             # items.extra.via: the signal source whose link this article was imported from
     news_at: object = None      # when its news happened, if days before the article (newsdate.py)
+    signals: dict = field(default_factory=dict)    # items.extra.signals: {signal source id: {points, ...}}
     keys: set = field(default_factory=set)
 
     @property
@@ -262,7 +267,7 @@ def _item(r):
               summary_short=r["summary_short"], notif_line=r["notif_line"], s1=r["s1"],
               entailed=r["entailed"], text=r["text"], spice=r["spice"], notif_title=r["notif_title"],
               publisher=extra.get("publisher"), feed_text=r["feed_text"], via=extra.get("via"),
-              news_at=from_iso(r["news_at"]))
+              news_at=from_iso(r["news_at"]), signals=extra.get("signals") or {})
     it.keys = entity_keys(ents)
     return it
 
@@ -270,9 +275,14 @@ def _item(r):
 def pending_items(db, now, max_age_days=14):
     """Classified items not yet in an event, oldest publisher time first. Thin items that found no event stay
     pending (they may never start one), so they are retried each tick until they age out."""
-    rows = db.q(ITEM_SQL + " WHERE w.type IS NOT NULL AND i.status != 'dropped' AND i.published_at >= ?"
+    # An item dropped only because its text could not be had ("held_out:no_text": three fetches of an open
+    # site failed, or a paywall) keeps its classification and stays clusterable for LOST_TEXT_H: it can still
+    # back an event up, and one the tech world is sharing can still start one and get a brief (thin_can_seed).
+    rows = db.q(ITEM_SQL + " WHERE w.type IS NOT NULL AND (i.status != 'dropped' OR (i.drop_rule = ?"
+                " AND i.published_at >= ?)) AND i.published_at >= ?"
                 " AND i.url_canonical NOT IN (SELECT url_canonical FROM event_members)"
-                " ORDER BY i.published_at, i.url_canonical", iso(now - timedelta(days=max_age_days)))
+                " ORDER BY i.published_at, i.url_canonical", NO_TEXT_DROP, iso(now - timedelta(hours=LOST_TEXT_H)),
+                iso(now - timedelta(days=max_age_days)))
     return [_item(r) for r in rows]
 
 
@@ -566,7 +576,24 @@ def thin_can_seed(store, item):
     if not item.hard or item.relevance < 2:
         return False
     via = store.by_id.get(item.via) if item.via else None
-    return store.authority(item.source_id) >= SEED_AUTHORITY or (via is not None and via.kind == "techmeme")
+    return (store.authority(item.source_id) >= SEED_AUTHORITY or (via is not None and via.kind == "techmeme")
+            or widely_shared(store, item))
+
+
+# The same bars as rank.STRONG_HN and rank.STRONG_LOBSTERS: a story this widely shared gets a short attributed
+# card from the lines available even when its page cannot be fetched, the way a paywalled scoop does.
+SEED_HN, SEED_LOBSTERS = 300, 100
+
+
+def widely_shared(store, item):
+    """Is the item itself a big Hacker News or Lobsters link (its own points, kept in items.extra.signals)?"""
+    for sid, pts in (item.signals or {}).items():
+        src = store.by_id.get(sid)
+        kind = (src.kind or ("hn" if sid.startswith("hn") else "")) if src else ""
+        points = (pts or {}).get("points") or 0
+        if (kind == "hn" and points >= SEED_HN) or (kind == "lobsters" and points >= SEED_LOBSTERS):
+            return True
+    return False
 
 
 def create(store, item, parent_id=None, how="new"):
@@ -884,6 +911,8 @@ BRIEF = "brief"
 BRIEF_MAX_AGE_H = 24
 BRIEF_RETRY = timedelta(minutes=20)
 BRIEF_MIN_WORDS = 25
+BRIEF_MIN_WORDS_SHARED = 16
+HN_LINE = "Hacker News (discussion, not the source of the report)"
 BRIEF_HN = 150
 BRIEF_SOLO_IMPORTANCE = 7
 MAX_BRIEFS = 3
@@ -912,6 +941,12 @@ def brief_lines(store, ev):
             text = " ".join((r["feed_text"] or "").split()[:90])
             if not any(text[:60].lower() == t[:60].lower() for _, _, t in out):
                 out.append((f"{src.name} (summary of the report)", r["title"].strip(), text))
+    # How widely the link is being discussed is itself a line the card may state: for a page that cannot be
+    # fetched it is often the only fact besides the title.
+    hn = json.loads(ev.row.get("hn") or "null") or {}
+    if (hn.get("points") or 0) >= BRIEF_HN:
+        out.append((HN_LINE, f"The link has {hn['points']} points and {hn.get('comments') or 0} comments on "
+                             f"Hacker News", ""))
     return out
 
 
@@ -933,7 +968,10 @@ def brief_due(store, ev):
     if not (row.get("on_techmeme") or (row.get("n_publishers") or 0) >= 2 or hn >= BRIEF_HN or solo):
         return False
     lines = brief_lines(store, ev)
-    if sum(len(f"{title} {text}".split()) for _, title, text in lines) < BRIEF_MIN_WORDS:
+    # A story Techmeme headlines or Hacker News is discussing at length gets its card from less: the title and
+    # the discussion line are enough for a headline and one attributed sentence.
+    need = BRIEF_MIN_WORDS_SHARED if row.get("on_techmeme") or hn >= SEED_HN else BRIEF_MIN_WORDS
+    if sum(len(f"{title} {text}".split()) for _, title, text in lines) < need:
         return False
     last = from_iso(row.get("rewritten_at"))
     return (last is None or now - last >= BRIEF_RETRY

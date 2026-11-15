@@ -6,9 +6,9 @@ from datetime import timedelta
 
 import pytest
 
-from worker import cluster, llm, newsdate, publish_v1, rank, text, validate  # noqa: F401
+from worker import cluster, embed, fetch, llm, newsdate, publish_v1, rank, text, validate  # noqa: F401
 from worker.db import from_iso, iso
-from test_second_run_review import Replies, _written
+from test_second_run_review import CFG as BRIEF_CFG, Replies, _thin, _written
 from test_validate import CFG as WRITE_CFG, DAYLIGHT, DAYLIGHT_SRC, FakeClient, _db_with, _sources
 from test_spice_and_truth import (NOW, S, SEBI, SEBI_SRC, SEBI_TITLE, SRCS, _cand, _db, _item, _judge,  # noqa: F401
                                   _stored, check, out)
@@ -386,3 +386,113 @@ def test_old_news_is_shown_with_its_own_date_and_is_never_an_alert():
     db.conn.execute("UPDATE items SET feed_published_at = NULL, first_seen_at = published_at WHERE url_canonical = ?",
                     (fresh.url,))
     assert publish_v1.build(ctx)[1]["notifications"] == []
+
+
+# 4. A widely shared story is not lost when its page cannot be fetched, and a screening drop is not final
+
+LOVABLE = "Lovable apps expose passport details and more than 200K private messages"
+LOVABLE_OG = ("An investigation of 159,041 Lovable projects found apps exposing passport scans, and one forum "
+              "leaking more than 200,000 private chat messages without a login.")
+
+
+def _hn_item(url, title, text_, points, vec=(1, 0, 0)):
+    it = _thin(url, title, text_, "web", imp=6, people=(), type="security_incident", vec=list(vec))
+    it.signals, it.via, it.publisher = {"hn": {"points": points, "comments": 368}}, "hn", "crissyfield.de"
+    return it
+
+
+def test_a_big_hacker_news_link_with_no_fetchable_page_still_gets_an_attributed_card():
+    db = _db()
+    big = _hn_item("https://crissyfield.test/lovable", LOVABLE, LOVABLE_OG, 969)
+    small = _hn_item("https://blog.test/minor", "A minor note on app security", "A short note.", 180, vec=(0, 1, 0))
+    _written(db, [big, small])
+    for it in (big, small):
+        db.conn.execute("UPDATE items SET extra = ? WHERE url_canonical = ?",
+                        (json.dumps({"via": "hn", "publisher": it.publisher, "signals": it.signals}), it.url))
+        db.add_sighting(it.url, "hn", it.title, None, NOW)
+        db.conn.execute("INSERT INTO embeddings VALUES (?,?,?,?,?,?,?)",
+                        (it.url, "passage", "m", 3, None, embed.to_blob(it.vec), iso(NOW)))
+    # Three fetches failed and the item was dropped for want of text: it is still there to cluster for two days.
+    db.conn.execute("UPDATE items SET status = 'dropped', drop_rule = 'held_out:no_text' WHERE url_canonical = ?",
+                    (big.url,))
+    pending = {i.url: i for i in cluster.pending_items(db, NOW)}
+    assert big.url in pending and pending[big.url].signals == big.signals
+    assert big.url not in {i.url for i in cluster.pending_items(db, NOW + timedelta(hours=cluster.LOST_TEXT_H + 1))}
+    db.conn.execute("UPDATE items SET status = 'dropped', drop_rule = 'triage_dull' WHERE url_canonical = ?",
+                    (small.url,))
+    assert small.url not in {i.url for i in cluster.pending_items(db, NOW)}     # a judgement drop is not text lost
+    store = cluster.Store(db, SRCS, S, NOW, _judge({}, []))
+    assert cluster.widely_shared(store, big) and not cluster.widely_shared(store, small)
+    eid, how = cluster.assign(store, big)
+    assert how == "thin_seed"
+    assert cluster.assign(store, small) == (None, "thin_unmatched")             # 180 points start nothing
+    cluster.attach_signals(store)
+    ev = store.events[eid]
+    cluster.refresh(store, ev, lambda s: True)
+    assert json.loads(ev.row["hn"])["points"] == 969 and cluster.brief_due(store, ev)
+    lines = cluster.brief_lines(store, ev)
+    assert lines[0][:2] == ("crissyfield.de", LOVABLE) and lines[-1][0] == cluster.HN_LINE
+    assert "969 points and 368 comments" in lines[-1][1]
+    card = {"spice": 8, "headline": "Report: Lovable apps expose passport details and 200K messages",
+            "headline_short": "Lovable apps expose passports",
+            "s1": "An investigation of 159,041 Lovable projects found apps exposing passport scans, crissyfield.de "
+                  "reports.",
+            "s2": "The link has 969 points and 368 comments on Hacker News.",
+            "notif_title": "Lovable apps expose passports",
+            "notif_line": "One forum built on Lovable leaked more than 200,000 private chat messages."}
+    client = Replies(card, {"entailed": "yes"})
+    assert llm.brief_event(client, BRIEF_CFG, store, ev) is True
+    assert "HACKER NEWS (DISCUSSION" in client.calls[0][2] and "never whose reporting" in llm.BRIEF_PROMPT
+    assert ev.row["text_from"] == cluster.BRIEF and ev.row["headline"] == card["headline"]
+    # Hacker News is where it is discussed, never whose reporting it is: a card that credits it fails.
+    bad = {**card, "headline": "Lovable apps expose passport details and 200K private messages",
+           "s1": "An investigation of 159,041 Lovable projects found apps exposing passport scans, Hacker News says."}
+    ev.row.update(headline=None, summary=None, text_from=None, rewritten_at=None)
+    assert llm.brief_event(Replies(bad, bad), BRIEF_CFG, store, ev) is False
+    # A title alone, with a big thread, is enough for a brief; a title alone with a small one is not.
+    assert cluster.BRIEF_MIN_WORDS_SHARED < len(f"{LOVABLE} {lines[-1][1]}".split()) < cluster.BRIEF_MIN_WORDS
+
+
+def _dropped(db, url, title, rule, signals=None, source_id="techcrunch", pub=NOW):
+    db.insert_item({"url_canonical": url, "url": url, "source_id": source_id, "title": title, "first_seen_at": pub,
+                    "published_at": pub, "status": "dropped", "drop_rule": rule,
+                    "extra": {"signals": signals} if signals else {}})
+
+
+SNL = "SNL gathers all the tech tycoons for a lesson in dating and spycraft"
+PROMOTE_CFG = {"signals": {"promote": {"hn": 150, "lobsters": 60}}}
+
+
+def test_a_screening_drop_is_reconsidered_when_traction_arrives():
+    """TechCrunch's SNL piece was dropped triage_offtopic at 20:23 and stayed dropped."""
+    db = _db()
+    _dropped(db, "https://tc.test/snl", SNL, "triage_offtopic", {"hn": {"points": 40}})
+    _dropped(db, "https://tc.test/deal", "The best laptop deals this week", "triage_shopping",
+             {"hn": {"points": 900}})
+    _dropped(db, "https://tc.test/old", "An old dull item", "triage_dull", {"hn": {"points": 900}},
+             pub=NOW - timedelta(hours=60))
+    assert fetch.promote_signals(db, SRCS, PROMOTE_CFG, NOW) == 0          # 40 points: not yet
+    db.conn.execute("UPDATE items SET extra = ? WHERE url_canonical = 'https://tc.test/snl'",
+                    (json.dumps({"signals": {"hn": {"points": 210, "comments": 90}}}),))
+    assert fetch.promote_signals(db, SRCS, PROMOTE_CFG, NOW) == 1
+    row = db.item("https://tc.test/snl")
+    assert (row["status"], row["drop_rule"], row["triaged"]) == ("new", None, 1)       # written, not screened again
+    assert json.loads(row["extra"])["via"] == "hn"
+    # A shopping drop is a different judgement (not "is it tech"), and an old item stays where it is.
+    assert db.item("https://tc.test/deal")["status"] == db.item("https://tc.test/old")["status"] == "dropped"
+
+
+def test_drops_are_screened_again_when_the_screening_prompt_changes():
+    db = _db()
+    _dropped(db, "https://tc.test/snl", SNL, "triage_offtopic")
+    _dropped(db, "https://tc.test/q", "How to change your app icons", "title_question")
+    _dropped(db, "https://tc.test/old", "An old off-topic item", "triage_offtopic", pub=NOW - timedelta(hours=40))
+    assert llm.rescreen_on_prompt_change(db, NOW) == 1         # the prompt these were judged by is not on record
+    assert db.item("https://tc.test/snl")["status"] == "new" and db.item("https://tc.test/snl")["triaged"] is None
+    assert db.item("https://tc.test/q")["status"] == db.item("https://tc.test/old")["status"] == "dropped"
+    db.conn.execute("UPDATE items SET status = 'dropped', drop_rule = 'triage_offtopic' WHERE url_canonical = ?",
+                    ("https://tc.test/snl",))
+    assert llm.rescreen_on_prompt_change(db, NOW) == 0         # same prompt: its judgement stands
+    db.set_meta("triage_prompt_sha", "an older prompt")
+    assert llm.rescreen_on_prompt_change(db, NOW) == 1
+    assert "SNL gathers all the tech tycoons" in llm.TRIAGE_PROMPT

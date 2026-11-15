@@ -478,17 +478,44 @@ def promote_signals(db, srcs, cfg, now):
                 db.add_sighting(target, r["source_id"], r["title"], from_iso(r["feed_published_at"]), now)
                 done("item")
             made += 1
-        elif existing["status"] == "dropped" and existing["drop_rule"] in REVIVABLE and kind == "techmeme":
+        elif existing["status"] == "dropped" and existing["drop_rule"] in REVIVABLE:
             # The feed's category filter or the screening call dropped it as off-topic or dull, and Techmeme's
-            # editors then picked it: their judgement wins, and the item is written after all.
-            keep = json.loads(existing["extra"] or "{}")
-            db.conn.execute("UPDATE items SET status = 'new', drop_rule = NULL, triaged = 1, extra = ?"
-                            " WHERE url_canonical = ?", (json.dumps({**keep, "via": r["source_id"]}), target))
+            # editors then picked it (or it passed the points bar on Hacker News or Lobsters): that judgement
+            # wins, and the item is written after all.
+            revive(db, existing, r["source_id"])
             done("revived")
             made += 1
         else:
             done("known")       # a news source already carries the linked article
-    return made
+    return made + revive_shared(db, by_id, bars, since)
+
+
+def revive(db, existing, via):
+    keep = json.loads(existing["extra"] or "{}")
+    db.conn.execute("UPDATE items SET status = 'new', drop_rule = NULL, triaged = 1, attempts = 0, retry_at = NULL,"
+                    " extra = ? WHERE url_canonical = ?",
+                    (json.dumps({**keep, "via": via}), existing["url_canonical"]))
+
+
+def revive_shared(db, by_id, bars, since):
+    """A screening drop is not final: an item a news source listed, dropped as off-topic or dull, that Hacker
+    News or Lobsters then carries past the import bar is written after all. Such a link has no signal row of its
+    own (the URL is the news item's; its points live in the item's extra.signals), so promote_signals' loop over
+    signal rows never saw it: TechCrunch's "SNL gathers all the tech tycoons for a lesson in dating and spycraft"
+    was dropped as off-topic and stayed dropped whatever followed. Returns the number revived."""
+    marks = ",".join("?" * len(REVIVABLE))
+    n = 0
+    for r in db.q(f"SELECT * FROM items WHERE status = 'dropped' AND drop_rule IN ({marks})"
+                  " AND extra LIKE '%\"signals\"%' AND published_at >= ?", *REVIVABLE, since):
+        for sid, pts in (json.loads(r["extra"] or "{}").get("signals") or {}).items():
+            source = by_id.get(sid)
+            kind = (source.kind or ("hn" if sid.startswith("hn") else sid)) if source else None
+            bar = bars.get(kind) if kind in ("hn", "lobsters") else None
+            if bar is not None and (pts.get("points") or 0) >= bar:
+                revive(db, r, sid)
+                n += 1
+                break
+    return n
 
 
 def record(db, source, sources, res, now, cfg):

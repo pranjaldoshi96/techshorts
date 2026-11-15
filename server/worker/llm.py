@@ -859,6 +859,9 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
     rows = priority(rows, srcs, db)
     # One cheap screening call for the tick's unseen items, before any of them costs a full write: the wide source
     # list (business press, gossip, gaming, crypto, regulators) carries much that has no tech angle at all.
+    if llm_cfg.get("triage") and rescreen_on_prompt_change(db, now):
+        rows = priority([r for r in db.pending_writes(now)
+                         if r["source_id"] in by_id and not by_id[r["source_id"]].is_signal], srcs, db)
     if llm_cfg.get("triage") and rows:
         vetted = _techmeme_linked(db)
         fresh = [r for r in rows if r["status"] == "new" and not r["triaged"] and r["url_canonical"] not in vetted
@@ -1012,8 +1015,10 @@ def backdate(db, row, text):
 
 # Briefs: a short attributed card for a story with traction and no full text (cluster.brief_due)
 
-BRIEF_PROMPT = """A story is breaking and only short reports of it are available: paywalled outlets' headlines \
-and opening lines, and Techmeme's summary of the report. Write a short card from these LINES and nothing else.
+BRIEF_PROMPT = """A story is breaking and only short reports of it are available: outlets' headlines and \
+opening lines (a paywall, or a page that could not be read), and Techmeme's summary of the report. Write a short \
+card from these LINES and nothing else. A HACKER NEWS line, when there is one, says how widely the link is being \
+discussed: the card may state that as a fact about the discussion, but Hacker News is never whose reporting it is.
 
 Return this JSON object:
 {"spice": 1-10, "headline": "...", "headline_alt": "...", "headline_short": "...", "s1": "...", "s2": "...",
@@ -1055,7 +1060,10 @@ def brief_event(client, cfg, store, ev):
         return False
     row["rewritten_at"] = cluster.iso(now)
     row["rewrite_publishers"] = row.get("publishers")
-    outlets = [name for name, _, _ in lines]
+    # Whose reporting it is: the outlets, never the place it is being discussed.
+    outlets = [name for name, _, _ in lines if name != cluster.HN_LINE]
+    if not outlets:
+        return False
     block = "\n".join(f"{name.upper()}: {title}" + (f" | {text}" if text else "") for name, title, text in lines)
     source_text = "\n".join(f"{name}: {title}. {text}" for name, title, text in lines)
     base = [{"role": "system", "content": SYSTEM},
@@ -1361,6 +1369,24 @@ Items:
 <<items>>"""
 TRIAGE_BATCH = 40
 TRIAGE_RULES = ("offtopic", "shopping", "dull")
+RESCREEN_WINDOW = timedelta(hours=36)
+
+
+def rescreen_on_prompt_change(db, now):
+    """Puts the last day and a half of screening drops back in the queue when the screening prompt has changed
+    since they were judged (or was never recorded): a drop is the prompt's judgement, and it should not outlive
+    the prompt. The SNL sketch about the tech tycoons was dropped as off-topic an hour before the prompt learned
+    that a culture moment about tech people is a keep, and never came back. Returns the number requeued."""
+    import hashlib
+    sha = hashlib.sha1(TRIAGE_PROMPT.encode()).hexdigest()[:12]
+    if db.get_meta("triage_prompt_sha") == sha:
+        return 0
+    db.set_meta("triage_prompt_sha", sha)
+    cur = db.conn.execute("UPDATE items SET status = 'new', drop_rule = NULL, triaged = NULL WHERE status = 'dropped'"
+                          " AND drop_rule LIKE 'triage_%' AND published_at >= ?", (iso(now - RESCREEN_WINDOW),))
+    if cur.rowcount:
+        log.info("screening prompt changed: %d dropped items go back to screening", cur.rowcount)
+    return cur.rowcount
 
 
 def triage_batch(client, cfg, rows, by_id):
