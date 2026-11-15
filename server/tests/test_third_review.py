@@ -496,3 +496,87 @@ def test_drops_are_screened_again_when_the_screening_prompt_changes():
     db.set_meta("triage_prompt_sha", "an older prompt")
     assert llm.rescreen_on_prompt_change(db, NOW) == 1
     assert "SNL gathers all the tech tycoons" in llm.TRIAGE_PROMPT
+
+
+# 5. Typing and filing: commentary is not rewritten into "the event"; a big security story is Dev and Top news
+
+def test_commentary_is_never_rewritten_or_rescored_as_the_event():
+    """ev_623d4c31f8: a Decrypt recap, a Business Insider analysis and an FT opinion line were rewritten into
+    "Analysis: Jensen Huang resigns as Nvidia CEO after reports of affairs", re-scored 9, and took the saga's
+    main-event place at Top rank 35 while the resignation report itself was cut."""
+    db = _db()
+    recap = _item("https://decrypt.test/week", [1, 0, 0], "The Week Jensen Huang Fell", source_id="decrypt",
+                  type="analysis", imp=4, pub=NOW - timedelta(hours=28))
+    view = _item("https://bi.test/next", [0.9, 0.4, 0], "Nvidia's next CEO will inherit more than Huang's job",
+                 source_id="businessinsider", type="analysis", imp=4, pub=NOW - timedelta(hours=12))
+    third = _item("https://verge.test/after", [0.9, 0.3, 0.2], "What Nvidia looks like after Huang",
+                  source_id="verge", type="analysis", imp=5, pub=NOW - timedelta(hours=10))
+    _written(db, [recap, view, third])
+    store = cluster.Store(db, SRCS, S, NOW)
+    eid, _ = cluster.create(store, recap)
+    ev = store.events[eid]
+    for m in (view, third):
+        cluster.join(store, ev, m, 0.9, "judge")
+    cluster.refresh(store, ev, lambda s: True)
+    assert ev.row["type"] == "analysis" and "publishers" in ev.row["rewrite_reason"]
+    assert not cluster.due_rewrite(ev.row, NOW, S)                      # three authors' views are not one report
+    # A state written before this rule: the rewrite's headline and its 9 go, the lead's own card comes back.
+    ev.row.update(text_from="rewrite", headline="Analysis: Jensen Huang resigns as Nvidia CEO after reports of affairs",
+                  rewrite_importance=9)
+    cluster.refresh(store, ev, lambda s: True)
+    assert ev.row["headline"] == ev.members[0].headline or ev.row["headline"] in {m.headline for m in ev.members}
+    assert ev.row["text_from"] != "rewrite" and ev.row["rewrite_importance"] is None and ev.row["importance"] <= 5
+    # A report with two outlets behind it is still rewritten.
+    news = _item("https://it.test/resigns", [0, 1, 0], "Jensen Huang resigns", source_id="indiatoday_tech", imp=8)
+    more = [_item(f"https://x{i}.test/resigns", [0, 1, 0.1 * i], "Huang resigns", source_id=s, imp=8)
+            for i, s in enumerate(("cnbc", "bbc"), 1)]
+    _written(db, [news, *more])
+    nid, _ = cluster.create(store, news)
+    for m in more:
+        cluster.join(store, store.events[nid], m, 0.9, "judge")
+    cluster.refresh(store, store.events[nid], lambda s: True)
+    assert cluster.due_rewrite(store.events[nid].row, NOW, S)
+
+
+LOVABLE_HEAD = "Lovable apps expose passport details, investigation finds"
+LOVABLE_SUM = ("One German lifestyle forum exposed more than 200,000 chat messages without requiring a login. The "
+               "investigation analyzed 159,041 projects, focusing on Supabase databases rather than Lovable's own.")
+
+
+def _sec(title, topics=("security",), summary="", **kw):
+    c = _cand("sec", type="security_incident", topics=topics, title=title, **kw)
+    c.data = {"summary": summary}
+    return c
+
+
+def test_a_widely_shared_security_story_is_dev_and_top_news_not_startups():
+    """ev_c8d55e521b (crissyfield.de, HN 969, spice 8, topics [security, ai, startups_funding]): no Top rank, and
+    filed under Startups."""
+    dev, st = rank.TABS["dev"], rank.TABS["startups"]
+    lovable = _sec(LOVABLE_HEAD, ("security", "ai", "startups_funding"), LOVABLE_SUM, importance=6, spice=8, hn=969)
+    lovable.unvetted = True
+    assert rank.eligible(lovable, dev, NOW) is None             # its summary is about Supabase databases
+    assert rank.eligible(lovable, st, NOW) == "topic"           # a breach is not startup news
+    assert rank.eligible(lovable, TOP, NOW) is None             # one of the day's biggest threads
+    assert not rank.notifiable(lovable)                         # ... but no push alert without a second outlet
+    small = _sec(LOVABLE_HEAD, ("security", "ai"), LOVABLE_SUM, importance=7, spice=8, hn=448)
+    small.unvetted = True
+    assert rank.eligible(small, TOP, NOW) == "unvetted"         # the second review's case still holds
+    placed = [("ai", 3, 30), ("dev", 0, 20)]
+    assert publish_v1.v1_category(lovable, placed, True) == "Dev"
+    assert publish_v1.v1_category(lovable, [("ai", 3, 30)], True) == "AI"       # only when it made Dev
+
+
+@pytest.mark.parametrize("title,summary,is_dev", [
+    # The third review's Dev tab: an HR data leak, one of its three cards under a day old.
+    ("TSMC confirms employee data leak tied to cloud service provider",
+     "The chipmaker says information about current and former staff appeared online.", False),
+    ("Hospital chain says patient records were stolen from cloud storage", "", False),
+    ("Cursor breach exposed customer data and API credentials", "", True),
+    ("Attackers exploit UnrealIRCd flaw to inject server commands", "", True),
+    ("Malicious npm packages steal cloud credentials", "", True),
+    ("Attackers steal AWS credentials from a CI runner", "", True),
+    ("Workday outage locks millions of employees out of their accounts", "", False),
+])
+def test_dev_takes_a_breach_for_its_developer_angle_not_for_a_word(title, summary, is_dev):
+    assert (rank.eligible(_sec(title, summary=summary), rank.TABS["dev"], NOW) is None) == is_dev

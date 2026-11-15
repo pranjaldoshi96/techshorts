@@ -40,7 +40,9 @@ log = logging.getLogger("techgist")
 
 V1_CATEGORY = {"ai": "AI", "startups": "Startups", "dev": "Dev", "reads": "Blogs"}
 # The tab an event's main topic (its first) belongs in, preferred over the relative-rank rule in v1_category.
-PRIMARY_TAB = {"ai": "ai", "startups_funding": "startups", "dev_tools": "dev"}
+# A security incident that made Dev (rank.dev_security: it has a developer angle) is filed there, not under
+# whichever other tab it also reached.
+PRIMARY_TAB = {"ai": "ai", "startups_funding": "startups", "dev_tools": "dev", "security": "dev"}
 V1_CATEGORIES = ("Top", "AI", "Startups", "Dev", "Blogs")
 URL_SAFE = ":/?#[]@!$&'()*+,;=%~-._"
 MAX_WINDOW = timedelta(days=14)

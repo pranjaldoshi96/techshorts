@@ -863,6 +863,9 @@ def refresh(store, ev, tier1_ok):
         row.update(type=lead.type, topics=json.dumps(lead.topics), region=lead.region, relevance=lead.relevance,
                    is_news=int(lead.is_news))
         own = bool(lead.headline and lead.status == "ok")
+        if row.get("text_from") == "rewrite" and not lead.hard:
+            # An earlier rewrite of commentary (see due_rewrite): the lead's own card and score come back.
+            row.update(text_from=None, rewrite_importance=None, rewrite_reason=None)
         if row.get("text_from") == BRIEF and not own and row.get("headline"):
             pass        # the brief stands until a member's own card validates (an open outlet's report)
         elif row.get("text_from") != "rewrite" or prev_lead != lead.url:
@@ -1390,6 +1393,11 @@ def due_rewrite(row, now, s):
     """A rewrite at most every 2 h, except a hard-news material update, which goes straight through."""
     reasons = set(filter(None, (row.get("rewrite_reason") or "").split(",")))
     if not reasons or (row.get("n_publishers") or 0) < 2:
+        return False
+    # Commentary is each author's own: three analyses of a week-old resignation, rewritten into one card and
+    # re-scored as "the event", shipped as "Analysis: Jensen Huang resigns as Nvidia CEO after reports of
+    # affairs" at importance 9. A rewrite merges reports of one development, so it needs a report to lead it.
+    if row.get("type") not in HARD_NEWS:
         return False
     last = from_iso(row.get("rewritten_at"))
     return "material_update" in reasons or last is None or now - last >= timedelta(hours=s.rewrite_cap_h)

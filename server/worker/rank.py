@@ -76,13 +76,28 @@ DEV_LABELLED_MIN = 5
 # Workday outage, a consumer scam explainer, an airline blocking AI agents and a weapons platform, all typed
 # security_incident with the "security" topic.
 DEV_SECURITY = re.compile(
-    r"\b(vulnerab\w*|cves?|cve-[\d-]+|zero-days?|0-days?|exploit\w*|patch\w*|npm|pypi|crates\.io|packages?|"
+    r"\b(vulnerab\w*|cves?|cve-[\d-]+|zero-days?|0-days?|exploit\w*|patch\w*|npm|pypi|crates\.io|"
     r"supply[- ]chain|github|gitlab|bitbucket|ci/cd|repos?|repositor\w+|source code|codebase|apis?|api keys?|sdks?|"
-    r"secrets|credentials|aws|azure|gcp|cloud|kubernetes|docker|containers?|linux|kernel|open[- ]source|"
-    r"developers?|coding|devops|post-?mortem|backdoor\w*|firmware)\b", re.I)
+    r"kubernetes|docker|containers?|linux|kernel|open[- ]source|developers?|coding|devops|post-?mortem|"
+    r"backdoor\w*|firmware|supabase|firebase|databases?|vibe[- ]cod\w+|app builders?|coding agents?|"
+    r"prompt injection)\b", re.I)
+# Words that make a breach developer news only when it is not, at heart, a leak of people's records: the third
+# review's Dev tab carried "TSMC confirms employee data leak tied to cloud service provider" (an HR data leak,
+# matched on "cloud"), one of its three cards under a day old.
+DEV_SECURITY_WEAK = re.compile(r"\b(packages?|secrets|credentials|aws|azure|gcp|cloud)\b", re.I)
+PEOPLE_DATA = re.compile(
+    r"\b(employees?|staff|workers?|hr|payroll|customers?|patients?|passengers?|drivers?|students?|users?|members?)"
+    r"['’]?s?\s+(data|records|details|information|info|files)\b", re.I)
+# In the card's summary only the unmistakable terms count: "Lovable apps expose passport details, investigation
+# finds" (HN 969) names no developer term in its headline; its summary is about Supabase databases.
+DEV_SECURITY_BODY = re.compile(
+    r"\b(vulnerabilit\w+|cve-[\d-]+|zero-days?|npm|pypi|crates\.io|supply[- ]chain|github|gitlab|repositor\w+|"
+    r"source code|api keys?|sdks?|kubernetes|docker|open[- ]source|supabase|firebase|prompt injection)\b", re.I)
 # Startups is for startups: a big company buying one, or a big company's earnings, is not startup news unless the
 # model put startups_funding first ("Samsung in talks to acquire Modine Manufacturing" was [bigtech, startups_funding]).
-STARTUP_STRICT_TYPES = ("acquisition", "earnings")
+# Nor is a breach or outage that merely involves a startup ("Lovable apps expose passport details", topics
+# [security, ai, startups_funding], was filed under Startups).
+STARTUP_STRICT_TYPES = ("acquisition", "earnings", "security_incident")
 # A card with no validated text is a raw publisher title and a feed excerpt. Outside an LLM outage it never takes a
 # Top rank (the 2026-11 shadow led Top with a Verge column whose write failed, excerpt "...follow Terrence O'Brien.
 # Opt in for The Stepback here") and scores at most this importance elsewhere, so a written card on the same story wins.
@@ -325,6 +340,17 @@ def corroborated(c):
     return c.n_publishers >= 2 or c.on_techmeme
 
 
+# A report from a site nobody chose may take a Top rank without a second outlet once Hacker News has made it one
+# of the day's biggest threads. The bar is importance.py's upper one: the second review found sites taking Top
+# on a link of a few hundred points (the test case had 448), the third found "Lovable apps expose passport
+# details" (969 points, spice 8) kept out of Top altogether. A push alert still needs a second outlet.
+UNVETTED_TOP_HN = 600
+
+
+def vetted_for_top(c):
+    return corroborated(c) or c.hn_points >= UNVETTED_TOP_HN
+
+
 def traction_pass(c, tab, now):
     """A story the tech world is plainly following may sit up to two importance points under a tab's minimum
     (see TRACTION_PUBLISHERS): Techmeme's headline of the hour scored importance 4-5 was in no tab."""
@@ -366,7 +392,13 @@ def top_fresh(c, now):
 
 
 def dev_security(c):
-    return "dev_tools" in c.topics or bool(DEV_SECURITY.search(c.title or ""))
+    """Is this security incident developer news? See DEV_SECURITY and the two lists after it."""
+    title = c.title or ""
+    if "dev_tools" in c.topics or DEV_SECURITY.search(title):
+        return True
+    if DEV_SECURITY_WEAK.search(title) and not PEOPLE_DATA.search(title):
+        return True
+    return bool(DEV_SECURITY_BODY.search(c.data.get("summary") or ""))
 
 
 def eligible(c, tab, now, degraded=False):
@@ -402,7 +434,7 @@ def eligible(c, tab, now, degraded=False):
     # A hard-news report from a site nobody chose (imported from a Hacker News or Lobsters link) needs a second
     # outlet or a Techmeme pick before it can take a Top rank: the fact-check reads the card against the page, not
     # the page's reliability. An essay is its author's view and is labelled as such.
-    if tab.id == "top" and c.unvetted and c.type not in LABELLED and not corroborated(c):
+    if tab.id == "top" and c.unvetted and c.type not in LABELLED and not vetted_for_top(c):
         return "unvetted"
     if tab.id == "top" and c.spice <= DRY and c.importance < DRY_TOP_IMPORTANCE:
         return "dry"
