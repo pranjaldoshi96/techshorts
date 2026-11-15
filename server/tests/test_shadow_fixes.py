@@ -213,7 +213,10 @@ def cand(eid, importance=6, type="news", topics=("ai",), age_h=2.0, n=1, publish
 def test_dev_needs_dev_tools_as_the_main_topic_or_a_developer_release():
     dev = rank.TABS["dev"]
     assert rank.eligible(cand("a", topics=("dev_tools", "ai")), dev, NOW) is None
-    assert rank.eligible(cand("b", type="launch", topics=("ai", "dev_tools")), dev, NOW) is None
+    # A launch needs dev_tools first ("ElevenLabs launches ElevenAI app for meeting note-taking" was [ai, dev_tools]);
+    # release notes and tutorials may carry it second.
+    assert rank.eligible(cand("b", type="launch", topics=("ai", "dev_tools")), dev, NOW) == "topic"
+    assert rank.eligible(cand("b2", type="release_notes", topics=("ai", "dev_tools")), dev, NOW) is None
     # SpaceX Starship [security, dev_tools, bigtech]; CoreWeave earnings; a bike startup's round.
     assert rank.eligible(cand("c", topics=("security", "dev_tools", "bigtech")), dev, NOW) == "topic"
     assert rank.eligible(cand("d", type="earnings", topics=("dev_tools",)), dev, NOW) == "topic"

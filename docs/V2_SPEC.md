@@ -239,6 +239,7 @@ The required prefix is `Name:` (for example `Cramer: Anthropic growth could just
   3. ≥ 8 requires ≥ 2 tier-1 publishers (tier-1 as defined for the event's region), or 1 tier-1 plus Techmeme.
   4. `release_notes`/`tutorial` cap at 4.
   5. Parsed funding ≥ $500M sets a floor of 8, but only when clamp 3 already holds.
+- **Follow-up cap (2026-11 shadow):** a member published more than 24 h after the story began (the event's first report, or its parent's for a follow-up event) counts at most 6 in the base value unless it is hard news with `material_update`. A member that reports done what the event's headline describes as coming ("set to … upcoming IPO" → "IPO lands") is a material update even when the model said otherwise.
 - **Drift check:** `health.json` publishes the 24 h histogram of raw LLM importance against clamped importance. ntfy alerts when more than 10% of items score raw ≥ 8.
 
 ### 2.11 Scoring (server, region-neutral)
@@ -269,6 +270,7 @@ An event may appear in several tabs with the same id.
 | **Dev** | topics ∋ dev_tools or security | Top types + release_notes, analysis, tutorial (≤ 1 per 10) | 4 | 2 | 7 d | 48 | 20 |
 | **Reads** | lead source `reads: true` or HN-import analysis | analysis, opinion, interview, essay-like `other` | 5 | 2 | 14 d | 96 | 15 |
 
+- **2026-11 shadow rules:** a card with no validated text takes no Top rank outside an LLM outage and scores at most importance 5 elsewhere; Top also takes tier-1 hard news at importance 5 within 12 h (not explainer-style "How/Why/What" titles); Dev takes a launch only with `dev_tools` first, release notes and tutorials with `dev_tools` anywhere, and a `security_incident` only with a developer angle (dev_tools, or a vulnerability, package, code host, cloud or API platform in the headline); Startups takes acquisitions and earnings only with `startups_funding` first; a storyline (follow-ups, close headlines sharing a person/product/amount, or close headlines about the same first-named company) takes at most 2 cards per tab, and its second card must be under 24 h (age_eff); a publisher's own promo (its name plus a promo word in its title) is held; column/opinion URLs are analysis at publish, capped at importance 6.
 - **Never shipped:** `topics = []`; `relevance < 2`; `is_news = false` outside Reads and Dev; the types `review, explainer, customer_story, podcast, promo, deal`.
 - **Assembly:**
   1. Filter.
@@ -284,6 +286,7 @@ An event may appear in several tabs with the same id.
 **Mapping:**
 - **`category`** must be one of the closed enum values `Top|AI|Startups|Dev|Blogs` (`Article.swift:3-5`). India → `Startups` if the type is funding or acquisition, else `Top`. Reads → `Blogs`. Dev → `Dev`. An unknown value would make the whole decode fail (`Edition.swift:16-20` `try?`), and 1.2 would fall back to raw feeds.
 - **`topRank`** is the Top rank.
+- **`publishedAt`** is the event's first report, or its last material update when later (1.2 sorts by it).
 - **`alsoCoveredBy`** comes from the `v1_name` of the sources.
 - **`source`** is the lead's `v1_name`. New sources keep their `name`, which per-source toggles simply ignore.
 - `title` is the headline, `excerpt` is the full summary, `content` is the full summary, and `image` is the 720 px URL.

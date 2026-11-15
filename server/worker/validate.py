@@ -136,19 +136,6 @@ def select(out, attribution=None, hedge_source=None):
             styled[sent] = len(summary_problems(sent, None))
         return styled[sent]
 
-    best = None
-    for s1 in options("s1"):
-        for s2 in options("s2"):
-            for s3 in options("s3"):
-                n_short, n_full = word_count(join(s1, s2)), word_count(join(s1, s2, s3))
-                miss = (max(0, SHORT_MIN - n_short, n_short - SHORT_MAX)
-                        + max(0, FULL_MIN - n_full, n_full - FULL_MAX))
-                bad = style(s1) + style(s2) + (style(s3) if s3 else 0) + len(
-                    repeat_problems(out.headline, s1, s2, s3))
-                key = ((bad > 0) + (miss > 0), bad, miss, abs(n_full - FULL_TARGET) + abs(n_short - SHORT_TARGET))
-                if best is None or key < best[0]:
-                    best = (key, s1, s2, s3)
-    _, out.s1, out.s2, out.s3 = best
     candidates = [h for h in options("headline") + [out.headline_short] if h]
     # Analysis, opinion and interview pieces carry a label (spec 3). The model rarely adds one even when told, and
     # the label states no fact, so code adds it: "Analysis: ...". A deterministic attribution (Cramer:) is the
@@ -179,6 +166,20 @@ def select(out, attribution=None, hedge_source=None):
             labelled = [h for h in labelled if not headline_problems(h)]
             fitting = labelled + fitting
     out.headline = fitting[0] if fitting else candidates[0] if candidates else out.headline
+    # Sentences after the headline, so the repeat check sees the headline the card will show.
+    best = None
+    for s1 in options("s1"):
+        for s2 in options("s2"):
+            for s3 in options("s3"):
+                n_short, n_full = word_count(join(s1, s2)), word_count(join(s1, s2, s3))
+                miss = (max(0, SHORT_MIN - n_short, n_short - SHORT_MAX)
+                        + max(0, FULL_MIN - n_full, n_full - FULL_MAX))
+                bad = style(s1) + style(s2) + (style(s3) if s3 else 0) + len(
+                    repeat_problems(out.headline, s1, s2, s3))
+                key = ((bad > 0) + (miss > 0), bad, miss, abs(n_full - FULL_TARGET) + abs(n_short - SHORT_TARGET))
+                if best is None or key < best[0]:
+                    best = (key, s1, s2, s3)
+    _, out.s1, out.s2, out.s3 = best
     return out
 
 

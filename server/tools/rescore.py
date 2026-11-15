@@ -10,6 +10,7 @@ takes the member median until the next rewrite (with the same anchors) replaces 
 Run from server/ against a test copy's state only, with the worker running or not:
   TECHGIST_STATE=~/.techshorts-r1 python3 -m tools.rescore --hours 72 [--rate 15] [--dry-run]
   ... --hours 168 --from-hours 72 --topics dev_tools,security     # the rest of Dev's 7-day window
+  ... --hours 72 --ai-missing      # items about AI (attribution.ai_subject) that lack the "ai" topic
 Old values are saved to <state_dir>/rescore-<time>.json first.
 """
 import argparse
@@ -56,6 +57,8 @@ def main():
     ap.add_argument("--min-importance", type=int, default=1, help="only items currently scored at least this")
     ap.add_argument("--from-hours", type=float, default=0, help="only items published at least this long ago")
     ap.add_argument("--topics", default="", help="only items with one of these comma-separated topics")
+    ap.add_argument("--ai-missing", action="store_true",
+                    help="only items whose title is about AI but whose topics lack 'ai'")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     cfg = config.load()
@@ -70,12 +73,15 @@ def main():
     rows = [dict(r) for r in db.q(SQL, iso(now - timedelta(hours=args.hours)))
             if (r["importance"] or 0) >= args.min_importance
             and r["published_at"] <= iso(now - timedelta(hours=args.from_hours))
-            and (not want or want & set(json.loads(r["topics"] or "[]")))]
+            and (not want or want & set(json.loads(r["topics"] or "[]")))
+            and (not args.ai_missing or (attribution_mod.ai_subject(r["title"])
+                                         and "ai" not in json.loads(r["topics"] or "[]")))]
     print(f"{len(rows)} items; before: {histogram(rows)}")
     if args.dry_run:
         return
     backup = config.state_path(cfg, f"rescore-{now.strftime('%Y%m%dT%H%M%SZ')}.json")
-    json.dump([{k: r[k] for k in ("url_canonical", "importance", "topics", "type")} for r in rows], open(backup, "w"))
+    json.dump([{k: r[k] for k in ("url_canonical", "importance", "topics", "type", "relevance")} for r in rows],
+              open(backup, "w"))
     key = llm.api_key()
     client = llm.Client(cfg["llm"]["base_url"], key, llm.TokenBucket(rate=args.rate, per=60.0),
                         timeout=cfg["llm"]["timeout_s"])
@@ -92,7 +98,10 @@ def main():
             reply = client.chat(cfg["llm"]["model"], llm.build_messages(item, src.name if src else r["source_id"],
                                                                         r["text"], attr, cands), kind="triage",
                                 tries=2)
-            return r, llm.parse(reply)
+            out = llm.parse(reply)
+            # The deterministic rules the write path applies (the AI-subject topic and relevance floor).
+            attribution_mod.apply(out, None, r["url"], r["title"])
+            return r, out
         except (llm.LLMError, llm.BadOutput) as e:
             return r, e
 
@@ -103,8 +112,10 @@ def main():
                 failed += 1
                 after.append(r)
                 continue
-            db.conn.execute("UPDATE writes SET importance = ?, topics = ?, type = ? WHERE url_canonical = ?",
-                            (res.importance, json.dumps(res.topics), new_type(r, res), r["url_canonical"]))
+            db.conn.execute("UPDATE writes SET importance = ?, topics = ?, type = ?, relevance = MAX(relevance, ?)"
+                            " WHERE url_canonical = ?",
+                            (res.importance, json.dumps(res.topics), new_type(r, res), res.relevance,
+                             r["url_canonical"]))
             db.commit()
             after.append({**r, "importance": res.importance, "topics": json.dumps(res.topics),
                           "type": new_type(r, res)})

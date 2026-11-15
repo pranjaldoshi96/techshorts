@@ -355,6 +355,7 @@ def test_tab_overrides_from_config():
 
 def test_dev_takes_security_incidents_not_other_safety_news():
     dev = rank.TABS["dev"]
-    assert rank.eligible(cand(type="security_incident", topics=("security",), importance=7), dev, NOW) is None
+    assert rank.eligible(cand(type="security_incident", topics=("security",), importance=7,
+                              title="Malicious npm packages steal cloud credentials"), dev, NOW) is None
     assert rank.eligible(cand(type="news", topics=("security", "policy"), importance=7), dev, NOW) == "topic"
     assert rank.eligible(cand(type="launch", topics=("dev_tools",), importance=7), dev, NOW) is None

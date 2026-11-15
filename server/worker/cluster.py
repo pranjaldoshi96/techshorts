@@ -36,6 +36,33 @@ LEAD_MIN_WORDS = 120
 # are different events, and a launch and the funding round behind it usually are.
 NEVER_JOIN = {frozenset(("earnings", "security_incident"))}
 JOIN_ONLY_IF_PICKED = {frozenset(("launch", "funding"))}
+# An item on a story more than this many hours old (the event's, or its parent's, first report) adds a follow-up,
+# and scores at most FOLLOWUP_CAP for the event's importance unless it carries a material update. The model rates
+# per-item coverage of a week-long mega-story 8 whatever the anchors say (the 2026-11 shadow: hard-news 8s 58 -> 119
+# after the follow-up anchors), and one inflated member lifts the event median.
+FOLLOWUP_AFTER_H = 24
+FOLLOWUP_CAP = 6
+# A planned event that happened: the event's headline is about what is coming ("set to become billionaires in
+# upcoming IPO") and a new hard-news member reports it done ("Anthropic's IPO lands"). The model left
+# material_update false on that CNBC piece, so the card kept saying "upcoming" a day after the listing.
+PROSPECTIVE = re.compile(r"\b(set to|plans? to|planning|upcoming|expected to|expects? to|targets?|targeting|"
+                         r"seeks?|seeking|eyes|eyeing|prepares?|preparing|considers?|considering|in talks|"
+                         r"weighs?|weighing|could|may|will|aims? to|ahead of|files? for|filed for|nears?|nearing)\b",
+                         re.I)
+REALIZED = re.compile(r"\b(lands|landed|debuts?|debuted|prices|priced|lists|listed|goes public|went public|"
+                      r"opens|opened|soars?|soared|jumps?|jumped|surges?|surged|closes|closed|completes?|completed|"
+                      r"finali[sz]es|finali[sz]ed|launches|launched|ships|shipped|releases|released|resigns|resigned|"
+                      r"steps down|stepped down|approves?|approved|passes|passed|signs|signed|wins|won|rules|ruled|"
+                      r"agrees|agreed|confirms|confirmed|starts trading|"
+                      r"is live|now live)\b", re.I)
+
+
+def realizes(event_headline, item_title):
+    """True when `item_title` reports done what `event_headline` describes as coming."""
+    if not event_headline or not item_title:
+        return False
+    return bool(PROSPECTIVE.search(event_headline)) and bool(REALIZED.search(item_title)) \
+        and not PROSPECTIVE.search(item_title)
 
 
 def event_id(url_canonical):
@@ -321,10 +348,21 @@ def join(store, ev, item, cos, how):
     _add_member(store, ev, item, cos, how)
     _set_anchor(ev)
     ev.row["updated_at"] = iso(store.now)
+    mark_realized(store, ev, item)
     if item.material_update and item.hard:
         ev.dirty.add("material_update")
         _set_material(ev, item.published_at)
     return ev.id, how
+
+
+def mark_realized(store, ev, item):
+    """Marks `item` a material update when it reports done what the event's headline describes as coming."""
+    if item.material_update or not item.hard or not realizes(ev.row.get("headline"), item.headline or item.title):
+        return False
+    item.material_update = True
+    store.db.conn.execute("UPDATE writes SET material_update = 1 WHERE url_canonical = ?", (item.url,))
+    log.info("realized update: %s in %s", item.url, ev.id)
+    return True
 
 
 def _add_member(store, ev, item, cos, how):
@@ -440,6 +478,11 @@ def choose_lead(store, ev):
 def refresh(store, ev, tier1_ok):
     """Recomputes everything derived from the members, and queues a rewrite when the spec asks for one."""
     row, members = ev.row, ev.members
+    # A member that joined before the event's headline said "upcoming" (or before this rule) still counts.
+    for m in members:
+        if mark_realized(store, ev, m):
+            _set_material(ev, m.published_at)
+            ev.dirty.add("material_update")
     _set_anchor(ev)
     row["published_at"] = iso(min(m.published_at for m in members))
     publishers = sorted({store.publisher(m.source_id) for m in members})
@@ -469,19 +512,35 @@ def refresh(store, ev, tier1_ok):
     _apply_signals(store, ev)
 
     region = row.get("region") or "global"
+    start = story_start(store, row)
     imembers = []
     for m in members:
         src = store.by_id.get(m.source_id)
         t1 = src is not None and importance_mod.tier1_for(src, sources_mod.effective_tier(src, tier1_ok(src.id)),
                                                           region)
+        imp = m.importance
+        if (start is not None and not (m.material_update and m.hard)
+                and m.published_at - start > timedelta(hours=FOLLOWUP_AFTER_H)):
+            imp = min(imp, FOLLOWUP_CAP)
         imembers.append(importance_mod.Member(m.url, m.source_id, store.publisher(m.source_id), t1, m.type,
-                                              m.importance, m.topics, m.entities.get("amounts") or []))
+                                              imp, m.topics, m.entities.get("amounts") or []))
     hn = json.loads(row.get("hn") or "null") or {}
     res = importance_mod.compute(imembers, row.get("type"), json.loads(row.get("topics") or "[]"),
                                  bool(row.get("on_techmeme")), hn.get("points") or 0, row.get("rewrite_importance"))
     row.update(importance_raw=res.raw, importance=res.value, clamps=json.dumps(res.clamps))
     ev.dirty.clear()
     save(store.db, row)
+
+
+def story_start(store, row):
+    """When the story began: the parent's first report for a follow-up event, else the event's own."""
+    pid = row.get("parent_id")
+    if pid:
+        parent = store.events.get(pid)
+        prow = parent.row if parent is not None else store.db.one("SELECT published_at FROM events WHERE id = ?", pid)
+        if prow is not None and prow["published_at"]:
+            return from_iso(prow["published_at"])
+    return from_iso(row.get("published_at"))
 
 
 def _queue_rewrite(row, reason):

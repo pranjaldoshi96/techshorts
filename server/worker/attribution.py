@@ -82,12 +82,34 @@ COLUMN_PATH = re.compile(r"/(column|columns|opinion|opinions|commentary|op-ed|op
 HARD_NEWS = ("news", "launch", "funding", "acquisition", "earnings", "policy", "security_incident")
 
 
-def apply(output, attribution, url=None):
-    """Forces the type; the prefix is checked in validate.py so a missing one retries with feedback."""
+# AI as the subject or the means of a story, in the source title or the headline. The model filed "South Korea exam
+# top scorer admits using generative AI to cheat" (Guardian, BBC) under science at relevance 1, so the app never
+# showed it although the prompt says "ai" whenever AI or its effects are the subject.
+AI_SUBJECT = re.compile(r"\b(AI|A\.I\.|[Aa]rtificial [Ii]ntelligence|[Gg]enerative AI|ChatGPT|LLMs?|[Cc]hatbots?|"
+                        r"GPT-\d[\w.]*|OpenAI|Anthropic|DeepMind|[Dd]eepfakes?|[Mm]achine learning|AI agents?)\b")
+
+
+def is_column(url):
+    return bool(url) and bool(COLUMN_PATH.search(urlsplit(url).path.lower()))
+
+
+def ai_subject(*texts):
+    return any(t and AI_SUBJECT.search(t) for t in texts)
+
+
+def apply(output, attribution, url=None, title=None):
+    """Forces the type; the prefix is checked in validate.py so a missing one retries with feedback. A story whose
+    source title or headline is about AI always gets the "ai" topic and at least relevance 2."""
     if attribution is not None:
         output.type = "opinion"
-    elif url and output.type in HARD_NEWS and COLUMN_PATH.search(urlsplit(url).path.lower()):
+    elif output.type in HARD_NEWS and is_column(url):
         output.type = "analysis"
+    if ai_subject(title, getattr(output, "headline", None)):
+        topics = list(output.topics or [])
+        if "ai" not in topics:
+            output.topics = topics + ["ai"]
+        if (output.relevance or 0) < 2:
+            output.relevance = 2
     return output
 
 

@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from urllib.parse import quote
 
-from . import (degraded as degraded_mod, editorial as editorial_mod, embed as embed_mod, images as images_mod,
+from . import (attribution as attribution_mod, degraded as degraded_mod, editorial as editorial_mod, embed as embed_mod, images as images_mod,
                importance as importance_mod, rank, sources as sources_mod)
 from .cluster import entity_keys
 from .db import from_iso, iso
@@ -41,6 +41,7 @@ V1_CATEGORIES = ("Top", "AI", "Startups", "Dev", "Blogs")
 URL_SAFE = ":/?#[]@!$&'()*+,;=%~-._"
 MAX_WINDOW = timedelta(days=14)
 OUTAGE_SINGLETON_WINDOW = timedelta(hours=36)
+COLUMN_IMPORTANCE = 6
 
 
 def clean_url(u):
@@ -132,8 +133,16 @@ def event_candidate(ctx, ev):
     lead_tier1 = ctx.tier1(lead["source_id"])
     if not ai_text and not (len(publishers) >= 2 or lead_tier1):
         return None, "no_text"      # held; publishes once its text validates or coverage grows
+    if self_promo(ctx.v1_name(lead["source_id"]), lead["title"]):
+        return None, "self_promo"
+    importance = ev["importance"] or 1
+    ev_type, headline = column_type(ev["type"], lead["url"], headline)
+    if ev_type != ev["type"]:
+        # Scored as news, it was scored for a fact it doesn't report: a column on a known story adds a view, which
+        # the prompt rates 4-6 ("An overview of Jensen Huang's messy days" came back 9 and led Top).
+        importance = min(importance, COLUMN_IMPORTANCE)
     c = rank.Candidate(
-        id=ev["id"], importance=ev["importance"] or 1, type=ev["type"], is_news=bool(ev["is_news"]),
+        id=ev["id"], importance=importance, type=ev_type, is_news=bool(ev["is_news"]),
         relevance=ev["relevance"] or 0, topics=json.loads(ev["topics"] or "[]"), region=ev["region"] or "global",
         n_publishers=max(1, len(publishers)), on_techmeme=bool(ev["on_techmeme"]), hn_points=hn.get("points") or 0,
         authority=max([ctx.authority(m["source_id"]) for m in news] or [0.8]),
@@ -141,13 +150,54 @@ def event_candidate(ctx, ev):
         lead_source=lead["source_id"], lead_publisher=ctx.v1_name(lead["source_id"]),
         lead_reads=bool(lead_src and lead_src.reads), lead_tier1=lead_tier1, ai_text=ai_text,
         classified=ev["type"] is not None, boost=ctx.editorial.boost.get(ev["id"], 1.0),
-        pin=frozenset(ctx.editorial.pins.get(ev["id"], ())),
+        pin=frozenset(ctx.editorial.pins.get(ev["id"], ())), title=headline or lead["title"] or "",
         keys=frozenset().union(*(entity_keys(json.loads(m["entities"] or "{}")) for m in members)))
     c.data = {"lead": lead, "members": members, "publishers": publishers, "headline": headline, "summary": summary,
               "hn": hn, "parent_id": ev["parent_id"], "title_words": _words(lead["title"]),
               "first_seen_at": min(m["first_seen_at"] for m in members),
-              "images": image_sources(ctx, lead, members)}
+              "images": image_sources(ctx, lead, members), "orgs": primary_orgs(members)}
     return c, None
+
+
+def column_type(ev_type, url, headline):
+    """A column or opinion URL is commentary whatever an earlier write said: (type, headline) with the type made
+    analysis and the headline labelled. Deterministic, so it holds for events written before the rule existed and
+    for leads whose write failed, not only for new validated writes."""
+    if ev_type in importance_mod.HARD_NEWS and attribution_mod.is_column(url):
+        ev_type = "analysis"
+        if headline and not ANALYSIS_LABEL.match(headline):
+            headline = "Analysis: " + headline
+    return ev_type, headline
+
+
+ANALYSIS_LABEL = re.compile(r"^(Analysis|Opinion|Interview|[A-Z][\w'’-]+):\s")
+
+
+# What a publisher announces about itself: a programme, event, speaker line-up, quiz, award or weekly round-up.
+PROMO_WORDS = re.compile(r"\b(launch(es|ed)?|announce(s|d|ment)?|speakers?|edition|quiz|summit|conference|awards?|"
+                         r"webinar|this week|top \d+|accelerator|programme|program|cohort|investment pool|"
+                         r"applications? open|register|nominations?)\b", re.I)
+
+
+def self_promo(publisher, title):
+    """A publisher writing about its own programme or event ("Inc42, DevX Launch RE:FRAME With ₹15 Cr Investment
+    Pool", "MediaNama This Week: Top 10 Stories", YourStory's quiz "Edition 258"): its name and a promo word in its
+    own title. Only the source's title counts: a company blog naming itself in a product post ("Pay for Hugging Face
+    Hub with your Google Cloud Account") is not caught, nor is a headline the model wrote."""
+    if not publisher or not title:
+        return False
+    pat = re.compile(r"(?<![\w])" + re.escape(publisher) + r"(?![\w])", re.I)
+    return bool(pat.search(title)) and bool(PROMO_WORDS.search(title))
+
+
+def primary_orgs(members):
+    """The first-named org of each validated member: what the story is about ("Anthropic" for the IPO pieces)."""
+    out = set()
+    for m in members:
+        orgs = (json.loads(m.get("entities") or "{}") or {}).get("orgs") or []
+        if orgs and orgs[0].strip():
+            out.add(re.sub(r"[^\w]+", " ", orgs[0].lower()).strip())
+    return out
 
 
 def outage_singletons(ctx, events):
@@ -201,7 +251,9 @@ def outage_singletons(ctx, events):
         c.data = {"lead": lead, "members": [lead], "publishers": [s.v1_name],
                   "headline": r["headline"] if c.ai_text else None, "summary": r["summary"] if c.ai_text else None,
                   "hn": {}, "title_words": _words(r["title"]), "first_seen_at": r["first_seen_at"],
-                  "images": image_sources(ctx, lead, [lead]), "parent_id": None, "singleton": True}
+                  "images": image_sources(ctx, lead, [lead]), "parent_id": None, "singleton": True,
+                  "orgs": set()}
+        c.title = c.data["headline"] or r["title"] or ""
         out.append(c)
     return out
 
@@ -317,10 +369,13 @@ def suppress_duplicates(cands, dedup):
     return [c for c in cands if c.id in keep], dropped
 
 
-def storylines(cands, dedup, threshold):
-    """Groups cards into storylines for rank.STORYLINE_CAP: a follow-up with its parent, and cards whose headlines
+def storylines(cands, dedup, threshold, org_threshold=None):
+    """Groups cards into storylines for rank.STORYLINE_CAP: a follow-up with its parent, cards whose headlines
     are close (cosine >= `threshold`) and share a non-org entity (the Huang resignation, the investors' letter and
-    the supply-chain worries). Sets each candidate's `storyline` to its group's id."""
+    the supply-chain worries), and cards whose headlines are close (cosine >= `org_threshold`) and are about the
+    same company (the first-named org: three Anthropic IPO cards named no person in common and all sat in Top).
+    Sets each candidate's `storyline` to its group's id."""
+    org_threshold = threshold if org_threshold is None else org_threshold
     root = {c.id: c.id for c in cands}
 
     def find(x):
@@ -339,7 +394,10 @@ def storylines(cands, dedup, threshold):
             union(c.id, p)
     for a, b in itertools.combinations(cands, 2):
         cos = dedup.cosine(a, b)
-        if cos is not None and cos >= threshold and a.keys & b.keys:
+        if cos is None:
+            continue
+        if (cos >= threshold and a.keys & b.keys) or (
+                cos >= org_threshold and a.data.get("orgs", set()) & b.data.get("orgs", set())):
             union(a.id, b.id)
     for c in cands:
         c.storyline = find(c.id)
@@ -392,8 +450,11 @@ def article(c, category, top_rank, image_url):
     else:
         title = lead["title"]
         body = degraded_mod.excerpt(lead.get("feed_text") or lead.get("text") or "")
+    # 1.2 sorts by publishedAt: a story with a material update (the IPO that was "upcoming" has listed) carries the
+    # update's time, as its rewritten card reports the update.
+    when = max(c.published_at, c.material_at) if c.material_at else c.published_at
     a = {"url": clean_url(lead["url_canonical"]), "title": title, "excerpt": body, "content": body,
-         "source": c.lead_publisher, "category": category, "publishedAt": iso(c.published_at)}
+         "source": c.lead_publisher, "category": category, "publishedAt": iso(when)}
     if image_url:
         a["image"] = clean_url(image_url)
     if c.hn_points:
@@ -417,12 +478,15 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
     degraded = bool(ctx.outage)
     # Only events some tab could take need vectors and pictures; best first, so per-tick caps go to likely cards.
     tab_specs = rank.tabs_for(ctx.cfg)
-    live = [c for c in cands if any(rank.eligible(c, tab_specs[t], now) is None or t in c.pin for t in rank.TAB_ORDER)]
+    live = [c for c in cands
+            if any(rank.eligible(c, tab_specs[t], now, degraded) is None or t in c.pin for t in rank.TAB_ORDER)]
     live.sort(key=lambda c: -rank.cand_score(c, tab_specs["top"], now, degraded))
     headline_vectors(ctx.db, embedder, live, now)
     dedup = rank.Dedup.from_cfg(ctx.cfg)
     live, twins = suppress_duplicates(live, dedup)
-    storylines(live, dedup, (ctx.cfg.get("dedup") or {}).get("t_storyline", ctx.cfg["cluster"]["t_join"]))
+    dcfg = ctx.cfg.get("dedup") or {}
+    t_story = dcfg.get("t_storyline", ctx.cfg["cluster"]["t_join"])
+    storylines(live, dedup, t_story, dcfg.get("t_storyline_org", t_story))
     pictures = {}
     if image_store is not None:
         need_page = [c.data["lead"] for c in live[:120] if c.data["lead"]["og_image"] is None]

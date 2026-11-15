@@ -71,11 +71,15 @@ cluster:
 # labelled fixture titles: t_headline (with a shared non-org entity) 0.49 -> 0.5; cosine alone 0.59 at precision
 # 0.97 on the fixture, raised to 0.65 because the shadow run showed a different-angle pair at 0.585. A storyline
 # (same-or-related, with an entity) caps a tab at rank.STORYLINE_CAP cards; it only holds cards back, so it uses
-# the 0.95-precision point, 0.45.
+# the 0.95-precision point, 0.45. Two cards about the same company (first-named org) with no shared person or amount
+# join a storyline at 0.43: on the 2026-11-15 shadow candidates the same-story pairs sat at 0.44-0.65 (three
+# Anthropic IPO cards, two Fireworks breach cards, two Amazon shopping-data cards) and the first different-story
+# pair at 0.38 (Paytm wallet nod vs Paytm shares).
 dedup:
   t_headline: 0.5
   t_headline_alone: 0.65
   t_storyline: 0.45
+  t_storyline_org: 0.43
 
 # v1 publish (WP4, spec 2.13). The worker writes edition.json, health.json and img/ into out_dir (default
 # <state_dir>/edition; `--out` overrides). base_url is where that directory is served from: image URLs in the edition

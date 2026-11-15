@@ -5,6 +5,7 @@ event_published_at, the publisher's own clock, so a 5-day-old post re-fetched af
 material update resets the decay to "3 h old" (age_eff), which is how a story that keeps moving stays up.
 """
 import math
+import re
 from dataclasses import dataclass, field
 
 from .importance import HARD_NEWS
@@ -27,6 +28,32 @@ STORYLINE_CAP = 2
 DEV_TYPES = ("launch", "release_notes", "tutorial")
 NOT_DEV_TYPES = ("funding", "acquisition", "earnings")
 DEV_LABELLED_MIN = 5
+# A security incident is Dev news only when it hits what developers build or run on: a vulnerability, a package or
+# supply chain, a code host, CI, a cloud or API platform, a coding agent. The 2026-11 shadow Dev tab carried a
+# Workday outage, a consumer scam explainer, an airline blocking AI agents and a weapons platform, all typed
+# security_incident with the "security" topic.
+DEV_SECURITY = re.compile(
+    r"\b(vulnerab\w*|cves?|cve-[\d-]+|zero-days?|0-days?|exploit\w*|patch\w*|npm|pypi|crates\.io|packages?|"
+    r"supply[- ]chain|github|gitlab|bitbucket|ci/cd|repos?|repositor\w+|source code|codebase|apis?|api keys?|sdks?|"
+    r"secrets|credentials|aws|azure|gcp|cloud|kubernetes|docker|containers?|linux|kernel|open[- ]source|"
+    r"developers?|coding|devops|post-?mortem|backdoor\w*|firmware)\b", re.I)
+# Startups is for startups: a big company buying one, or a big company's earnings, is not startup news unless the
+# model put startups_funding first ("Samsung in talks to acquire Modine Manufacturing" was [bigtech, startups_funding]).
+STARTUP_STRICT_TYPES = ("acquisition", "earnings")
+# A card with no validated text is a raw publisher title and a feed excerpt. Outside an LLM outage it never takes a
+# Top rank (the 2026-11 shadow led Top with a Verge column whose write failed, excerpt "...follow Terrence O'Brien.
+# Opt in for The Stepback here") and scores at most this importance elsewhere, so a written card on the same story wins.
+UNWRITTEN_IMPORTANCE = 5
+# Fresh tier-1 hard news at importance 5 may enter Top within this many hours of publication (the spec's minimum of
+# 6 left a Sunday Top with 2 cards under 12 h while tier-1 outlets ran ordinary but current news).
+TOP_FRESH_IMPORTANCE = 5
+TOP_FRESH_H = 12
+# ... but not an explainer the model typed as news ("How the ClickFix scam captures your computer", a Guardian
+# consumer piece typed security_incident at 5): at 5 the lift is for plain reports only.
+EXPLAINER_TITLE = re.compile(r"^(how|why|what|who|when|where|here's|inside|the [\w-]+ guide)\b", re.I)
+# Once a storyline has a card in a tab, another card of it must be this fresh (age_eff): a fresh angle may sit next
+# to the main card, a 3-day-old "targets a $1.4tn valuation" may not sit next to "the IPO lands".
+STORYLINE_SECOND_MAX_H = 24
 
 
 @dataclass(frozen=True)
@@ -114,6 +141,7 @@ class Candidate:
     headline_vec: object = None     # unit vector of the headline, for the duplicate guard
     keys: frozenset = frozenset()   # non-org entity keys of the members (cluster.entity_keys)
     storyline: str = None           # id shared by the cards of one storyline (publish_v1.storylines)
+    title: str = ""                 # the headline the card shows (or the lead's title), for text rules
     boost: float = 1.0              # editorial boost / bury multiplier
     pin: frozenset = frozenset()    # tabs this event is pinned to the head of
     data: dict = field(default_factory=dict)    # whatever publish_v1 needs later (lead row, text, members)
@@ -142,6 +170,8 @@ def score(importance, n_publishers, on_techmeme, hn_points, authority, age_eff_h
 
 def cand_score(c, tab, now, degraded=False):
     imp = DEGRADED_IMPORTANCE if degraded or not c.classified else c.importance
+    if not c.ai_text and not degraded:
+        imp = min(imp, UNWRITTEN_IMPORTANCE)
     return score(imp, c.n_publishers, c.on_techmeme, c.hn_points, c.authority, c.age_eff(now), tab.tau_h) * c.boost
 
 
@@ -156,10 +186,23 @@ def never_shipped(c):
     return (not c.topics or c.relevance < 2 or c.type in NEVER_TYPES)
 
 
-def eligible(c, tab, now):
-    """None when `c` may appear in `tab`, else the first failing rule (kept for health.json and tests)."""
+def top_fresh(c, now):
+    """Fresh tier-1 hard news at importance 5 (see TOP_FRESH_IMPORTANCE)."""
+    return (c.importance >= TOP_FRESH_IMPORTANCE and c.lead_tier1 and c.ai_text and c.type in TOP_TYPES
+            and c.age_eff(now) <= TOP_FRESH_H and not EXPLAINER_TITLE.match(c.title or ""))
+
+
+def dev_security(c):
+    return "dev_tools" in c.topics or bool(DEV_SECURITY.search(c.title or ""))
+
+
+def eligible(c, tab, now, degraded=False):
+    """None when `c` may appear in `tab`, else the first failing rule (kept for health.json and tests).
+    `degraded` is an LLM-outage edition, the only time an unwritten card may take a Top rank."""
     if c.age_eff(now) > window_h(c, tab) or c.age_h(now) > 14 * 24:
         return "window"
+    if tab.id == "top" and not c.ai_text and not degraded and tab.id not in c.pin:
+        return "no_text"
     if not c.classified:
         # Degraded mode only: a tier-1 item the LLM never saw. Top is the only tab that needs no topic.
         return None if tab.id == "top" and c.lead_tier1 else "unclassified"
@@ -170,25 +213,27 @@ def eligible(c, tab, now):
     # Top takes analysis, opinion and interview pieces only at importance >= 8.
     if c.type not in tab.types and not (tab.id == "top" and c.type in LABELLED and c.importance >= 8):
         return "type"
-    if c.importance < tab.min_importance:
+    if c.importance < tab.min_importance and not (tab.id == "top" and top_fresh(c, now)):
         return "importance"
     if c.relevance < tab.min_relevance:
         return "relevance"
     topics = set(c.topics)
     if tab.id == "ai" and "ai" not in topics:
         return "topic"
-    if tab.id == "startups" and "startups_funding" not in topics:
+    if tab.id == "startups" and ("startups_funding" not in topics or (
+            c.type in STARTUP_STRICT_TYPES and c.topics[0] != "startups_funding")):
         return "topic"
     if tab.id == "india" and not (c.region == "in" or "india" in topics):
         return "topic"
-    # Dev is developer news: dev tools, or a real security incident (the LLM also tags "security" for national or
-    # physical safety stories, which don't belong here). The LLM adds dev_tools to much company news (a rocket
-    # launch, CoreWeave earnings, a bike startup's round), so it must be the main topic or come with a developer
-    # release type.
+    # Dev is developer news: dev tools, or a security incident with a developer angle (DEV_SECURITY; the LLM also
+    # tags "security" for national or physical safety stories, consumer scams and SaaS outages, which don't belong
+    # here). The LLM adds dev_tools to much company news (a rocket launch, CoreWeave earnings, a bike startup's
+    # round) and to consumer AI apps, so it must be the main topic, or come second on release notes or a tutorial.
     if tab.id == "dev":
         dev = ("dev_tools" in topics and c.type not in NOT_DEV_TYPES
-               and (c.topics[0] == "dev_tools" or c.type in DEV_TYPES))
-        if not (dev or ("security" in topics and c.type == "security_incident")):
+               and (c.topics[0] == "dev_tools" or c.type in ("release_notes", "tutorial")))
+        sec = "security" in topics and c.type == "security_incident" and dev_security(c)
+        if not (dev or sec):
             return "topic"
         if c.type in LABELLED and c.importance < DEV_LABELLED_MIN:
             return "importance"
@@ -208,7 +253,7 @@ def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None):
     pool = []
     for c in cands:
         # An owner's pin is a decision, not a signal: it skips the filters too.
-        why = None if tab.id in c.pin else eligible(c, tab, now)
+        why = None if tab.id in c.pin else eligible(c, tab, now, degraded)
         if why is None:
             pool.append((c, cand_score(c, tab, now, degraded)))
         elif stats is not None:
@@ -241,6 +286,8 @@ def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None):
             return "diversity"
         if c.storyline and per_story.get(c.storyline, 0) >= STORYLINE_CAP:
             return "storyline"
+        if c.storyline and per_story.get(c.storyline, 0) and c.age_eff(now) > STORYLINE_SECOND_MAX_H:
+            return "storyline_stale"
         if tab.id == "dev" and c.type == "tutorial" and tutorials >= TUTORIAL_PER_10 * (1 + len(out) // 10):
             return "tutorial_cap"
         if len(out) < 10 and c.image_hash and any(

@@ -295,7 +295,8 @@ its product), podcast, promo, deal (a shopping deal), other. A profile ("Who is 
 or "what happens next" piece, live blog or round-up of reactions to a known story is explainer or analysis, \
 not news, even when it is current.
 - relevance, how relevant to tech professionals in Bengaluru and the Bay Area: 3 = core tech or business news; \
-2 = adjacent (science, or policy with a tech angle); 1 = tangential; 0 = off-topic (US partisan politics, \
+2 = adjacent (science, or policy with a tech angle; any story where AI is the subject or the means, such as \
+a scandal over cheating with AI, is at least 2); 1 = tangential; 0 = off-topic (US partisan politics, \
 entertainment, celebrity, cars without a tech angle).
 - importance: <<importance>>
 - breaking: true only for sudden, just-happened news of importance 8 or more.
@@ -312,7 +313,10 @@ or product is "global" (an Anthropic IPO, CoreWeave earnings and an Nvidia probe
 India-market companies, Indian policy or Indian funding.
 - entities: names exactly as in the text; amounts as written ("$1.4T").
 - event: which candidate event below this article covers (see "Candidate events"), else "new". \
-material_update: true when it adds a major new fact to that event.
+material_update: true when it adds a major new fact to that event, above all when something the candidate's \
+headline describes as coming has now happened (an IPO that was "upcoming" has priced or listed, a planned launch \
+has shipped, a deal "in talks" is signed, a resignation has taken effect, a vote or ruling has been made). \
+False for reactions, analysis, background and smaller details.
 
 Writing:
 - headline: 50 to 70 characters. Fact-first, sentence case, active voice, present tense. The subject is the \
@@ -461,7 +465,7 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
             feedback = [str(e)]
             steps.append(Step(rung, model, "bad_json", "bad_json", feedback))
             continue
-        attribution_mod.apply(out, attribution, item["url"])
+        attribution_mod.apply(out, attribution, item["url"], item["title"])
         validate.select(out, attribution, hedge_source=hedge_scope)
         last_out = out
         v = validate.check(out, text.text, item["title"], source_name, attribution, author, text.lead())
@@ -509,7 +513,7 @@ def triage_thin(client, cfg, item, source_name, text, attribution=None, candidat
         raise
     except (LLMError, BadOutput) as e:
         return WriteResult("thin_failed", reason="no_text", steps=[Step(1, model, "llm_error", str(e))])
-    attribution_mod.apply(out, attribution, item["url"])
+    attribution_mod.apply(out, attribution, item["url"], item["title"])
     return WriteResult("thin", out, reason="no_text", model=model, steps=[Step(1, model, "ok")])
 
 
@@ -707,6 +711,7 @@ for a new major development (a resignation, a ruling, a new deal).
   "Brightloop raises $80M Series B for warehouse robots" = 6, funding
   "Zentra releases a 1T-parameter open model for coding agents" = 6, launch
   "Markets regulator issues rules for AI use by stock brokers" = 5, policy
+  "Top scorer in a national exam admits using a chatbot to cheat" = 5, news (topics: ai)
   "Novacloud CEO's first interview since the outage: what we learned" = 5, interview
   "Pundit says Orbitly's growth could justify a record-breaking IPO" = 4, opinion
   "Lumen CLI 0.36" (a tool's release notes) = 3, release_notes
