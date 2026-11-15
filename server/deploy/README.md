@@ -28,3 +28,14 @@ Notes
 - A source's first poll marks items older than `fetch.first_run_skip_hours` (36) as seen, so a fresh state starts with
   about a day and a half of news. To start over: stop the service, remove `/var/lib/techgist/state.db*`, start it.
 - The `techgist` user has no shell, no SSH key and no git remote, so this box cannot push to the `edition` branch.
+- Backups are in `/var/lib/techgist/backups/`: `state-<time>.db` is a SQLite backup taken before a risky change,
+  and `run1-<time>/` holds the first test run's state (37 sources, Nemotron, no spice), set aside on 2026-11-15
+  when the second run was seeded from scratch with the wide source list and the hub models.
+- `deploy.sh` installs the unit file when it has changed (a new key file variable, say) before restarting.
+- Still to decide before cutover (owner): where `edition.json` and `img/` are served from. Image URLs in the
+  edition point at `publish.base_url` (the GitHub raw URL), where nothing from this box is published, so they do
+  not resolve; `health.json` reports this as `edition.last.imageUrls.served: false`. And `NTFY_TOPIC` is unset, so
+  alerts are only logged.
+- Checking a change against real data without touching the service: copy the state with a SQLite backup, then
+  `tools/eval_cards.py COPY "title words"` (writes those cards with the current prompts and prints every check)
+  and `tools/recluster.py COPY --grep word` (re-clusters the copy and prints the events).
