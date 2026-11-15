@@ -357,7 +357,11 @@ def join(store, ev, item, cos, how):
 
 
 def mark_realized(store, ev, item):
-    """Marks `item` a material update when it reports done what the event's headline describes as coming."""
+    """Marks `item` a material update when it reports done what the event's headline describes as coming.
+
+    Off: in the shadow run this word-list rule was wrong for 4 of the 6 members it marked, and each wrong mark gave
+    a day-old card a fresh publishedAt. The LLM's own material_update judgement (the write prompt) still applies."""
+    return False
     if item.material_update or not item.hard or not realizes(ev.row.get("headline"), item.headline or item.title):
         return False
     item.material_update = True

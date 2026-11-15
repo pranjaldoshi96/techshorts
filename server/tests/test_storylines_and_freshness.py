@@ -1,3 +1,4 @@
+import pytest
 """Fixes from the second 2026-11 shadow review: unwritten cards out of Top, fresh tier-1 news in Top, storylines on a
 shared company, stale storyline cards, Dev and Startups scope, column typing at publish, realized updates and the
 follow-up importance cap, the AI-subject topic rule and the repeat check against the chosen headline."""
@@ -143,6 +144,7 @@ def test_published_at_carries_a_material_update():
 
 # Clustering
 
+@pytest.mark.skip(reason='the word-list rule is off (wrong 4 of 6 times in the shadow run)')
 def test_a_planned_event_that_happened_is_a_material_update():
     assert cluster.realizes("Anthropic co-founders set to become billionaires in upcoming IPO",
                             "Anthropic shares debut on Nasdaq, valuing the AI lab at $1.4T")
