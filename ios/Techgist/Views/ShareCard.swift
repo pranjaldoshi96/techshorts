@@ -47,7 +47,7 @@ private struct ShareCard: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text(article.source.uppercased())
                     .font(.caption.bold())
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(Theme.accent)
                 Text(article.displayTitle)
                     .font(.system(.title3, design: .serif).weight(.bold))
                     .foregroundStyle(.black)
@@ -79,7 +79,7 @@ private struct ShareCard: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(Color.accentColor)
+            .background(Theme.accent)
         }
         .frame(width: 390)
         .background(.white)

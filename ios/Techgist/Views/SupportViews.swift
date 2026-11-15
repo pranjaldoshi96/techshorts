@@ -18,13 +18,21 @@ enum Reader {
     static var usesReaderMode: Bool { UserDefaults.standard.object(forKey: Keys.readerMode) as? Bool ?? true }
 
     @MainActor static func open(_ url: URL) {
-        guard url.scheme == "https" || url.scheme == "http" else { return }
+        guard url.scheme == "https" || url.scheme == "http",
+              let top = UIApplication.shared.topViewController else { return }
+        // A sheet may be on its way in or out (a result tapped in Search, an alert tapped while Settings is open).
+        // Presenting during that transition fails, so wait for it to finish.
+        if let transition = top.transitionCoordinator ?? top.presentingViewController?.transitionCoordinator {
+            transition.animate(alongsideTransition: nil) { _ in open(url) }
+            return
+        }
+        guard !(top is SFSafariViewController) else { return }
         let configuration = SFSafariViewController.Configuration()
         configuration.entersReaderIfAvailable = usesReaderMode
         let safari = SFSafariViewController(url: url, configuration: configuration)
         safari.preferredControlTintColor = UIColor(named: "AccentColor")
         safari.modalPresentationStyle = .pageSheet
-        UIApplication.shared.topViewController?.present(safari, animated: true)
+        top.present(safari, animated: true)
     }
 }
 
@@ -233,7 +241,8 @@ struct SettingsView: View {
                 } header: {
                     Text("Notifications")
                 } footer: {
-                    Text("One notification each morning with the top story, and an alert when a story is covered by several outlets at once, at most 3 a day. iOS decides when the app checks in the background, so alerts can arrive a few hours after a story breaks. A sample alert arrives in 5 seconds; lock the phone or go to the Home Screen to see it as it will look.")
+                    Text("One notification each morning with the top story, and an alert when a story is covered by several outlets at once, at most 3 a day. iOS decides when the app checks in the background, so alerts can arrive a few hours after a story breaks."
+                         + (digestEnabled || breakingEnabled ? " A sample alert arrives 5 seconds after you ask for it." : ""))
                 }
 
                 Section {
@@ -267,7 +276,7 @@ struct SettingsView: View {
                 } header: {
                     Text("About")
                 } footer: {
-                    Text("Headlines and summaries are written by Techgist's AI from each publisher's story, checked against it, and link to the original. Your reading, saves and settings stay on this device.")
+                    Text("Summaries marked AI are written by Techgist's model from the publisher's story and checked against it. Every card links to the original. Your reading, saves and settings stay on this device.")
                 }
             }
             .navigationTitle("Settings")

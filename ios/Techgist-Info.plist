@@ -13,6 +13,7 @@
 	<key>LSRequiresIPhoneOS</key><true/>
 	<key>LSApplicationCategoryType</key><string>public.app-category.news</string>
 	<key>ITSAppUsesNonExemptEncryption</key><false/>
+	<key>NSAccentColorName</key><string>AccentColor</string>
 	<key>UILaunchScreen</key><dict/>
 	<key>UIApplicationSceneManifest</key>
 	<dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>

@@ -1,9 +1,12 @@
 import SwiftUI
 
 /// One tab's stories, one card per screen, paged vertically.
+/// At the accessibility text sizes a story is taller than a screen, so the feed becomes an ordinary scrolling list
+/// of full-length cards instead: nothing is cut off and nothing needs a scroll view inside a scroll view.
 struct FeedView: View {
     @EnvironmentObject private var store: NewsStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
     let category: Category
     let items: [Article]
     /// The id of the card on screen.
@@ -21,37 +24,55 @@ struct FeedView: View {
         if items.isEmpty {
             empty
         } else {
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(items) { article in
-                        CardView(article: article, highlighted: highlighted == article.id,
-                                 onRead: { onRead(article) }, onCoverage: { onCoverage(article) })
-                            .containerRelativeFrame(.vertical)
-                            .scrollTransition(.interactive, axis: .vertical) { [reduceMotion] content, phase in
-                                // Depth: the card leaving at the top shrinks and dims, the next one rises into place.
-                                let above = max(0, -phase.value), below = max(0, phase.value)
-                                return content
-                                    .scaleEffect(reduceMotion ? 1 : 1 - 0.06 * above)
-                                    .opacity(1 - 0.5 * above)
-                                    .offset(y: reduceMotion ? 0 : 24 * below)
-                            }
-                            .id(article.id)
-                    }
-                    EndOfTabCard(category: category, count: items.count,
-                                 onTop: { withAnimation(reduceMotion ? nil : .default) { position = items.first?.id } },
-                                 onSaved: onSaved)
-                        .containerRelativeFrame(.vertical)
-                        .id(Self.endID)
-                }
-                .scrollTargetLayout()
+            // The feed runs to the bottom edge of the screen and each page is exactly one screen of it. Cards get
+            // their size and the home-indicator inset as numbers, so nothing inside the scroll view depends on the
+            // safe area (which SwiftUI applies unevenly to pages that are partly off screen).
+            GeometryReader { geo in
+                let inset = geo.safeAreaInsets.bottom
+                pages(CGSize(width: geo.size.width, height: geo.size.height + inset), inset: inset)
             }
-            .scrollTargetBehavior(.paging)
+        }
+    }
+
+    private func pages(_ page: CGSize, inset: CGFloat) -> some View {
+        let paged = !typeSize.isAccessibilitySize
+        return ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(items) { article in
+                    CardView(article: article, width: page.width, bottomInset: paged ? inset : 0, flows: !paged,
+                             highlighted: highlighted == article.id,
+                             onRead: { onRead(article) }, onCoverage: { onCoverage(article) })
+                        .frame(width: page.width, height: paged ? page.height : nil)
+                        .scrollTransition(.interactive, axis: .vertical) { [reduceMotion] content, phase in
+                            // Depth: the card leaving at the top shrinks and dims, the next one rises into place.
+                            // With Reduce Motion only the dimming remains; a scrolling list of tall cards has neither.
+                            let above = paged ? max(0, -phase.value) : 0, below = paged ? max(0, phase.value) : 0
+                            return content
+                                .scaleEffect(reduceMotion ? 1 : 1 - 0.06 * above)
+                                .opacity(1 - 0.5 * above)
+                                .offset(y: reduceMotion ? 0 : 24 * below)
+                        }
+                        .id(article.id)
+                    if !paged {
+                        Color(.secondarySystemBackground).frame(height: 10)
+                    }
+                }
+                EndOfTabCard(category: category, count: items.count,
+                             onTop: { withAnimation(reduceMotion ? nil : .default) { position = items.first?.id } },
+                             onSaved: onSaved)
+                    .padding(.bottom, inset)
+                    .frame(width: page.width, height: page.height)
+                    .id(Self.endID)
+            }
+            .scrollTargetLayout()
+        }
+            .scrollTargetBehavior(FeedPaging(paged: paged))
             .scrollPosition(id: $position)
-            .scrollIndicators(.hidden)
+            .scrollIndicators(paged ? .hidden : .automatic)
+            .ignoresSafeArea(.container, edges: .bottom)
             .refreshable { await store.refresh() }
             .sensoryFeedback(.success, trigger: store.lastUpdated) { _, _ in store.isRefreshing }
             .task(id: currentID) { await settled() }
-        }
     }
 
     private var currentID: String? { position ?? items.first?.id }
@@ -83,6 +104,16 @@ struct FeedView: View {
             }
             .frame(maxHeight: .infinity)
         }
+    }
+}
+
+/// One card per swipe when the feed is paged; free scrolling when it is a list of tall cards.
+struct FeedPaging: ScrollTargetBehavior {
+    let paged: Bool
+
+    func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
+        guard paged else { return }
+        ViewAlignedScrollTargetBehavior(limitBehavior: .always).updateTarget(&target, context: context)
     }
 }
 

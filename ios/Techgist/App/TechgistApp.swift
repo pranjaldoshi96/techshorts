@@ -10,6 +10,7 @@ struct TechgistApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(store)
+                .tint(Theme.accent)
                 .task { await store.becameActive() }
         }
         .onChange(of: scenePhase) { _, phase in

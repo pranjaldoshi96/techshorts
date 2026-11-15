@@ -53,7 +53,7 @@ enum BackgroundRefresh {
         schedule()
         let result = await FeedService().latest()
         guard !result.articles.isEmpty else { return }
-        ArticleCache.save(result.articles, at: Date())
+        ArticleCache.save(result.articles, at: Date(), origin: result.origin)
         let muted = Set(UserDefaults.standard.stringArray(forKey: Keys.disabledSources) ?? [])
         let enabled = result.articles.filter { !muted.contains($0.source) }
         await DailyDigest.reschedule(with: FeedOrdering.topStory(in: enabled))

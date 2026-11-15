@@ -1,27 +1,32 @@
 import SwiftUI
 
-/// One story, one screen. The text never shrinks and never truncates: the card picks the richest layout that fits.
+/// One story, one screen. The text never shrinks: the card picks the richest layout that fits.
 /// 1. Hero picture + full summary.
 /// 2. Hero picture + short summary (the first two sentences).
 /// 3. Thumbnail + full summary, for small phones and long headlines.
-/// 4. The same, scrollable, for the largest text sizes.
+/// 4. Thumbnail + short summary.
+/// 5. Text only + short summary. Only here, as a last resort, may the summary end in an ellipsis.
+/// At the accessibility text sizes (`flows`) the card is as tall as its text and the feed scrolls freely.
 struct CardView: View {
     @EnvironmentObject private var store: NewsStore
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let article: Article
+    /// The card's width, and the height of the home-indicator area along its bottom edge.
+    let width: CGFloat
+    var bottomInset: CGFloat = 0
+    /// True when the card sizes itself to its text instead of filling one page.
+    var flows = false
     var highlighted = false
     let onRead: () -> Void
     let onCoverage: () -> Void
     @State private var preparingShare = false
 
     var body: some View {
-        GeometryReader { geo in
-            let width = geo.size.width
-            VStack(spacing: 0) {
+        VStack(spacing: 0) {
                 content(width: width)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .frame(maxWidth: .infinity, maxHeight: flows ? nil : .infinity, alignment: .top)
                     .contentShape(Rectangle())
                     .onTapGesture(perform: onRead)
                     .contextMenu { menu }
@@ -37,12 +42,12 @@ struct CardView: View {
                         Button("Mute \(article.source)") { store.disabledSources.insert(article.source) }
                     }
                 footer
-            }
+                    .padding(.bottom, bottomInset)
         }
         .background(Theme.cardBackground)
         .overlay {
             Rectangle()
-                .strokeBorder(Color.accentColor, lineWidth: 4)
+                .strokeBorder(Theme.accent, lineWidth: 4)
                 .opacity(highlighted ? 1 : 0)
                 .animation(.easeInOut(duration: 0.35), value: highlighted)
                 .allowsHitTesting(false)
@@ -64,29 +69,36 @@ struct CardView: View {
     private func content(width: CGFloat) -> some View {
         let full = article.displaySummary
         let short = article.shortSummary
-        if typeSize.isAccessibilitySize {
-            ViewThatFits(in: .vertical) {
-                compact(summary: full)
-                ScrollView { compact(summary: full) }
-                    .scrollBounceBehavior(.basedOnSize)
-            }
+        if flows {
+            compact(summary: full)
         } else if short != full {
             ViewThatFits(in: .vertical) {
                 hero(summary: full, width: width)
                 hero(summary: short, width: width)
                 compact(summary: full)
                 compact(summary: short)
-                ScrollView { compact(summary: full) }
-                    .scrollBounceBehavior(.basedOnSize)
+                textOnly(summary: short)
             }
         } else {
             ViewThatFits(in: .vertical) {
                 hero(summary: full, width: width)
                 compact(summary: full)
-                ScrollView { compact(summary: full) }
-                    .scrollBounceBehavior(.basedOnSize)
+                textOnly(summary: full)
             }
         }
+    }
+
+    /// No picture, and the one layout whose summary may be cut short: ViewThatFits falls back to its last choice
+    /// even when that doesn't fit, and a clipped card is worse than an ellipsis above "Read more".
+    private func textOnly(summary: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sourceLabel
+                .foregroundStyle(.primary)
+                .padding(.horizontal, Theme.horizontal)
+            textBlock(summary: summary, mayTruncate: true)
+                .padding(.top, 10)
+        }
+        .padding(.top, 14)
     }
 
     private func hero(summary: String, width: CGFloat) -> some View {
@@ -132,24 +144,29 @@ struct CardView: View {
         }
     }
 
-    private func textBlock(summary: String) -> some View {
+    private func textBlock(summary: String, mayTruncate: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             metaRow
+                .fixedSize(horizontal: false, vertical: true)
             Text(article.displayTitle)
                 .font(Theme.headline)
                 .lineSpacing(2)
                 .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, Theme.metaToHeadline)
             if !summary.isEmpty {
                 Text(summary)
                     .font(Theme.body)
                     .lineSpacing(5)
                     .foregroundStyle(Theme.bodyText)
+                    .fixedSize(horizontal: false, vertical: !mayTruncate)
                     .padding(.top, Theme.headlineToBody)
             }
             coverageRow
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .fixedSize(horizontal: false, vertical: true)
+        // Rigid as a whole, so the picture above is what gives way when space is short.
+        .fixedSize(horizontal: false, vertical: !mayTruncate)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Theme.horizontal)
         .padding(.bottom, 8)
@@ -193,16 +210,20 @@ struct CardView: View {
         let others = article.alsoCoveredBy ?? []
         if !others.isEmpty {
             Button(action: onCoverage) {
-                HStack(spacing: 8) {
+                // Side by side normally; the outlets' names go under the logos at the accessibility sizes.
+                let row = flows ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 8))
+                row {
                     HStack(spacing: -6) {
                         ForEach(Array(([article.source] + others).prefix(4).enumerated()), id: \.offset) { _, name in
                             SourceMonogram(name: name, size: 22)
                                 .overlay(Circle().stroke(Theme.cardBackground, lineWidth: 1.5))
                         }
                     }
-                    Text(coverageText)
-                        .multilineTextAlignment(.leading)
-                    Image(systemName: "chevron.right").imageScale(.small)
+                    HStack(spacing: 8) {
+                        Text(coverageText)
+                            .multilineTextAlignment(.leading)
+                        Image(systemName: "chevron.right").imageScale(.small)
+                    }
                 }
                 .font(Theme.meta.weight(.medium))
                 .foregroundStyle(Theme.metaText)
@@ -230,14 +251,18 @@ struct CardView: View {
     private var footer: some View {
         HStack(spacing: 4) {
             Button(action: onRead) {
+                // The longest label that fits on one line; never a truncated one.
                 ViewThatFits(in: .horizontal) {
                     readLabel("Read more at \(article.source)")
                     readLabel("Read more")
+                    readLabel("Read")
+                    Image(systemName: "arrow.up.right")
                 }
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
             .accessibilityLabel("Read more at \(article.source)")
+            .accessibilityShowsLargeContentViewer { Label("Read more at \(article.source)", systemImage: "arrow.up.right") }
             Spacer(minLength: 8)
             Button { store.toggleSaved(article) } label: {
                 Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
@@ -247,6 +272,7 @@ struct CardView: View {
                     .contentShape(Rectangle())
             }
             .accessibilityLabel(isSaved ? "Remove from saved" : "Save story")
+            .accessibilityShowsLargeContentViewer { Label(isSaved ? "Saved" : "Save", systemImage: isSaved ? "bookmark.fill" : "bookmark") }
             .sensoryFeedback(.success, trigger: isSaved) { _, saved in saved }
             Button(action: share) {
                 Group {
@@ -257,8 +283,12 @@ struct CardView: View {
             }
             .disabled(preparingShare)
             .accessibilityLabel("Share")
+            .accessibilityShowsLargeContentViewer { Label("Share", systemImage: "square.and.arrow.up") }
         }
         .font(.body.weight(.semibold))
+        // The buttons stop growing at the third accessibility size so all three stay on one row; each still
+        // shows its name large when pressed and held.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility3)
         .padding(.leading, Theme.horizontal)
         .padding(.trailing, Theme.horizontal - 10)
         .frame(minHeight: Theme.footerHeight)

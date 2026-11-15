@@ -25,6 +25,9 @@ struct ChipBar: View {
                 .padding(.horizontal, 16)
             }
             .scrollIndicators(.hidden)
+            // Like a tab bar, the chips stop growing part-way up the accessibility sizes so the stories keep the
+            // screen; pressing and holding a chip shows its name large.
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
             .onChange(of: selection) { _, new in
                 withAnimation(reduceMotion ? nil : Theme.chipSpring) { proxy.scrollTo(new, anchor: .center) }
             }
@@ -40,7 +43,7 @@ struct ChipBar: View {
             HStack(spacing: 6) {
                 Text(category.title)
                 if unread.contains(category), !selected {
-                    Circle().fill(Color.accentColor).frame(width: 6, height: 6)
+                    Circle().fill(Theme.accent).frame(width: 6, height: 6)
                 }
             }
             .font(.subheadline.weight(.semibold))
@@ -49,7 +52,7 @@ struct ChipBar: View {
             .padding(.vertical, 7)
             .background {
                 if selected {
-                    Capsule().fill(Color.accentColor).matchedGeometryEffect(id: "selected", in: capsule)
+                    Capsule().fill(Theme.accent).matchedGeometryEffect(id: "selected", in: capsule)
                 } else {
                     Capsule().fill(Color(.secondarySystemBackground))
                 }
@@ -59,6 +62,7 @@ struct ChipBar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityShowsLargeContentViewer { Text(category.title) }
         .accessibilityLabel(category.title)
         .accessibilityValue(unread.contains(category) ? "Unread stories" : "")
         .accessibilityAddTraits(selected ? [.isSelected] : [])
@@ -72,7 +76,7 @@ struct ProgressLine: View {
 
     var body: some View {
         GeometryReader { geo in
-            Color.accentColor
+            Theme.accent
                 .frame(width: geo.size.width * min(max(fraction, 0), 1))
                 .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: fraction)
         }
@@ -112,7 +116,7 @@ struct NewStoriesPill: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .frame(minHeight: 44)
-                .background(Color.accentColor, in: Capsule())
+                .background(Theme.accent, in: Capsule())
                 .foregroundStyle(Theme.onAccent(scheme))
                 .shadow(color: .black.opacity(0.25), radius: 8, y: 3)
         }

@@ -211,11 +211,24 @@ extension Article {
 struct ArticleCache: Codable {
     var updatedAt: Date
     var articles: [Article]
+    /// When the server published these stories. Nil when they came straight from the feeds, or from a 1.x cache.
+    var editionPublishedAt: Date?
+    var degraded: Bool?
 
     static let fileName = "articles.json"
     static func load() -> ArticleCache? { Disk.load(ArticleCache.self, from: fileName, in: .cachesDirectory) }
-    static func save(_ articles: [Article], at date: Date) {
-        Disk.save(ArticleCache(updatedAt: date, articles: articles), to: fileName, in: .cachesDirectory)
+    static func save(_ articles: [Article], at date: Date, origin: NewsOrigin? = nil) {
+        var cache = ArticleCache(updatedAt: date, articles: articles)
+        if case .edition(let publishedAt, let degraded)? = origin {
+            cache.editionPublishedAt = publishedAt
+            cache.degraded = degraded
+        }
+        Disk.save(cache, to: fileName, in: .cachesDirectory)
+    }
+
+    /// Where the cached stories came from, when that is known.
+    var origin: NewsOrigin? {
+        editionPublishedAt.map { .edition(publishedAt: $0, degraded: degraded ?? false) }
     }
 }
 

@@ -23,6 +23,9 @@ enum Theme {
     static let badge = Font.caption2.weight(.heavy)
 
     // Colors
+    /// The app's blue, from the asset catalog: 4.5:1 against white in light mode, 7.5:1 against black in dark.
+    /// Named explicitly because the system tint (a lighter blue, 3.4:1 on white) is what views get otherwise.
+    static let accent = Color("AccentColor")
     static let cardBackground = Color(.systemBackground)
     static let bodyText = Color.primary.opacity(0.85)
     /// Meta text. `secondary` is under 4.5:1 on white at footnote size; this is about 6:1 in light and 8:1 in dark.
@@ -37,7 +40,8 @@ enum Theme {
         scheme == .dark ? .white.opacity(0.10) : .black.opacity(0.08)
     }
     /// Darkens the bottom of a picture so the white source label stays readable on any photo.
-    static let scrim = LinearGradient(colors: [.black.opacity(0), .black.opacity(0.62)], startPoint: .center, endPoint: .bottom)
+    static let scrim = LinearGradient(colors: [.black.opacity(0), .black.opacity(0.62)],
+                                      startPoint: UnitPoint(x: 0.5, y: 0.62), endPoint: .bottom)
 
     // Motion
     static let chipSpring = Animation.spring(response: 0.35, dampingFraction: 0.85)
@@ -76,6 +80,8 @@ extension View {
 struct SourceMonogram: View {
     let name: String
     var size: CGFloat = 20
+    /// Grows with the text beside it.
+    @ScaledMetric(relativeTo: .caption) private var scale: CGFloat = 1
 
     private static let palette: [Color] = [
         Color(red: 0.12, green: 0.34, blue: 0.80), Color(red: 0.55, green: 0.20, blue: 0.75),
@@ -92,9 +98,9 @@ struct SourceMonogram: View {
 
     var body: some View {
         Text(String(name.first(where: { $0.isLetter || $0.isNumber }) ?? "T").uppercased())
-            .font(.system(size: size * 0.55, weight: .bold, design: .rounded))
+            .font(.system(size: size * min(scale, 2) * 0.55, weight: .bold, design: .rounded))
             .foregroundStyle(.white)
-            .frame(width: size, height: size)
+            .frame(width: size * min(scale, 2), height: size * min(scale, 2))
             .background(Self.color(for: name), in: Circle())
             .accessibilityHidden(true)
     }

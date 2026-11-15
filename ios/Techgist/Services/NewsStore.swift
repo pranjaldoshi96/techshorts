@@ -58,6 +58,7 @@ final class NewsStore: ObservableObject {
         self.service = service ?? { await FeedService().latest() }
         articles = (cache?.articles ?? []).map(Self.slim)
         lastUpdated = cache?.updatedAt
+        origin = cache?.origin
         saved = Self.loadSaved()
         disabledSources = Set(UserDefaults.standard.stringArray(forKey: Keys.disabledSources) ?? [])
         rebuildFeeds()
@@ -89,7 +90,7 @@ final class NewsStore: ObservableObject {
     func becameActive() async {
         // A background refresh may have written a newer cache while we were suspended.
         if let cache = ArticleCache.load(), cache.updatedAt > (lastUpdated ?? .distantPast) {
-            waiting = (cache.articles.map(Self.slim), origin)
+            waiting = (cache.articles.map(Self.slim), cache.origin ?? origin)
             lastUpdated = cache.updatedAt
         }
         let awayLong = backgroundedAt.map { Date().timeIntervalSince($0) >= Self.staleAfter } ?? false
@@ -176,7 +177,7 @@ final class NewsStore: ObservableObject {
     }
 
     func persist() {
-        if let lastUpdated { ArticleCache.save(articles, at: lastUpdated) }
+        if let lastUpdated { ArticleCache.save(articles, at: lastUpdated, origin: origin) }
     }
 
     // MARK: Finding a story

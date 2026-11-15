@@ -24,7 +24,7 @@ final class ReadState: ObservableObject {
         guard readAt[id] == nil else { return }
         readAt[id] = now
         unsaved += 1
-        if unsaved >= 8 { persist() }
+        persist()
     }
 
     func persist() {

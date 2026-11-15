@@ -4,11 +4,8 @@ struct ContentView: View {
     @EnvironmentObject private var store: NewsStore
     @ObservedObject private var readState = ReadState.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var showSaved = false
-    @State private var showSettings = false
-    @State private var showSearch = false
-    @State private var coverage: Article?
-    @State private var offerNotifications = false
+    /// The one sheet on screen. A single value, so two sheets can never compete to present.
+    @State private var sheet: Sheet?
     /// The card on screen in each tab, so a tab comes back where it was left.
     @State private var positions: [Category: String] = [:]
     @State private var pushEdge: Edge = .trailing
@@ -16,6 +13,21 @@ struct ContentView: View {
     @State private var pillHidden = false
     @State private var viewedThisSession = Set<String>()
     @AppStorage(Keys.notificationsOffered) private var notificationsOffered = false
+
+    enum Sheet: Identifiable {
+        case saved, settings, search, offer
+        case coverage(Article)
+
+        var id: String {
+            switch self {
+            case .saved: "saved"
+            case .settings: "settings"
+            case .search: "search"
+            case .offer: "offer"
+            case .coverage(let article): "coverage-" + article.id
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -27,8 +39,8 @@ struct ContentView: View {
                 }
                 ZStack {
                     FeedView(category: store.category, items: store.visibleArticles, position: position(for: store.category),
-                             highlighted: highlighted, onRead: read, onCoverage: { coverage = $0 },
-                             onViewed: viewed, onSaved: { showSaved = true })
+                             highlighted: highlighted, onRead: read, onCoverage: { sheet = .coverage($0) },
+                             onViewed: viewed, onSaved: { sheet = .saved })
                         .id(store.category)
                         .transition(reduceMotion ? .opacity : .push(from: pushEdge))
                 }
@@ -66,19 +78,26 @@ struct ContentView: View {
                     .accessibilityHint("Goes back to the first story")
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { showSearch = true } label: { Image(systemName: "magnifyingglass") }
+                    Button { sheet = .search } label: { Image(systemName: "magnifyingglass") }
                         .accessibilityLabel("Search")
-                    Button { showSaved = true } label: { Image(systemName: "bookmark") }
+                    Button { sheet = .saved } label: { Image(systemName: "bookmark") }
                         .accessibilityLabel("Saved stories")
-                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
+                    Button { sheet = .settings } label: { Image(systemName: "gearshape") }
                         .accessibilityLabel("Settings")
                 }
             }
-            .sheet(isPresented: $showSaved) { SavedView() }
-            .sheet(isPresented: $showSettings) { SettingsView() }
-            .sheet(isPresented: $showSearch) { SearchView(onSelect: show) }
-            .sheet(item: $coverage) { CoverageSheet(article: $0, onRead: read) }
-            .sheet(isPresented: $offerNotifications) { NotificationsOffer() }
+            .sheet(item: $sheet) { sheet in
+                Group {
+                    switch sheet {
+                    case .saved: SavedView()
+                    case .settings: SettingsView()
+                    case .search: SearchView(onSelect: show)
+                    case .coverage(let article): CoverageSheet(article: article, onRead: read)
+                    case .offer: NotificationsOffer()
+                    }
+                }
+                .tint(Theme.accent)
+            }
         }
         .task {
             // While the app is open, look for a newer edition every 5 minutes and offer it with the pill.
@@ -183,8 +202,8 @@ struct ContentView: View {
     }
 
     private func offerNotificationsIfNeeded() {
-        guard !notificationsOffered, !offerNotifications, !showSaved, !showSettings, !showSearch, coverage == nil else { return }
-        offerNotifications = true
+        guard !notificationsOffered, sheet == nil else { return }
+        sheet = .offer
     }
 
     /// Brings a story's card on screen, or opens the story when it isn't in the edition any more.
@@ -193,9 +212,7 @@ struct ContentView: View {
     }
 
     private func handle(_ request: AppDelegate.Request) {
-        showSaved = false
-        showSettings = false
-        showSearch = false
+        sheet = nil
         switch request {
         case .show(let url):
             if !store.focus(on: url) { Reader.open(url) }
