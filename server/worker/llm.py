@@ -732,6 +732,7 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
     if llm_cfg.get("triage") and rows:
         vetted = _techmeme_linked(db)
         fresh = [r for r in rows if r["status"] == "new" and not r["triaged"] and r["url_canonical"] not in vetted
+                 and not by_id[r["source_id"]].curated
                  and not json.loads(r["extra"] or "{}").get("via")][:TRIAGE_BATCH]
         drops = triage_batch(client, cfg, fresh, by_id)
         for r in fresh:

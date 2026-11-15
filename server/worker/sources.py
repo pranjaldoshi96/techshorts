@@ -48,6 +48,13 @@ class Source:
         return POLL_SECONDS[self.poll]
 
     @property
+    def curated(self):
+        """A source listed for its own tab's readers (essays for Reads, developer and lab posts for Dev). Its posts
+        skip the screening call, which asks "would a tech-curious reader tap this?" and so dropped "Rust 1.100.0
+        released", an InfoQ essay and Stratechery's weekly as dull; the writer's type and importance decide."""
+        return bool(self.reads or self.seed_days)
+
+    @property
     def polled(self):
         """False for a publisher that is listed only so linked articles carry its name and authority."""
         return bool(self.url)

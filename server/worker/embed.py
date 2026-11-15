@@ -27,6 +27,11 @@ class ServerError(LLMError):
     """5xx or 429s on every try."""
 
 
+class Rejected(LLMError):
+    """400/422: the endpoint refuses this input (its content screening rejected one article's text). Not transient
+    and not the batch's fault: the batch is halved until the one input is found, and that input comes back None."""
+
+
 class Unavailable(LLMError):
     """The endpoint doesn't answer at all (timeouts, connection errors): the rest of the tick goes without."""
 
@@ -84,8 +89,27 @@ class Embedder:
         self.calls = 0
         self.timeouts = 0
 
+    def embed_safe(self, texts, input_type="passage", fallbacks=None):
+        """Like embed, but never None: an input the endpoint rejects is embedded from its fallback text (an item's
+        title), and gets a zero vector if that is rejected too. A zero vector is near nothing, so the item becomes
+        its own event instead of blocking every other item's vector: one screened article made every batch fail
+        with HTTP 422, tick after tick, and 30 written items could not cluster."""
+        vecs = self.embed(texts, input_type)
+        missing = [i for i, v in enumerate(vecs) if v is None]
+        if missing and fallbacks:
+            again = self.embed([fallbacks[i] for i in missing], input_type)
+            for i, v in zip(missing, again):
+                vecs[i] = v
+        dims = next((len(v) for v in vecs if v is not None), self.dims or 1024)
+        for i, v in enumerate(vecs):
+            if v is None:
+                log.warning("embedding rejected an input; it gets a zero vector")
+                vecs[i] = np.zeros(dims, dtype=np.float32)
+        return vecs
+
     def embed(self, texts, input_type="passage"):
-        """Unit vectors for `texts`, in order. Raises LLMError (or AuthError/ModelGone) when a batch fails."""
+        """Unit vectors for `texts`, in order; None for an input the endpoint rejects (Rejected). Raises LLMError
+        (or AuthError/ModelGone) when a batch fails."""
         out = []
         self.timeouts = 0
         for i in range(0, len(texts), BATCH):
@@ -98,6 +122,11 @@ class Embedder:
         try:
             # A multi-input batch gets one try before halving; retries are for the single inputs at the bottom.
             return self._batch(texts, input_type, tries=1 if len(texts) > 1 else 6)
+        except Rejected:
+            if len(texts) == 1:
+                return [None]
+            mid = len(texts) // 2
+            return self._split(texts[:mid], input_type) + self._split(texts[mid:], input_type)
         except ServerError:
             if len(texts) == 1:
                 raise
@@ -132,6 +161,8 @@ class Embedder:
             if r.status_code >= 500:
                 self.sleep(attempt + 1)
                 continue
+            if r.status_code in (400, 413, 422):
+                raise Rejected(f"embed HTTP {r.status_code}: {r.text[:200]}")
             if r.status_code != 200:
                 raise LLMError(f"embed HTTP {r.status_code}: {r.text[:200]}")
             data = sorted(r.json()["data"], key=lambda d: d["index"])

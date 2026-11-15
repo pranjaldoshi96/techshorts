@@ -889,7 +889,8 @@ def embed_items(db, cfg, embedder, prepared, now):
         else:
             todo.append((row["url_canonical"], inp, sha))
     if todo:
-        vecs = embedder.embed([t[1] for t in todo], "passage")
+        titles = {row["url_canonical"]: row["title"] for row, _ in prepared}
+        vecs = _embed(embedder, [t[1] for t in todo], "passage", [titles[t[0]] for t in todo])
         for (url, _, sha), v in zip(todo, vecs):
             db.conn.execute("INSERT OR REPLACE INTO embeddings VALUES (?,?,?,?,?,?,?)",
                             (url, "passage", embedder.model, len(v), sha, embed_mod.to_blob(v), iso(now)))
@@ -908,6 +909,12 @@ def candidates(db, cfg, vecs, now):
     return out
 
 
+def _embed(embedder, texts, input_type, fallbacks=None):
+    """Vectors that are never None (Embedder.embed_safe); a test's fake embedder has only `embed`."""
+    safe = getattr(embedder, "embed_safe", None)
+    return safe(texts, input_type, fallbacks) if safe else embedder.embed(texts, input_type)
+
+
 def embed_backlog(db, cfg, embedder, now, limit=50):
     """Classified items that missed their embedding (the embedding call failed that tick) get one from their stored
     text, so they can still cluster."""
@@ -921,7 +928,7 @@ def embed_backlog(db, cfg, embedder, now, limit=50):
         return 0
     lead_words = cfg["embed"].get("lead_words", 120)
     inputs = [embed_mod.item_input(r["title"], r["text"], lead_words) for r in rows]
-    vecs = embedder.embed(inputs, "passage")
+    vecs = _embed(embedder, inputs, "passage", [r["title"] for r in rows])
     for r, inp, v in zip(rows, inputs, vecs):
         db.conn.execute("INSERT OR REPLACE INTO embeddings VALUES (?,?,?,?,?,?,?)",
                         (r["url_canonical"], "passage", embedder.model, len(v),
@@ -936,7 +943,7 @@ def embed_signals(db, embedder, srcs, now, limit=50):
     rows = [r for r in signal_items(db, srcs, now) if r["vec"] is None][:limit]
     if not rows:
         return 0
-    vecs = embedder.embed([r["title"] for r in rows], "query")
+    vecs = _embed(embedder, [r["title"] for r in rows], "query")
     for r, v in zip(rows, vecs):
         db.conn.execute("INSERT OR REPLACE INTO embeddings VALUES (?,?,?,?,?,?,?)",
                         (r["url_canonical"], "query", embedder.model, len(v), None, embed_mod.to_blob(v), iso(now)))

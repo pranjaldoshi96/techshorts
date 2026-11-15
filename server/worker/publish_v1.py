@@ -362,6 +362,8 @@ def headline_vectors(db, embedder, cands, now, limit=60):
         log.warning("headline embedding failed: %s", e)
         return 0
     for (key, (_, cs)), v in zip(todo, vecs):
+        if v is None:       # the endpoint rejected this headline; the title-word guard covers the card
+            continue
         db.conn.execute("INSERT OR REPLACE INTO embeddings VALUES (?,?,?,?,?,?,?)",
                         (key, "headline", embedder.model, len(v), None, embed_mod.to_blob(v), iso(now)))
         for c in cs:

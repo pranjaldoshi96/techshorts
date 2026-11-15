@@ -610,3 +610,42 @@ def test_commentary_on_a_story_cannot_score_like_the_story():
     assert res.value == 9
     res = importance.compute([member("guardian", "news"), member("bbc", "news")], "news", ["bigtech"])
     assert res.value == 9 and "commentary" not in res.clamps
+
+
+class RejectingSession:
+    """An embedding endpoint whose content screening rejects any batch containing a text with "REJECT"."""
+
+    def __init__(self):
+        self.batches = []
+
+    def post(self, url, json=None, timeout=None, headers=None):
+        self.batches.append(list(json["input"]))
+        bad = any("REJECT" in t for t in json["input"])
+
+        class R:
+            status_code = 422 if bad else 200
+            text = '{"error": {"message": "input rejected by content safety screening"}}'
+            headers = {}
+
+            def json(self_inner):
+                return {"data": [{"index": i, "embedding": [1.0, float(i), 0.0]} for i in range(len(json["input"]))]}
+        return R()
+
+
+def test_one_rejected_input_does_not_block_the_batch():
+    # One screened article made every embedding batch fail with HTTP 422, tick after tick; 30 items never clustered.
+    e = embed.Embedder("https://nv.test/v1", "k", "m", session=RejectingSession(), sleep=lambda s: None)
+    texts = ["a", "b", "Title\nREJECT body", "d", "e"]
+    vecs = e.embed(texts, "passage")
+    assert [v is None for v in vecs] == [False, False, True, False, False]
+    # The item's title stands in; if that is rejected too, a zero vector (its own event) rather than a failure.
+    vecs = e.embed_safe(texts, "passage", fallbacks=["a", "b", "Title", "d", "e"])
+    assert all(v is not None for v in vecs) and float(vecs[2] @ vecs[2]) > 0
+    vecs = e.embed_safe(["ok", "REJECT"], "passage", fallbacks=["ok", "REJECT title"])
+    assert not vecs[1].any() and len(vecs[1]) == len(vecs[0])
+
+
+def test_curated_sources_skip_the_screening_call():
+    by_id = SRCS.by_id()
+    assert by_id["infoq"].curated and by_id["stratechery"].curated and by_id["rust_blog"].curated
+    assert not by_id["nypost_business"].curated and not by_id["techcrunch"].curated

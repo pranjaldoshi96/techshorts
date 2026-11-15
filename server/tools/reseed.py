@@ -3,7 +3,8 @@
 
 A source's first poll marks items older than its horizon as `seen`. When a source later gets a longer horizon
 (seed_days in sources.yaml), its older posts stay `seen` and its tab stays thin for a week. This puts the `seen`
-items inside the new horizon back to `new`, so the worker writes them on its next ticks (newest news first, as
+items inside the new horizon (and the ones the screening call dropped, from which such sources are now exempt)
+back to `new`, so the worker writes them on its next ticks (newest news first, as
 always). Items the prefilter would drop are dropped. Stop the worker first.
 
 Usage (from server/): TECHGIST_STATE=... python3 -m tools.reseed [--dry-run]
@@ -24,8 +25,10 @@ def reseed(db, srcs, cfg, now, dry_run=False):
         if not s.seed_days or not s.polled or s.is_signal:
             continue
         since = iso(now - fetch.seed_horizon(s, cfg))
-        rows = db.q("SELECT url_canonical, url, title FROM items WHERE source_id = ? AND status = 'seen'"
-                    " AND feed_published_at IS NOT NULL AND published_at >= ?", s.id, since)
+        # Also what the screening call dropped from this source before curated sources were exempt from it.
+        rows = db.q("SELECT url_canonical, url, title FROM items WHERE source_id = ? AND feed_published_at IS NOT NULL"
+                    " AND published_at >= ? AND (status = 'seen' OR (status = 'dropped' AND drop_rule LIKE 'triage_%'))",
+                    s.id, since)
         for r in rows:
             rule = "domain_blocklist" if srcs.blocked(r["url"]) else prefilter.check(r["title"], r["url"])
             if dry_run:
@@ -35,7 +38,8 @@ def reseed(db, srcs, cfg, now, dry_run=False):
                                 (rule, r["url_canonical"]))
                 db.log_drop(now, s.id, r["url"], r["title"], rule)
             else:
-                db.conn.execute("UPDATE items SET status = 'new' WHERE url_canonical = ?", (r["url_canonical"],))
+                db.conn.execute("UPDATE items SET status = 'new', drop_rule = NULL WHERE url_canonical = ?",
+                                (r["url_canonical"],))
         if rows:
             out[s.id] = len(rows)
     if not dry_run:
