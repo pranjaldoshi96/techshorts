@@ -32,8 +32,9 @@ Notes
   and `run1-<time>/` holds the first test run's state (37 sources, Nemotron, no spice), set aside on 2026-11-15
   when the second run was seeded from scratch with the wide source list and the hub models.
 - The review fixes of 2026-11-15 (briefs, tab sizes, traction floors, backup models) were deployed onto the
-  second run's state, not a fresh one: `state-20261115T211500Z.db` and `state-20261115T213649Z.db` are the SQLite
-  backups taken before each of the two deploys, with the edition and health.json of 21:15 beside the first. After
+  second run's state, not a fresh one: `state-20261115T211500Z.db`, `state-20261115T213649Z.db` and
+  `state-20261115T215422Z.db` are the SQLite backups taken before each of the three deploys, with the edition and
+  health.json of 21:15 beside the first. After
   the first deploy `tools/requeue.py --hours 14 --no-text` put 27 paywalled tier-1 items that had been dropped for
   too little text back in the queue, so they could start events and get briefs.
 - `deploy.sh` installs the unit files when they have changed (a new key file variable, say) before restarting,
