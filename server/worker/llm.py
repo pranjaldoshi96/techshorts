@@ -746,6 +746,7 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
             steps.append(Step(rung, model, "bad_json", "bad_json", feedback))
             continue
         attribution_mod.apply(out, attribution, item["url"], item["title"])
+        own_headline = out.headline
         validate.select(out, attribution, hedge_source=hedge_scope)
         last_out = out
         v = validate.check(out, text.text, item["title"], source_name, attribution, author, text.lead(),
@@ -769,6 +770,10 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
                 continue
             if not e.ok:
                 feedback = [e.feedback()]
+                if "headline" in e.line.lower():
+                    # The label the fact-checker objects to may be one code added (validate.select).
+                    hint = validate.label_feedback(out.headline, own_headline, hedge_scope)
+                    feedback += [hint] if hint else []
                 steps.append(Step(rung, model, "entail_fail", "entail_fail", feedback))
                 continue
             entailed = True

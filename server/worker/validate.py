@@ -639,6 +639,22 @@ def hedge_problem(headline, scope):
     return hedge_dropped(headline, scope) or title_claim_dropped(headline, scope.split("\n", 1)[0])
 
 
+def label_feedback(headline, own, scope):
+    """What to tell the writer when the fact-check rejects a "Report:" label that select() added to its headline:
+    the text hedges one claim ("what is reportedly its first mission failure") beside a name the headline uses,
+    the headline carried no hedge, and "Report: ULA's Vulcan rocket fails" then labels as someone's reporting what
+    the company itself confirmed. "Remove the label" brought the same headline back, and the label with it.
+    None when the label was the writer's own or there is no dropped hedge."""
+    if not (headline or "").startswith(REPORT_PREFIX) or (own or "").startswith(REPORT_PREFIX):
+        return None
+    hp = hedge_dropped(headline[len(REPORT_PREFIX):], scope)
+    if not hp:
+        return None
+    return (f"The \"Report:\" label was added because the text hedges with \"{hp[0]}\" (\"...{hp[1]}...\") and "
+            f"your headline had no hedge. Write the headline with \"{hp[0]}\" on the claim the text hedges, or "
+            f"say who states the headline's fact (\"X says ...\"), so that no label is needed.")
+
+
 def _content(s):
     return {w.rstrip("s") for w in re.findall(r"[a-z0-9$%.]+", (s or "").lower().replace("’", "'"))
             if len(w) >= 3 and w not in FUNCTION_WORDS}
@@ -864,8 +880,9 @@ def check(out, source_text, title, source_name, attribution=None, author=None, l
     dropped = hedge_problem(out.headline or "", hedge_scope(title, lead or source_text))
     if dropped:
         v.fail("hedge_dropped", f"Headline drops '{dropped[0]}'; keep the hedge. The source says: "
-                                f"\"...{dropped[1]}...\". Keep that word or attribute the claim "
-                                f"(\"..., report says\").")
+                                f"\"...{dropped[1]}...\". Keep that word on the claim the source hedges, or "
+                                f"say who states the headline's fact (\"X says ...\", \"..., report says\"); "
+                                f"never put the hedge on a fact the source states outright.")
     mark = tense_problem(out.headline, title)
     if mark:
         v.fail("tense_drift", f"Headline states as done what the source says is still to come (the source title "

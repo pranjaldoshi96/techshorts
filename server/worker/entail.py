@@ -49,10 +49,13 @@ out who is alleging it.
 10. Is scene-setting or colour instead of a fact about the story: what hung on a wall, where the writer was \
 sitting or how he felt, an app-store ranking or a biography line that is not what the story reports ("Framed \
 art by rock legends hung on the wall"; "Writing from the airport, he describes himself as grouchy").
-11. The summary does not report the headline's news. Read S1 to S3 together: at least one of them must state a \
-fact about what the headline announces (who did it, how much, when, how, what follows). A headline "VC firm has \
-a $7B stake in Anthropic" over sentences about a meeting in 2023, what was discussed and what hung on the wall \
-fails, even though each sentence is true to the source: name the line "summary".
+11. The summary is about something other than the headline's news. The sentences are written not to repeat \
+the headline, so they need not restate its fact; read together, S1 to S3 must still be about that same news: \
+its terms, numbers, people, cause, effects or what follows. Fail only when none of them is. A headline "VC firm \
+has a $7B stake in Anthropic" over sentences about a meeting in 2023, what was discussed and what hung on the \
+wall fails, even though each sentence is true to the source; so does a headline about one story over sentences \
+about other stories from the same article. A headline "Chipmaker ties extra pay to resigning in 3 days" over \
+sentences on how many jobs are cut and what else the severance package holds passes. Name the line "summary".
 
 Reply with only JSON: {"entailed": "yes" or "no", "line": "which line fails, or empty", \
 "unsupported": "the unsupported claim and what the source actually says, in one sentence, or empty"}
@@ -74,6 +77,13 @@ class Entailment:
 
     def feedback(self):
         claim = self.unsupported or "a claim"
+        if self.line.strip().lower() == "summary":
+            # Rule 11: "rewrite that line" led the writer to swap the headline for another one the sentences did
+            # not report either (tools/eval_cards.py on the VPS, twice in 50 cards).
+            return (f"The fact-check failed (summary): {claim} Keep the headline and write S1 to S3 about its "
+                    f"news, from the text: S1 the next fact about it (who, how much, when, how), then detail and "
+                    f"what follows. If the text holds no further fact about it, make the headline the news the "
+                    f"sentences do report.")
         where = f" ({self.line})" if self.line else ""
         return (f"The fact-check failed{where}: {claim} Rewrite that line with only what the source states, "
                 f"keeping its tense, hedges and attribution.")

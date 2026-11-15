@@ -678,7 +678,7 @@ def test_a_title_with_no_report_under_it_is_not_written_as_a_card():
     assert validate.TEASER not in validate.check(o, body.text, MADONNA_TITLE, "Bloomberg", None, None,
                                                  body.lead()).reasons
     # The fact-checker is told the same thing in its own terms (prompt change, untested against a live model).
-    assert "11. The summary does not report the headline's news" in entail.PROMPT
+    assert "11. The summary is about something other than the headline's news" in entail.PROMPT
 
     item = {"url": "https://www.bloomberg.com/news/x", "url_canonical": "https://www.bloomberg.com/news/x",
             "source_id": "bloomberg", "title": MADONNA_TITLE, "feed_text": MADONNA_TEXT,
