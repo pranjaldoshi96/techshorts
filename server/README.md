@@ -83,6 +83,9 @@ python3 tools/check_edition.py ~/.techshorts-r1/edition/edition.json   # the 1.2
 The NVIDIA key comes from `NVIDIA_API_KEY`, else the last `export NVIDIA_API_KEY=` line in `~/.bashrc`. Without
 a key the worker still publishes, in degraded mode.
 
+The same worker also runs as a system service on the public VPS (a test run that publishes to a local directory
+only); see [deploy/README.md](deploy/README.md). There the key comes from the file named by `NVIDIA_API_KEY_FILE`.
+
 ### Owner controls: `server/tg`
 
 `tg` edits `<state_dir>/editorial.yaml`, which the worker re-reads every tick, so changes show within a minute.
