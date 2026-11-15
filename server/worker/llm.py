@@ -631,7 +631,8 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
             try:
                 e = entail.check(client, role_model(cfg, "judge"), item["title"],
                                  entail.context(out, text, attribution), out.headline, out.s1, out.s2,
-                                 out.s3 if v.full != v.short else "", out.notif_title, out.notif_line)
+                                 out.s3 if v.full != v.short else "", out.notif_title, out.notif_line,
+                                 source_name)
             except (AuthError, CircuitOpen):
                 raise
             except (LLMError, ValueError) as err:

@@ -58,18 +58,27 @@ SENTENCE_JACCARD_MAX = 0.5
 REPORT_PREFIX = "Report: "
 
 
-# Tense and certainty (the owner's rule: "will issue" must never become "issues"). A source title that describes a
-# planned, expected or proposed action binds the headline and the push alert: they must keep a future or
-# prospective form. Two shapes in the title count: a marker word ("will", "plans to", "set to", "expected"), and
-# headline-ese "X to VERB" ("Sebi to issue AI usage guidelines"), where the word after "to" must be a verb from
-# FUTURE_VERBS so "Apple brings Siri to glasses" or "A guide to Rust" don't read as plans.
+# Tense and certainty (the owner's rule: "will issue" must never become "issues"). A source title that plainly
+# describes a planned action binds the headline, which restates it: the headline must keep a future or prospective
+# form. What counts as "plainly" in the title is narrow (PLAN_MARK, or headline-ese "X to VERB" such as "Sebi to
+# issue AI usage guidelines", where the word after "to" must be a verb from FUTURE_VERBS so "Apple brings Siri to
+# glasses" or "A guide to Rust" don't read as plans). What counts as keeping it in the headline is wide
+# (FUTURE_MARK). The first version used the wide list on both sides and checked the push alert too: on the first
+# 150 cards of the second VPS run it failed 8 that were fine ("May I ..." in a quote, "What Earth would be like",
+# "Work to replace old copper wire led to ...", an alert stating a different, present fact). Weaker forms and the
+# alert's lines are the fact-checker's job (entail.py, rule 2).
+PLAN_MARK = re.compile(
+    r"\b(will|won't|to be|set to|plans? to|planning to|poised to|expected to|is expected|are expected|slated to|"
+    r"scheduled to|about to|aims? to|intends? to|prepares? to|preparing to|soon)\b", re.I)
 FUTURE_MARK = re.compile(
     r"\b(will|won't|shall|to be|set to|plans? to|plans|planned|planning|poised to|expected|expects?|likely to|slated|"
     r"scheduled|due to (?:launch|ship|list|open|start|begin|arrive|debut)|about to|aims? to|aiming to|seeks? to|"
     r"seeking to|looks? to|looking to|prepares? to|preparing|readies|intends? to|wants? to|hopes? to|hoping to|"
     r"could|may|might|would|soon|upcoming|coming|next (?:week|month|quarter|year)|in talks|considers?|"
     r"considering|weighs?|weighing|mulls?|mulling|eyes|eyeing|nears?|nearing|proposes?|proposed|proposal|draft|"
-    r"threatens? to|vows? to|pledges? to|promises? to|targets?|targeting|in the works|working on|on track)\b", re.I)
+    r"threatens? to|vows? to|pledges? to|promises? to|targets?|targeting|in the works|working on|on track|"
+    r"wants?|hopes?|interested in|tipped|rumou?red|reportedly|possible|potential|ahead of|awaits?|pending|"
+    r"readying|gearing up|explores?|exploring|pushes for|calls for|urges?|asks?|demands?|bids? (?:to|for))\b", re.I)
 FUTURE_VERBS = set("""issue launch release unveil announce acquire buy sell raise invest cut lay hire fire open close
 shut build bring add ban block sue pay settle appeal testify step resign join leave replace name appoint roll ship
 debut list file go become get receive offer start begin stop end expand enter exit merge spin split make take give
@@ -87,11 +96,17 @@ detail outline brief renegotiate challenge exit""".split())
 FUTURE_TO = re.compile(r"^((?:[A-Z0-9][\w&.'’-]*,?\s+|(?:and|of|the|&)\s+){1,5})to\s+([a-z]{2,})\b")
 NOT_SUBJECT = {"how", "why", "what", "when", "where", "who", "ways", "way", "time", "guide", "introduction",
                "intro", "welcome", "road", "path", "response", "reaction", "back", "return", "thanks", "due", "up",
-               "here's", "need", "reasons", "reason", "things", "tips", "steps", "want", "ready", "learn"}
+               "here's", "need", "reasons", "reason", "things", "tips", "steps", "want", "ready", "learn",
+               # a noun and its infinitive ("Work to replace old copper wire led to ..."), not a subject's plan
+               "work", "bill", "law", "bid", "push", "effort", "efforts", "move", "deal", "race", "fight",
+               "attempt", "drive", "campaign", "proposal", "rule", "rules", "tool", "tools", "app", "feature",
+               "option", "right", "ability", "decision", "failure", "refusal", "pressure", "call", "calls", "plan",
+               "plans", "talks", "vote", "order", "pledge", "promise", "threat", "chance", "struggle", "quest"}
 # Speculation and causation the writer adds on its own ("The founder's personal spending may have contributed to
 # the company's payroll crisis", from a CNBC report that drew no such link): each of these phrasings must be in the
 # source text, or the sentence is the writer's inference.
-SPECULATION = re.compile(r"\b(may have|might have|could have|must have|appears to have|seems to have|"
+SPECULATION = re.compile(r"\b((?:may|might|could|must) have (?:\w+ )?\w+(?:ed|en|wn|de|ne)|"
+                         r"appears to have|seems to have|"
                          r"contributed to|suggests? that|suggesting that|raises? (?:questions|concerns|doubts)|"
                          r"raising (?:questions|concerns|doubts)|signals? that|signalling that|signaling that|"
                          r"paving the way|could lead to|may lead to|likely to lead)\b", re.I)
@@ -114,12 +129,13 @@ SOURCING_KEPT = re.compile(r"\b(sources?|insiders?|people familiar|reportedly|re
 SOURCED_SCOPE_WORDS = 120
 # Only third-party reporting gets the code-added "Report:" label; "claims", "alleged" and "accused" are someone's
 # own statement, which the headline must attribute in words (the retry feedback asks for that).
-REPORT_HEDGES = ("reportedly", "according to")
+REPORT_HEDGES = ("reportedly",)
 
 
-def future_marker(text):
-    """The first sign that `text` describes something planned or expected, or None."""
-    m = FUTURE_MARK.search(text or "")
+def future_marker(text, pattern=FUTURE_MARK):
+    """The first sign that `text` describes something planned or expected, or None. With `pattern=PLAN_MARK` only
+    the plain forms count (what a source title must show before it binds the headline)."""
+    m = pattern.search(text or "")
     if m:
         return m.group(0)
     for segment in re.split(r"[:;|]\s+|\s[–—-]\s", text or ""):
@@ -133,7 +149,7 @@ def future_marker(text):
 def tense_problem(line, title):
     """The title's future marker when the source title describes a planned action and `line` states it with no
     future or prospective form at all; None otherwise."""
-    mark = future_marker(title)
+    mark = future_marker(title, PLAN_MARK)
     if not mark or not line or future_marker(line):
         return None
     return mark
@@ -278,6 +294,15 @@ def select(out, attribution=None, hedge_source=None):
         # Otherwise the hedge is someone's own claim or an accusation: "Report:" would mislabel it, so the first
         # headline goes to the hedge gate and its feedback asks the model to attribute the claim in words.
     out.headline = fitting[0] if fitting else candidates[0] if candidates else out.headline
+    # The push alert never costs a card its place. A title over the limit (the model counts badly: 41 characters
+    # failed two cards) gives way to the short headline, which obeys the same rules; a body over the limit to the
+    # short first or second sentence. With no fitting title the edition shows the publisher's name.
+    if not 0 < len(getattr(out, "notif_title", "") or "") <= NOTIF_TITLE_MAX:
+        short = (out.headline_short or "").strip()
+        out.notif_title = short if 0 < len(short) <= NOTIF_TITLE_MAX and not PREFIX.match(short) else ""
+    if len(getattr(out, "notif_line", "") or "") > NOTIF_MAX:
+        out.notif_line = next((s for s in (getattr(out, "s1_alt", ""), getattr(out, "s2_alt", ""))
+                               if 0 < len(s) <= NOTIF_MAX), out.notif_line)
     # Sentences after the headline, so the repeat check sees the headline the card will show.
     best = None
     for s1 in options("s1"):
@@ -600,13 +625,11 @@ def check(out, source_text, title, source_name, attribution=None, author=None, l
         v.fail("hedge_dropped", f"Headline drops '{dropped[0]}'; keep the hedge. The source says: "
                                 f"\"...{dropped[1]}...\". Keep that word or attribute the claim "
                                 f"(\"..., report says\").")
-    for name, line in (("Headline", out.headline), ("notif_line", notif), ("notif_title", notif_title)):
-        mark = tense_problem(line, title)
-        if mark:
-            v.fail("tense_drift", f"{name} states as done what the source says is still to come (the source title "
-                                  f"says '{mark}': \"{title}\"). Keep the future form: 'to ...', 'will ...', "
-                                  f"'plans to ...'.")
-            break
+    mark = tense_problem(out.headline, title)
+    if mark:
+        v.fail("tense_drift", f"Headline states as done what the source says is still to come (the source title "
+                              f"says '{mark}': \"{title}\"). Keep the future form: 'to ...', 'will ...', "
+                              f"'plans to ...'.")
     shown = f"{out.headline or ''} {full} {notif} {notif_title}"
     for phrase in invented(SPECULATION, shown, source):
         v.fail("speculation", f"'{phrase}' is your inference, not in the source text; state only what the text "

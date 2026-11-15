@@ -25,7 +25,9 @@ unless every line of it is supported, so be strict and literal.
 A line is supported when ORIGINAL TITLE + SOURCE TEXT states it or it follows directly. Paraphrase, rounding \
 ("$1.405T" -> "$1.4T") and dropping detail are fine. A headline starting with "Name:" or "Analysis:" reports \
 what the author argues or says; it is supported when the author argues or says it. "Report:" or "sources say" \
-is supported when the source attributes the claim to a report or to unnamed sources.
+is supported when the source attributes the claim to a report or to unnamed sources. The source is published by \
+<<publisher>>: the card may name that publication ("<<publisher>> reports") even though the text calls itself \
+"The Post" or "we", or does not name itself at all.
 
 Reject (entailed "no") if any line does any of these:
 1. Adds a fact, name, number, date or quote that is not in the source.
@@ -86,10 +88,11 @@ def fill(template, **values):
     return re.sub(r"<<(\w+)>>", lambda m: str(values[m.group(1)]), template)
 
 
-def build(title, lead, headline, s1, s2="", s3="", notif_title="", notif_line=""):
+def build(title, lead, headline, s1, s2="", s3="", notif_title="", notif_line="", publisher=""):
     rest = "".join(f"\n{label}: {value}" for label, value in (
         ("S2", s2), ("S3", s3), ("ALERT TITLE", notif_title), ("ALERT", notif_line)) if value)
-    return fill(PROMPT, title=title, lead=lead, headline=headline, s1=s1, rest=rest)
+    return fill(PROMPT, title=title, lead=lead, headline=headline, s1=s1, rest=rest,
+                publisher=publisher or "the outlet")
 
 
 def parse(content):
@@ -102,8 +105,8 @@ def parse(content):
                       str(data.get("line") or "").strip())
 
 
-def check(client, model, title, lead, headline, s1, s2="", s3="", notif_title="", notif_line=""):
+def check(client, model, title, lead, headline, s1, s2="", s3="", notif_title="", notif_line="", publisher=""):
     content = client.chat(model, [{"role": "user", "content": build(title, lead, headline, s1, s2, s3,
-                                                                    notif_title, notif_line)}],
+                                                                    notif_title, notif_line, publisher)}],
                           max_tokens=700, kind="entail", temperature=0.0)
     return parse(content)

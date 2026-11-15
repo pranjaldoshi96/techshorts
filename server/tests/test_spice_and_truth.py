@@ -52,9 +52,8 @@ def test_sebi_to_issue_must_not_become_sebi_issues():
     v = check(SEBI, headline="Sebi issues AI usage guidelines for capital markets")
     assert not v.ok and "tense_drift" in v.reasons
     assert "to issue" in next(f for f in v.feedback if "still to come" in f)
-    # The push alert is held to the same rule.
-    v = check(SEBI, notif_title="Sebi issues AI rules")
-    assert not v.ok and "tense_drift" in v.reasons
+    # The alert's lines often state another, present fact; their tense is the fact-checker's rule 2.
+    assert "tense or certainty" in entail.PROMPT and "ALERT TITLE" in entail.build("t", "x", "h", "s", notif_title="a")
     assert check(SEBI, headline="Sebi plans AI usage rules for capital markets").ok
     assert check(SEBI, headline="Sebi will issue AI usage rules for capital markets").ok
 
@@ -63,9 +62,15 @@ def test_sebi_to_issue_must_not_become_sebi_issues():
     (SEBI_TITLE, "to issue"),
     ("Musk to testify in OpenAI trial", "to testify"),
     ("Govt to ban deepfake apps", "to ban"),
-    ("OpenAI could raise $40B", "could"),
     ("Apple plans to launch smart glasses next year", "plans to"),
-    ("Anthropic is expected to price its IPO on Wednesday", "expected"),
+    ("Anthropic is expected to price its IPO on Wednesday", "is expected"),
+    ("Tesla will open Cybercab orders", "will"),
+    # Too weak or too ambiguous to bind a headline on their own (the fact-checker rules on these).
+    ("OpenAI could raise $40B", None),
+    ("'SNL' parodies Jensen Huang: 'May I pleasure you in an industry secret?'", None),
+    ("Grim simulation shows what Earth would be like if life never existed", None),
+    ("Work to replace old copper wire led to the FAA's ground stop", None),
+    ("Nvidia board urged to consider 'potential return of Jensen Huang'", None),
     # Not plans: an infinitive after a finite verb, a preposition, a how-to.
     ("Altimeter, Atreides urge Nvidia board to keep doors open for Jensen Huang's return", None),
     ("Apple brings Siri to smart glasses", None),
@@ -73,8 +78,15 @@ def test_sebi_to_issue_must_not_become_sebi_issues():
     ("How to build an agent", None),
     ("Italy fines Meta 805m euros over Android photo access", None),
 ])
-def test_future_marker(title, marker):
-    assert validate.future_marker(title) == marker
+def test_only_a_plain_plan_in_the_title_binds_the_headline(title, marker):
+    assert validate.future_marker(title, validate.PLAN_MARK) == marker
+
+
+def test_a_headline_keeps_the_plan_in_many_words():
+    for h in ("Alcon reportedly interested in making a Blade Runner game", "Apple's AI glasses tipped for WWDC",
+              "Sebi wants AI rules for brokers", "Musk could testify in OpenAI trial", "Govt may ban deepfake apps"):
+        assert validate.tense_problem(h, "Sebi to issue AI usage guidelines") is None, h
+    assert validate.tense_problem("Sebi issues AI usage guidelines", "Sebi to issue AI usage guidelines") == "to issue"
 
 
 # Inference, scale words and sourcing
@@ -151,7 +163,9 @@ def test_report_label_is_not_added_to_a_companys_own_claim():
 
 
 def test_fact_check_sees_every_line_and_the_whole_text():
-    prompt = entail.build("Title", "Source text.", "Headline", "S1.", "S2.", "S3.", "Alert title", "Alert body.")
+    prompt = entail.build("Title", "Source text.", "Headline", "S1.", "S2.", "S3.", "Alert title", "Alert body.",
+                          "New York Post")
+    assert "published by New York Post" in prompt and '"New York Post reports"' in prompt
     for part in ("HEADLINE: Headline", "S1: S1.", "S2: S2.", "S3: S3.", "ALERT TITLE: Alert title",
                  "ALERT: Alert body."):
         assert part in prompt
@@ -518,8 +532,15 @@ def test_article_carries_spice_and_a_bounded_notification():
 
 def test_notif_limits_are_validated():
     assert validate.NOTIF_MAX == 110 and validate.NOTIF_TITLE_MAX == 40
-    v = check(SEBI, notif_title="Sebi to issue AI usage guidelines for all of India's markets")
-    assert not v.ok and "too_long" in v.reasons
+    # An over-long alert never costs the card: the short headline and the short first sentence stand in.
+    o = out(SEBI, notif_title="Sebi to issue AI usage guidelines for all of India's markets",
+            headline_short="Sebi to issue AI rules", notif_line="x" * 111 + ".",
+            s1_alt="Pandey said the proposed rules would cover disclosures.")
+    validate.select(o)
+    assert o.notif_title == "Sebi to issue AI rules" and o.notif_line == "Pandey said the proposed rules would cover disclosures."
+    o = out(SEBI, notif_title="y" * 41, headline_short="")
+    validate.select(o)
+    assert o.notif_title == "" and validate.check(o, SEBI_SRC, SEBI_TITLE, "YourStory", None, None, SEBI_SRC).ok
     v = check(SEBI, notif_line="Will Sebi's proposed AI guidelines keep market decisions under human oversight?")
     assert not v.ok and "notif" in v.reasons
     # A number in the alert title must be in the source like any other.
