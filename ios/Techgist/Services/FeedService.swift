@@ -11,7 +11,7 @@ struct FeedService {
     func latest(onProgress: (@Sendable ([Article]) async -> Void)? = nil)
         async -> (articles: [Article], failed: [String], origin: NewsOrigin) {
         if let edition = await fetchEdition(), edition.isFresh {
-            return (edition.articles, [], .edition(publishedAt: edition.publishedAt))
+            return (edition.articles, [], .edition(publishedAt: edition.publishedAt, degraded: edition.degraded ?? false))
         }
         let result = await fetchAll(onProgress: onProgress)
         return (result.articles, result.failed, .direct)
@@ -23,7 +23,8 @@ struct FeedService {
         // Lets a test point the app at another edition, e.g. SIMCTL_CHILD_EDITION_URL=file:///…/edition.json.
         if let override = ProcessInfo.processInfo.environment["EDITION_URL"].flatMap(URL.init(string:)) { url = override }
         #endif
-        let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
+        // The default policy revalidates with the server's ETag, so an unchanged edition costs a few hundred bytes.
+        let request = URLRequest(url: url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 10)
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode ?? 200 == 200 else { return nil }
         return Edition.decode(data)

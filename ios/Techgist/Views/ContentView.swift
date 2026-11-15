@@ -2,232 +2,207 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var store: NewsStore
+    @ObservedObject private var readState = ReadState.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSaved = false
     @State private var showSettings = false
-    @State private var reading: Article?
-    @State private var alertStory: AlertStory?
+    @State private var showSearch = false
+    @State private var coverage: Article?
     @State private var offerNotifications = false
-    @AppStorage("notificationsOffered") private var notificationsOffered = false
-
-    struct AlertStory: Identifiable {
-        let url: URL
-        var id: URL { url }
-    }
+    /// The card on screen in each tab, so a tab comes back where it was left.
+    @State private var positions: [Category: String] = [:]
+    @State private var pushEdge: Edge = .trailing
+    @State private var highlighted: String?
+    @State private var pillHidden = false
+    @State private var viewedThisSession = Set<String>()
+    @AppStorage(Keys.notificationsOffered) private var notificationsOffered = false
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                CategoryBar(selection: $store.category)
-                // Swipe left and right between tabs; up and down between stories.
-                TabView(selection: $store.category) {
-                    ForEach(Category.allCases) { category in
-                        CategoryFeed(category: category) { reading = $0 }
-                            .tag(category)
-                    }
+                ChipBar(selection: tabSelection, unread: unreadTabs)
+                ProgressLine(fraction: progress)
+                if let banner {
+                    StateBanner(text: banner.text, symbol: banner.symbol)
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .animation(.default, value: store.category)
+                ZStack {
+                    FeedView(category: store.category, items: store.visibleArticles, position: position(for: store.category),
+                             highlighted: highlighted, onRead: read, onCoverage: { coverage = $0 },
+                             onViewed: viewed, onSaved: { showSaved = true })
+                        .id(store.category)
+                        .transition(reduceMotion ? .opacity : .push(from: pushEdge))
+                }
                 .overlay(alignment: .top) {
-                    if let waiting = store.waiting {
-                        Button { withAnimation { store.showWaitingStories() } } label: {
-                            Label("\(waiting.newCount) new \(waiting.newCount == 1 ? "story" : "stories")", systemImage: "arrow.up")
-                                .font(.subheadline.bold())
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 9)
-                                .background(Color.accentColor, in: Capsule())
-                                .foregroundStyle(.white)
-                                .shadow(color: .black.opacity(0.2), radius: 8, y: 3)
+                    if store.waitingCount > 0, !pillHidden {
+                        NewStoriesPill(count: store.waitingCount) {
+                            withAnimation(reduceMotion ? nil : .default) { store.showWaitingStories() }
                         }
-                        .padding(.top, 14)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .padding(.top, 12)
+                        .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                     }
                 }
-                .animation(.spring, value: store.waiting?.newCount)
+                .animation(reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.4, dampingFraction: 0.8),
+                           value: store.waitingCount > 0 && !pillHidden)
+                .sensoryFeedback(.impact(weight: .light), trigger: store.waitingCount > 0 && !pillHidden) { _, shown in shown }
             }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("Techgist")
+            .background(Theme.cardBackground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
-                        .accessibilityLabel("Settings")
+                    Button(action: scrollToTop) {
+                        HStack(spacing: 8) {
+                            Image("Logo")
+                                .resizable()
+                                .frame(width: 26, height: 26)
+                                .clipShape(.rect(cornerRadius: 6))
+                            Text("Techgist")
+                                .font(.system(.headline, design: .serif).weight(.bold))
+                                .foregroundStyle(.primary)
+                                .fixedSize()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Techgist")
+                    .accessibilityHint("Goes back to the first story")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button { showSearch = true } label: { Image(systemName: "magnifyingglass") }
+                        .accessibilityLabel("Search")
                     Button { showSaved = true } label: { Image(systemName: "bookmark") }
                         .accessibilityLabel("Saved stories")
+                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
+                        .accessibilityLabel("Settings")
                 }
             }
             .sheet(isPresented: $showSaved) { SavedView() }
             .sheet(isPresented: $showSettings) { SettingsView() }
-            .sheet(item: $reading) { SafariView(url: $0.url).ignoresSafeArea() }
-            .sheet(item: $alertStory) { SafariView(url: $0.url).ignoresSafeArea() }
+            .sheet(isPresented: $showSearch) { SearchView(onSelect: show) }
+            .sheet(item: $coverage) { CoverageSheet(article: $0, onRead: read) }
             .sheet(isPresented: $offerNotifications) { NotificationsOffer() }
         }
-        .task { await store.refreshIfStale() }
         .task {
-            // While the app is open, look for newer stories every few minutes and offer them with a button.
+            // While the app is open, look for a newer edition every 5 minutes and offer it with the pill.
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(240))
+                try? await Task.sleep(for: .seconds(300))
                 await store.checkForNewStories()
             }
         }
-        .task {
-            // Offer notifications once, after the reader has seen a few stories.
-            guard !notificationsOffered else { return }
-            try? await Task.sleep(for: .seconds(20))
-            guard !store.articles.isEmpty, !Task.isCancelled else { return }
-            notificationsOffered = true
-            offerNotifications = true
+        .task(id: store.waitingCount) {
+            // The pill steps aside after 8 seconds; the stories still arrive on the next refresh or tab change.
+            pillHidden = false
+            guard store.waitingCount > 0 else { return }
+            try? await Task.sleep(for: .seconds(8))
+            if !Task.isCancelled { pillHidden = true }
+        }
+        .onChange(of: store.scrollToTopRequests) {
+            positions = [:]
+            scrollToTop()
+        }
+        .onChange(of: store.focus) { _, focus in
+            guard let focus else { return }
+            positions[focus.category] = focus.id
+            highlighted = focus.id
+            Task {
+                try? await Task.sleep(for: .seconds(1.6))
+                if highlighted == focus.id { highlighted = nil }
+            }
+        }
+        .onChange(of: store.saved.count) { old, new in
+            // The first save is a good moment to offer alerts.
+            if new > old { offerNotificationsIfNeeded() }
         }
         .onAppear {
-            // A tapped big-story alert opens its article.
-            AppDelegate.openStory = { alertStory = AlertStory(url: $0) }
-            if let url = AppDelegate.takePending() { alertStory = AlertStory(url: url) }
+            AppDelegate.handle = handle
+            if let request = AppDelegate.takePending() { handle(request) }
         }
     }
-}
 
-/// One tab's stories, one card per screen.
-struct CategoryFeed: View {
-    @EnvironmentObject private var store: NewsStore
-    let category: Category
-    let onRead: (Article) -> Void
+    // MARK: Tabs and position
 
-    var body: some View {
-        let items = store.articles(in: category)
-        if items.isEmpty {
-            if store.isRefreshing || (store.lastUpdated == nil && store.failedSources.isEmpty) {
-                ProgressView("Fetching today's stories…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ContentUnavailableView {
-                    Label("No stories", systemImage: "newspaper")
-                } description: {
-                    Text(store.lastUpdated == nil ? "Couldn't reach the news sources. Check your connection." : "Nothing here right now.")
-                } actions: {
-                    Button("Try again") { Task { await store.refresh() } }
-                }
-                .frame(maxHeight: .infinity)
-            }
-        } else {
-            ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(items.enumerated()), id: \.element.id) { index, article in
-                        CardView(article: article) { onRead(article) }
-                            .containerRelativeFrame(.vertical)
-                            .task { await store.prepare(article) }
-                            .onAppear {
-                                // Prepare the next card too so its summary is ready by the time it's swiped to.
-                                guard index + 1 < items.count else { return }
-                                let next = items[index + 1]
-                                Task { await store.prepare(next) }
-                            }
-                    }
-                    CaughtUpView()
-                        .containerRelativeFrame(.vertical)
-                }
-                .scrollTargetLayout()
-            }
-            .scrollTargetBehavior(.paging)
-            .scrollIndicators(.hidden)
-            .refreshable { await store.refresh() }
-            .onChange(of: store.scrollToTopRequests) {
-                if let first = items.first { withAnimation { proxy.scrollTo(first.id, anchor: .top) } }
-            }
-            }
+    private var tabSelection: Binding<Category> {
+        Binding(get: { store.category }, set: { new in
+            let order = Category.allCases
+            pushEdge = (order.firstIndex(of: new) ?? 0) >= (order.firstIndex(of: store.category) ?? 0) ? .trailing : .leading
+            if new == store.category { scrollToTop() } else { store.category = new }
+        })
+    }
+
+    private func position(for category: Category) -> Binding<String?> {
+        Binding(get: { positions[category] }, set: { positions[category] = $0 })
+    }
+
+    private func scrollToTop() {
+        guard let first = store.visibleArticles.first else { return }
+        withAnimation(reduceMotion ? nil : .default) { positions[store.category] = first.id }
+    }
+
+    private var progress: Double {
+        let items = store.visibleArticles
+        guard !items.isEmpty else { return 0 }
+        guard let id = positions[store.category] else { return 1 / Double(items.count) }
+        if id == FeedView.endID { return 1 }
+        let index = items.firstIndex { $0.id == id } ?? 0
+        return Double(index + 1) / Double(items.count)
+    }
+
+    private var unreadTabs: Set<Category> {
+        Set(Category.allCases.filter { tab in
+            store.articles(in: tab).contains { !readState.isRead($0.id) }
+        })
+    }
+
+    private var banner: (text: String, symbol: String)? {
+        guard !store.articles.isEmpty else { return nil }
+        if store.isOffline, let updated = store.lastUpdated {
+            return ("Offline · stories from \(RelativeTime.spoken(updated))", "wifi.slash")
+        }
+        switch store.origin {
+        case .direct:
+            return ("Summaries catching up · showing headlines", "clock.arrow.circlepath")
+        case .edition(_, degraded: true):
+            return ("Summaries catching up · showing headlines", "clock.arrow.circlepath")
+        case .edition(let publishedAt, _) where Date().timeIntervalSince(publishedAt) > 2 * 3600:
+            return ("Updated \(RelativeTime.spoken(publishedAt))", "clock")
+        default:
+            return nil
         }
     }
-}
 
-/// Asked once: turns on the daily digest and big story alerts together.
-struct NotificationsOffer: View {
-    @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var store: NewsStore
+    // MARK: Actions
 
-    var body: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "bell.badge.fill")
-                .font(.system(size: 48))
-                .foregroundStyle(.tint)
-                .padding(.top, 28)
-            Text("Stay in the loop").font(.title2.bold())
-            Text("Get one morning briefing with the day's top story, plus an alert when a big story breaks. At most a few a day.")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal)
-            Spacer(minLength: 0)
-            Button {
-                Task {
-                    // One permission prompt covers both; record both before the sheet goes away.
-                    let granted = await DailyDigest.enable()
-                    UserDefaults.standard.set(granted, forKey: Keys.breakingNews)
-                    if granted { await DailyDigest.reschedule(with: store.topStory) }
-                    dismiss()
-                }
-            } label: {
-                Text("Turn on notifications").font(.body.bold()).frame(maxWidth: .infinity).padding(.vertical, 6)
-            }
-            .buttonStyle(.borderedProminent)
-            Button("Not now") { dismiss() }
-                .padding(.bottom, 8)
-        }
-        .padding(24)
-        .presentationDetents([.medium])
+    private func read(_ article: Article) {
+        readState.markRead(article.id)
+        Reader.open(article.url)
     }
-}
 
-struct CategoryBar: View {
-    @Binding var selection: Category
-
-    var body: some View {
-        ScrollViewReader { proxy in
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(Category.allCases) { c in
-                    Button { withAnimation { selection = c } } label: {
-                        Text(c.rawValue)
-                            .font(.subheadline.weight(.medium))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 6)
-                            .background(selection == c ? Color.accentColor : Color(.secondarySystemGroupedBackground), in: Capsule())
-                            .foregroundStyle(selection == c ? Color.white : Color.primary)
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selection == c ? .isSelected : [])
-                    .id(c)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-        }
-        .scrollIndicators(.hidden)
-        // Keep the current tab's chip in view when it changes by swiping.
-        .onChange(of: selection) { _, new in withAnimation { proxy.scrollTo(new, anchor: .center) } }
-        }
+    private func viewed(_ article: Article) {
+        readState.markRead(article.id)
+        viewedThisSession.insert(article.id)
+        // After a few stories the reader knows what the app is; that's when alerts are offered, once.
+        if viewedThisSession.count >= 8 { offerNotificationsIfNeeded() }
     }
-}
 
-struct CaughtUpView: View {
-    @EnvironmentObject private var store: NewsStore
+    private func offerNotificationsIfNeeded() {
+        guard !notificationsOffered, !offerNotifications, !showSaved, !showSettings, !showSearch, coverage == nil else { return }
+        offerNotifications = true
+    }
 
-    var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 52))
-                .foregroundStyle(.tint)
-            Text("You're all caught up")
-                .font(.title2.bold())
-            if let updated = store.lastUpdated {
-                Text("Updated \(updated, format: .relative(presentation: .named))")
-                    .foregroundStyle(.secondary)
-            }
-            Button("Check for new stories") { Task { await store.refresh() } }
-                .buttonStyle(.borderedProminent)
-                .disabled(store.isRefreshing)
-                .padding(.top, 8)
+    /// Brings a story's card on screen, or opens the story when it isn't in the edition any more.
+    private func show(_ article: Article) {
+        if !store.focus(on: article.url) { read(article) }
+    }
+
+    private func handle(_ request: AppDelegate.Request) {
+        showSaved = false
+        showSettings = false
+        showSearch = false
+        switch request {
+        case .show(let url):
+            if !store.focus(on: url) { Reader.open(url) }
+        case .read(let url):
+            store.focus(on: url)
+            readState.markRead(url.absoluteString)
+            Reader.open(url)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

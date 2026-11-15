@@ -2,7 +2,7 @@ import Foundation
 import UserNotifications
 import BackgroundTasks
 
-/// A repeating local notification ("Your daily Techgist") carrying the latest top headline.
+/// A repeating local notification, the morning gist, carrying the biggest story and its picture.
 /// Local notifications need no server or push certificate.
 enum DailyDigest {
     static let requestID = "daily-digest"
@@ -12,7 +12,7 @@ enum DailyDigest {
 
     /// Asks for permission and records whether the digest is on.
     static func enable() async -> Bool {
-        let granted = (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])) ?? false
+        let granted = await StoryNotification.requestPermission()
         UserDefaults.standard.set(granted, forKey: Keys.digestEnabled)
         return granted
     }
@@ -22,14 +22,16 @@ enum DailyDigest {
         center.removePendingNotificationRequests(withIdentifiers: [requestID])
         guard isEnabled else { return }
 
-        let content = UNMutableNotificationContent()
-        content.title = "Your daily Techgist"
+        let content: UNMutableNotificationContent
         if let top, Date().timeIntervalSince(top.publishedAt) < 18 * 3600 {
-            content.body = top.displayTitle
+            content = await StoryNotification.content(for: top, kind: .brief, subtitle: "Your morning gist")
         } else {
+            content = UNMutableNotificationContent()
+            content.title = "Your morning gist"
             content.body = "Today's tech, AI and startup news, 60 words a story."
+            content.sound = StoryNotification.sound
+            content.threadIdentifier = StoryNotification.Kind.brief.rawValue
         }
-        content.sound = .default
         let trigger = UNCalendarNotificationTrigger(
             dateMatching: DateComponents(hour: minuteOfDay / 60, minute: minuteOfDay % 60), repeats: true)
         try? await center.add(UNNotificationRequest(identifier: requestID, content: content, trigger: trigger))
@@ -52,10 +54,9 @@ enum BackgroundRefresh {
         let result = await FeedService().latest()
         guard !result.articles.isEmpty else { return }
         ArticleCache.save(result.articles, at: Date())
-        let disabled = Set(UserDefaults.standard.stringArray(forKey: Keys.disabledSources) ?? [])
-        let enabled = result.articles.filter { !disabled.contains($0.source) }
-        let top = enabled.filter { $0.topRank != nil }.min { $0.topRank! < $1.topRank! } ?? enabled.first { $0.category == .top }
-        await DailyDigest.reschedule(with: top)
+        let muted = Set(UserDefaults.standard.stringArray(forKey: Keys.disabledSources) ?? [])
+        let enabled = result.articles.filter { !muted.contains($0.source) }
+        await DailyDigest.reschedule(with: FeedOrdering.topStory(in: enabled))
         await BreakingNews.alertIfNeeded(enabled)
     }
 }

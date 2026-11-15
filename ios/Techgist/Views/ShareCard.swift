@@ -13,9 +13,10 @@ enum StoryShare {
 
     @MainActor
     static func payload(for article: Article, summary: String) async -> Payload? {
+        // Usually already on disk from the card, and decoded off the main thread either way.
         var photo: UIImage?
-        if let url = article.image, let (data, _) = try? await URLSession.shared.data(from: url) {
-            photo = UIImage(data: data)
+        if let url = article.cardImage(wide: true) {
+            photo = await ImageLoader.shared.image(for: url, maxPixel: 1290)
         }
         let renderer = ImageRenderer(content: ShareCard(article: article, summary: summary, photo: photo)
             .environment(\.colorScheme, .light))
@@ -48,13 +49,13 @@ private struct ShareCard: View {
                     .font(.caption.bold())
                     .foregroundStyle(Color.accentColor)
                 Text(article.displayTitle)
-                    .font(.title3.weight(.bold))
+                    .font(.system(.title3, design: .serif).weight(.bold))
                     .foregroundStyle(.black)
                     .fixedSize(horizontal: false, vertical: true)
                 if !summary.isEmpty {
                     Text(summary)
                         .font(.body)
-                        .foregroundStyle(.black.opacity(0.65))
+                        .foregroundStyle(.black.opacity(0.8))
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -90,9 +91,7 @@ extension StoryShare {
     /// paged feed don't present reliably, so this goes through UIKit.
     @MainActor
     static func present(_ payload: Payload) {
-        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-        guard var top = scene?.keyWindow?.rootViewController else { return }
-        while let presented = top.presentedViewController { top = presented }
+        guard let top = UIApplication.shared.topViewController else { return }
         top.present(UIActivityViewController(activityItems: [payload.image, payload.text], applicationActivities: nil),
                     animated: true)
     }

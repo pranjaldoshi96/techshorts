@@ -7,14 +7,14 @@
 		A00000000000000000000001 /* Techgist.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Techgist.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000002 /* Techgist */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Techgist; sourceTree = "<group>"; };
 		A00000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		A00000000000000000000004 = {isa = PBXGroup; children = (A00000000000000000000002, A00000000000000000000005); sourceTree = "<group>"; };
-		A00000000000000000000005 /* Products */ = {isa = PBXGroup; children = (A00000000000000000000001); name = Products; sourceTree = "<group>"; };
+		A00000000000000000000004 = {isa = PBXGroup; children = (A00000000000000000000002, B00000000000000000000002, C00000000000000000000002, A00000000000000000000005); sourceTree = "<group>"; };
+		A00000000000000000000005 /* Products */ = {isa = PBXGroup; children = (A00000000000000000000001, B00000000000000000000001, C00000000000000000000001); name = Products; sourceTree = "<group>"; };
 		A00000000000000000000006 /* Techgist */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A00000000000000000000012;
-			buildPhases = (A00000000000000000000007, A00000000000000000000003, A00000000000000000000008);
+			buildPhases = (A00000000000000000000007, A00000000000000000000003, A00000000000000000000008, B00000000000000000000011);
 			buildRules = ();
-			dependencies = ();
+			dependencies = (B00000000000000000000013);
 			fileSystemSynchronizedGroups = (A00000000000000000000002);
 			name = Techgist;
 			productName = Techgist;
@@ -25,7 +25,7 @@
 		A00000000000000000000008 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		A00000000000000000000009 /* Project object */ = {
 			isa = PBXProject;
-			attributes = {BuildIndependentTargetsInParallel = 1; LastUpgradeCheck = 2600;};
+			attributes = {BuildIndependentTargetsInParallel = 1; LastUpgradeCheck = 2600; TargetAttributes = {C00000000000000000000003 = {TestTargetID = A00000000000000000000006; }; }; };
 			buildConfigurationList = A00000000000000000000010;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
@@ -35,24 +35,88 @@
 			productRefGroup = A00000000000000000000005;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (A00000000000000000000006);
+			targets = (A00000000000000000000006, B00000000000000000000003, C00000000000000000000003);
 		};
 		A00000000000000000000010 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000013, A00000000000000000000014); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		A00000000000000000000012 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000015, A00000000000000000000016); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		A00000000000000000000013 /* Debug */ = {isa = XCBuildConfiguration; name = Debug; buildSettings = {
-			ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; ENABLE_TESTABILITY = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+			ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; COPY_PHASE_STRIP = NO; ENABLE_TESTABILITY = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+			APP_BUNDLE_ID = com.pranjald.techgist; MARKETING_VERSION = 2.0; CURRENT_PROJECT_VERSION = 20261116.0100;
 			SDKROOT = iphoneos; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_VERSION = 5.0; ONLY_ACTIVE_ARCH = YES; }; };
 		A00000000000000000000014 /* Release */ = {isa = XCBuildConfiguration; name = Release; buildSettings = {
-			ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+			ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; COPY_PHASE_STRIP = NO; IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+			APP_BUNDLE_ID = com.pranjald.techgist; MARKETING_VERSION = 2.0; CURRENT_PROJECT_VERSION = 20261116.0100;
 			SDKROOT = iphoneos; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_VERSION = 5.0; VALIDATE_PRODUCT = YES; }; };
 		A00000000000000000000015 /* Debug */ = {isa = XCBuildConfiguration; name = Debug; buildSettings = {
-			ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = A4HLS6BV3C; CURRENT_PROJECT_VERSION = 1; ENABLE_PREVIEWS = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = "Techgist-Info.plist";
-			LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks"); MARKETING_VERSION = 1.2;
-			PRODUCT_BUNDLE_IDENTIFIER = com.pranjald.techgist; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = 1; }; };
+			ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = A4HLS6BV3C; ENABLE_PREVIEWS = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = "Techgist-Info.plist";
+			LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
+			PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID)"; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = 1; }; };
 		A00000000000000000000016 /* Release */ = {isa = XCBuildConfiguration; name = Release; buildSettings = {
-			ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = A4HLS6BV3C; CURRENT_PROJECT_VERSION = 1; ENABLE_PREVIEWS = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = "Techgist-Info.plist";
-			LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks"); MARKETING_VERSION = 1.2;
-			PRODUCT_BUNDLE_IDENTIFIER = com.pranjald.techgist; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = 1; }; };
+			ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = A4HLS6BV3C; ENABLE_PREVIEWS = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = "Techgist-Info.plist";
+			LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
+			PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID)"; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = 1; }; };
+
+		/* Notification Service Extension: attaches the story picture to server pushes. */
+		B00000000000000000000001 /* TechgistNotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TechgistNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B00000000000000000000002 /* TechgistNotificationService */ = {isa = PBXFileSystemSynchronizedRootGroup; path = TechgistNotificationService; sourceTree = "<group>"; };
+		B00000000000000000000003 /* TechgistNotificationService */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B00000000000000000000007;
+			buildPhases = (B00000000000000000000004, B00000000000000000000005, B00000000000000000000006);
+			buildRules = ();
+			dependencies = ();
+			fileSystemSynchronizedGroups = (B00000000000000000000002);
+			name = TechgistNotificationService;
+			productName = TechgistNotificationService;
+			productReference = B00000000000000000000001;
+			productType = "com.apple.product-type.app-extension";
+		};
+		B00000000000000000000004 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B00000000000000000000005 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B00000000000000000000006 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B00000000000000000000007 = {isa = XCConfigurationList; buildConfigurations = (B00000000000000000000008, B00000000000000000000009); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		B00000000000000000000008 /* Debug */ = {isa = XCBuildConfiguration; name = Debug; buildSettings = {
+			APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = A4HLS6BV3C; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = "TechgistNotificationService-Info.plist";
+			LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
+			PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID).NotificationService"; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; TARGETED_DEVICE_FAMILY = 1; }; };
+		B00000000000000000000009 /* Release */ = {isa = XCBuildConfiguration; name = Release; buildSettings = {
+			APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = A4HLS6BV3C; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = "TechgistNotificationService-Info.plist";
+			LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
+			PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID).NotificationService"; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; TARGETED_DEVICE_FAMILY = 1; }; };
+		B00000000000000000000010 /* TechgistNotificationService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B00000000000000000000001; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B00000000000000000000011 /* Embed Foundation Extensions */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (B00000000000000000000010); name = "Embed Foundation Extensions"; runOnlyForDeploymentPostprocessing = 0; };
+		B00000000000000000000012 = {isa = PBXContainerItemProxy; containerPortal = A00000000000000000000009; proxyType = 1; remoteGlobalIDString = B00000000000000000000003; remoteInfo = TechgistNotificationService; };
+		B00000000000000000000013 = {isa = PBXTargetDependency; target = B00000000000000000000003; targetProxy = B00000000000000000000012; };
+
+		/* Unit tests, hosted by the app. */
+		C00000000000000000000001 /* TechgistTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TechgistTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C00000000000000000000002 /* TechgistTests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = TechgistTests; sourceTree = "<group>"; };
+		C00000000000000000000003 /* TechgistTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C00000000000000000000007;
+			buildPhases = (C00000000000000000000004, C00000000000000000000005, C00000000000000000000006);
+			buildRules = ();
+			dependencies = (C00000000000000000000011);
+			fileSystemSynchronizedGroups = (C00000000000000000000002);
+			name = TechgistTests;
+			productName = TechgistTests;
+			productReference = C00000000000000000000001;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		C00000000000000000000004 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		C00000000000000000000005 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		C00000000000000000000006 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		C00000000000000000000007 = {isa = XCConfigurationList; buildConfigurations = (C00000000000000000000008, C00000000000000000000009); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		C00000000000000000000008 /* Debug */ = {isa = XCBuildConfiguration; name = Debug; buildSettings = {
+			BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = A4HLS6BV3C; GENERATE_INFOPLIST_FILE = YES;
+			PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID).tests"; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = 1;
+			TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Techgist.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Techgist"; }; };
+		C00000000000000000000009 /* Release */ = {isa = XCBuildConfiguration; name = Release; buildSettings = {
+			BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = A4HLS6BV3C; GENERATE_INFOPLIST_FILE = YES;
+			PRODUCT_BUNDLE_IDENTIFIER = "$(APP_BUNDLE_ID).tests"; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = 1;
+			TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Techgist.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Techgist"; }; };
+		C00000000000000000000010 = {isa = PBXContainerItemProxy; containerPortal = A00000000000000000000009; proxyType = 1; remoteGlobalIDString = A00000000000000000000006; remoteInfo = Techgist; };
+		C00000000000000000000011 = {isa = PBXTargetDependency; target = A00000000000000000000006; targetProxy = C00000000000000000000010; };
 	};
 	rootObject = A00000000000000000000009;
 }

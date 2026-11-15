@@ -3,163 +3,206 @@ import SwiftUI
 
 @MainActor
 final class NewsStore: ObservableObject {
+    /// Everything in the current edition (or the direct-feed fallback).
     @Published private(set) var articles: [Article]
+    /// What each tab shows, in order. Rebuilt only when a new edition is applied, never while someone is reading,
+    /// so the list doesn't re-order under a finger.
+    @Published private(set) var feeds: [Category: [Article]] = [:]
     @Published private(set) var lastUpdated: Date?
     @Published private(set) var isRefreshing = false
     @Published private(set) var failedSources: [String] = []
     @Published private(set) var origin: NewsOrigin?
-    @Published private(set) var aiSummaries: [String: String] = [:]
+    /// True when the last attempt to load stories got nothing back (usually no connection).
+    @Published private(set) var isOffline = false
     @Published private(set) var saved: [Article]
-    @Published var category: Category = .top
-    /// A newer set of stories found while reading; shown only when the reader taps the "new stories" button.
-    @Published private(set) var waiting: (articles: [Article], origin: NewsOrigin, newCount: Int)?
-    /// Bumped when the feed should jump back to the newest story.
+    @Published var category: Category = .top {
+        didSet { if category != oldValue { updateWaitingCount() } }
+    }
+    /// How many unseen stories the waiting edition has near the top of the current tab; the pill shows this.
+    @Published private(set) var waitingCount = 0
+    /// Bumped when the feed should jump back to the first story.
     @Published private(set) var scrollToTopRequests = 0
+    /// A story to bring on screen and highlight, set when an alert or a search result is tapped.
+    @Published var focus: Focus?
 
     @Published var disabledSources: Set<String> {
-        didSet { UserDefaults.standard.set(Array(disabledSources), forKey: Keys.disabledSources) }
-    }
-    @Published var aiSummariesEnabled: Bool {
-        didSet { UserDefaults.standard.set(aiSummariesEnabled, forKey: Keys.aiSummaries) }
+        didSet {
+            UserDefaults.standard.set(Array(disabledSources), forKey: Keys.disabledSources)
+            if disabledSources != oldValue { rebuildFeeds() }
+        }
     }
 
-    private static let savedFile = "saved.json"
-    private static let staleAfter: TimeInterval = 15 * 60
+    struct Focus: Equatable {
+        let id: String
+        let category: Category
+        var token = UUID()
+    }
 
-    init() {
-        let cache = ArticleCache.load()
-        articles = cache?.articles ?? []
+    /// A newer set of stories found while reading; shown when the reader taps the "new stories" pill.
+    private var waiting: (articles: [Article], origin: NewsOrigin?)?
+    /// Set by the feed: true while the reader is still on the first card of the current tab.
+    var readerIsAtTop = true
+    private var backgroundedAt: Date?
+    private var isChecking = false
+    private let readState: ReadState
+    private let service: () async -> (articles: [Article], failed: [String], origin: NewsOrigin)
+
+    private nonisolated static let savedFile = "saved.json"
+    private static let staleAfter: TimeInterval = 10 * 60
+    nonisolated static let savedChanged = Notification.Name("TechgistSavedChanged")
+
+    init(readState: ReadState? = nil,
+         cache: ArticleCache? = ArticleCache.load(),
+         service: (() async -> (articles: [Article], failed: [String], origin: NewsOrigin))? = nil) {
+        self.readState = readState ?? .shared
+        self.service = service ?? { await FeedService().latest() }
+        articles = (cache?.articles ?? []).map(Self.slim)
         lastUpdated = cache?.updatedAt
-        saved = Disk.load([Article].self, from: Self.savedFile) ?? []
+        saved = Self.loadSaved()
         disabledSources = Set(UserDefaults.standard.stringArray(forKey: Keys.disabledSources) ?? [])
-        aiSummariesEnabled = UserDefaults.standard.object(forKey: Keys.aiSummaries) as? Bool ?? true
+        rebuildFeeds()
+        NotificationCenter.default.addObserver(forName: Self.savedChanged, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.saved = Self.loadSaved() }
+        }
     }
 
-    var visibleArticles: [Article] { articles(in: category) }
+    var visibleArticles: [Article] { feeds[category] ?? [] }
 
-    /// Every tab shows the newest story first. Top holds Top sources plus the strongest stories from every tab
-    /// (`topRank`); stories cached by older versions have no rank, so Top falls back to its own sources.
-    func articles(in category: Category) -> [Article] {
-        let enabled = articles.filter { !disabledSources.contains($0.source) }
-        let inTab = category == .top && enabled.contains(where: { $0.topRank != nil })
-            ? enabled.filter { $0.topRank != nil }
-            : enabled.filter { $0.category == category }
-        return inTab.sorted { $0.publishedAt > $1.publishedAt }
-    }
+    func articles(in category: Category) -> [Article] { feeds[category] ?? [] }
 
-    /// The biggest story right now (for the daily digest), not just the newest.
-    var topStory: Article? {
-        articles.filter { $0.topRank != nil && !disabledSources.contains($0.source) }.min { $0.topRank! < $1.topRank! }
-            ?? articles(in: .top).first
-    }
+    /// The biggest story right now (for the daily digest and the alert preview), not just the newest.
+    var topStory: Article? { FeedOrdering.topStory(in: articles, muted: disabledSources) }
 
-    /// Techgist's summary first, then one written on this iPhone, then the publisher's excerpt.
-    func summary(for article: Article) -> (text: String, isAI: Bool) {
-        if let s = article.summary { return (s, true) }
-        if aiSummariesEnabled, let s = aiSummaries[article.id] { return (s, true) }
-        return (article.excerpt, false)
+    /// Re-applies the ordering rules: rank, muted sources, unread first.
+    private func rebuildFeeds() {
+        let read = readState.ids
+        var next: [Category: [Article]] = [:]
+        for category in Category.allCases {
+            next[category] = FeedOrdering.stories(in: category, from: articles, muted: disabledSources, read: read)
+        }
+        feeds = next
     }
 
     // MARK: Loading
 
-    func refreshIfStale() async {
+    /// Called on launch and whenever the app comes to the front.
+    func becameActive() async {
         // A background refresh may have written a newer cache while we were suspended.
         if let cache = ArticleCache.load(), cache.updatedAt > (lastUpdated ?? .distantPast) {
-            articles = cache.articles
+            waiting = (cache.articles.map(Self.slim), origin)
             lastUpdated = cache.updatedAt
         }
-        guard Date().timeIntervalSince(lastUpdated ?? .distantPast) > Self.staleAfter else { return }
-        await refresh()
+        let awayLong = backgroundedAt.map { Date().timeIntervalSince($0) >= Self.staleAfter } ?? false
+        backgroundedAt = nil
+
+        if articles.isEmpty {
+            await refresh()
+        } else if Date().timeIntervalSince(lastUpdated ?? .distantPast) > Self.staleAfter || waiting != nil {
+            await checkForNewStories()
+            // Nobody is mid-read right after a launch or a long break, so the newer stories can simply appear.
+            if waiting != nil, awayLong || readerIsAtTop { showWaitingStories() }
+        } else if awayLong {
+            rebuildFeeds()
+            scrollToTopRequests += 1
+        }
     }
 
+    func enteredBackground() {
+        backgroundedAt = Date()
+        persist()
+        readState.persist()
+    }
+
+    /// Pull to refresh, the "Try again" button and first launch: fetch and show the result straight away.
     func refresh() async {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
 
-        // With nothing cached (first launch), show stories as feeds arrive. Otherwise swap in the full set at once
-        // so cards don't shift under someone who is reading.
-        var onProgress: (@Sendable ([Article]) async -> Void)?
-        if articles.isEmpty {
-            onProgress = { [weak self] partial in await self?.showPartial(partial) }
-        }
-        let result = await FeedService().latest(onProgress: onProgress)
+        let result = await service()
         failedSources = result.failed
-        guard !result.articles.isEmpty else { return }
-        origin = result.origin
-
-        replaceArticles(with: result.articles)
-        lastUpdated = Date()
-        waiting = nil
-        persist()
-        // These stories are on screen now, so they shouldn't alert later.
-        BreakingNews.markSeen(articles)
-        await DailyDigest.reschedule(with: topStory)
-    }
-
-    /// Fills in a missing image/excerpt from the article page and generates the on-device summary.
-    func prepare(_ article: Article) async {
-        if article.image == nil || article.excerpt.isEmpty, let meta = await PageMetadata.shared.meta(for: article.url) {
-            update(article.id) {
-                if $0.image == nil { $0.image = meta.image }
-                if $0.excerpt.isEmpty, let d = meta.description { $0.excerpt = d }
-            }
+        guard !result.articles.isEmpty else {
+            isOffline = true
+            return
         }
-        if article.summary == nil, aiSummariesEnabled, aiSummaries[article.id] == nil,
-           let s = await Summarizer.shared.summary(for: article) {
-            aiSummaries[article.id] = s
-        }
+        isOffline = false
+        apply(result.articles.map(Self.slim), origin: result.origin)
     }
 
     /// Looks for newer stories without disturbing the reader; `showWaitingStories()` brings them in.
     func checkForNewStories() async {
-        guard !isRefreshing, !articles.isEmpty else { return }
-        let result = await FeedService().latest()
-        guard !result.articles.isEmpty else { return }
-        let current = Set(articles.map(\.id))
-        let newCount = result.articles.filter { !current.contains($0.id) && !disabledSources.contains($0.source) }.count
-        waiting = newCount > 0 ? (result.articles, result.origin, newCount) : nil
+        guard !isRefreshing, !isChecking, !articles.isEmpty else { return }
+        isChecking = true
+        defer { isChecking = false }
+        let result = await service()
+        guard !result.articles.isEmpty else {
+            isOffline = true
+            return
+        }
+        isOffline = false
+        let fresh = result.articles.map(Self.slim)
+        if fresh == articles {
+            origin = result.origin
+            lastUpdated = Date()
+            return
+        }
+        waiting = (fresh, result.origin)
+        updateWaitingCount()
     }
 
     func showWaitingStories() {
         guard let waiting else { return }
-        replaceArticles(with: waiting.articles)
-        origin = waiting.origin
-        lastUpdated = Date()
-        self.waiting = nil
-        persist()
-        BreakingNews.markSeen(articles)
+        apply(waiting.articles, origin: waiting.origin)
         scrollToTopRequests += 1
+    }
+
+    private func apply(_ fresh: [Article], origin newOrigin: NewsOrigin?) {
+        articles = fresh
+        origin = newOrigin
+        lastUpdated = Date()
+        waiting = nil
+        waitingCount = 0
+        rebuildFeeds()
+        persist()
+        // These stories are on screen now, so they shouldn't alert later.
+        BreakingNews.markSeen(articles)
         Task { await DailyDigest.reschedule(with: topStory) }
     }
 
-    private func showPartial(_ partial: [Article]) {
-        replaceArticles(with: partial)
-    }
-
-    /// Swaps in fresh feed results while keeping images and excerpts already fetched from article pages.
-    private func replaceArticles(with fresh: [Article]) {
-        let previous = Dictionary(articles.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        articles = fresh.map { article in
-            var a = article
-            if let old = previous[a.id] {
-                if a.image == nil { a.image = old.image }
-                if a.excerpt.isEmpty { a.excerpt = old.excerpt }
-            }
-            return a
-        }
+    private func updateWaitingCount() {
+        guard let waiting else { waitingCount = 0; return }
+        let fresh = FeedOrdering.stories(in: category, from: waiting.articles, muted: disabledSources, read: readState.ids)
+        waitingCount = FeedOrdering.newCount(in: fresh, notIn: feeds[category] ?? [])
     }
 
     func persist() {
         if let lastUpdated { ArticleCache.save(articles, at: lastUpdated) }
     }
 
-    private func update(_ id: String, _ change: (inout Article) -> Void) {
-        guard let i = articles.firstIndex(where: { $0.id == id }) else { return }
-        change(&articles[i])
+    // MARK: Finding a story
+
+    func article(withURL url: URL) -> Article? {
+        let id = url.absoluteString
+        return articles.first { $0.id == id } ?? waiting?.articles.first { $0.id == id } ?? saved.first { $0.id == id }
+    }
+
+    /// Brings a story on screen and highlights it. Returns false when the story isn't in any tab.
+    @discardableResult
+    func focus(on url: URL) -> Bool {
+        let id = url.absoluteString
+        if !articles.contains(where: { $0.id == id }), waiting?.articles.contains(where: { $0.id == id }) == true {
+            showWaitingStories()
+        }
+        let tabs = [category] + Category.allCases
+        guard let tab = tabs.first(where: { feeds[$0]?.contains { $0.id == id } == true }) else { return false }
+        category = tab
+        focus = Focus(id: id, category: tab)
+        return true
     }
 
     // MARK: Saved
+
+    private static func loadSaved() -> [Article] { Disk.load([Article].self, from: savedFile) ?? [] }
 
     func isSaved(_ article: Article) -> Bool { saved.contains { $0.id == article.id } }
 
@@ -167,10 +210,29 @@ final class NewsStore: ObservableObject {
         if let i = saved.firstIndex(where: { $0.id == article.id }) {
             saved.remove(at: i)
         } else {
-            var copy = article
-            if article.summary == nil, let s = aiSummaries[article.id] { copy.excerpt = s }
-            saved.insert(copy, at: 0)
+            saved.insert(Self.slim(article), at: 0)
         }
         Disk.save(saved, to: Self.savedFile)
+    }
+
+    func clearSaved() {
+        saved = []
+        Disk.save(saved, to: Self.savedFile)
+    }
+
+    /// Saves a story without a running feed, for the Save button on a notification.
+    nonisolated static func saveFromNotification(_ article: Article) {
+        var saved = Disk.load([Article].self, from: savedFile) ?? []
+        guard !saved.contains(where: { $0.id == article.id }) else { return }
+        saved.insert(slim(article), at: 0)
+        Disk.save(saved, to: savedFile)
+        NotificationCenter.default.post(name: savedChanged, object: nil)
+    }
+
+    /// The card needs the summary, not the article body.
+    private nonisolated static func slim(_ article: Article) -> Article {
+        var copy = article
+        copy.content = ""
+        return copy
     }
 }

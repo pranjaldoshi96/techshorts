@@ -6,22 +6,18 @@ struct TechgistApp: App {
     @StateObject private var store = NewsStore()
     @Environment(\.scenePhase) private var scenePhase
 
-    init() {
-        // AsyncImage goes through URLSession, so a bigger shared cache keeps card images around between launches.
-        URLCache.shared = URLCache(memoryCapacity: 50_000_000, diskCapacity: 200_000_000)
-    }
-
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(store)
+                .task { await store.becameActive() }
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
-                Task { await store.refreshIfStale() }
+                Task { await store.becameActive() }
             case .background:
-                store.persist()
+                store.enteredBackground()
                 BackgroundRefresh.schedule()
             default:
                 break

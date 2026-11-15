@@ -1,21 +1,66 @@
 import SafariServices
 import SwiftUI
 
-/// In-app Safari, so reading the full story keeps people in the app and shares Safari's logins and content blockers.
-struct SafariView: UIViewControllerRepresentable {
-    let url: URL
-
-    func makeUIViewController(context: Context) -> SFSafariViewController {
-        SFSafariViewController(url: url)
+extension UIApplication {
+    /// The view controller on top, for presenting UIKit screens from anywhere in the paged feed.
+    @MainActor var topViewController: UIViewController? {
+        let scene = connectedScenes.compactMap { $0 as? UIWindowScene }.first { $0.activationState == .foregroundActive }
+            ?? connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        var top = scene?.keyWindow?.rootViewController
+        while let presented = top?.presentedViewController { top = presented }
+        return top
     }
+}
 
-    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
+/// The full story in in-app Safari, as a page sheet, in Reader mode when the page supports it. It shares Safari's
+/// logins and content blockers, and keeps people in the app.
+enum Reader {
+    static var usesReaderMode: Bool { UserDefaults.standard.object(forKey: Keys.readerMode) as? Bool ?? true }
+
+    @MainActor static func open(_ url: URL) {
+        guard url.scheme == "https" || url.scheme == "http" else { return }
+        let configuration = SFSafariViewController.Configuration()
+        configuration.entersReaderIfAvailable = usesReaderMode
+        let safari = SFSafariViewController(url: url, configuration: configuration)
+        safari.preferredControlTintColor = UIColor(named: "AccentColor")
+        safari.modalPresentationStyle = .pageSheet
+        UIApplication.shared.topViewController?.present(safari, animated: true)
+    }
+}
+
+/// A compact row for lists of stories: thumbnail, headline, source and age.
+struct StoryRow: View {
+    let article: Article
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            StoryImage(article: article, url: article.thumbImage, maxPixel: ImageLoader.thumbPixels)
+                .frame(width: 56, height: 56)
+                .clipShape(.rect(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(article.displayTitle)
+                    .font(.system(.headline, design: .serif))
+                    .foregroundStyle(.primary)
+                Text("\(article.source) · \(RelativeTime.short(article.publishedAt))")
+                    .font(.caption)
+                    .foregroundStyle(Theme.metaText)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(article.displayTitle). \(article.source), \(RelativeTime.spoken(article.publishedAt))")
+        .accessibilityAddTraits(.isButton)
+    }
 }
 
 struct SavedView: View {
     @EnvironmentObject private var store: NewsStore
     @Environment(\.dismiss) private var dismiss
-    @State private var reading: Article?
+    @State private var query = ""
+    @State private var confirmClear = false
+
+    private var results: [Article] {
+        query.isEmpty ? store.saved : store.saved.filter { StorySearch.matches($0, query) }
+    }
 
     var body: some View {
         NavigationStack {
@@ -24,18 +69,18 @@ struct SavedView: View {
                     ContentUnavailableView("Nothing saved", systemImage: "bookmark",
                                            description: Text("Tap the bookmark on a story to keep it here."))
                 } else {
-                    List(store.saved) { article in
-                        Button { reading = article } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(article.displayTitle).font(.headline).foregroundStyle(.primary)
-                                Text("\(article.source) · \(article.publishedAt.formatted(date: .abbreviated, time: .omitted))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                    List {
+                        ForEach(results) { article in
+                            Button { Reader.open(article.url) } label: { StoryRow(article: article) }
+                                .swipeActions {
+                                    Button("Remove", role: .destructive) { store.toggleSaved(article) }
+                                }
                         }
-                        .swipeActions {
-                            Button("Remove", role: .destructive) { store.toggleSaved(article) }
-                        }
+                    }
+                    .listStyle(.plain)
+                    .searchable(text: $query, prompt: "Search saved stories")
+                    .overlay {
+                        if results.isEmpty { ContentUnavailableView.search(text: query) }
                     }
                 }
             }
@@ -43,9 +88,118 @@ struct SavedView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                if !store.saved.isEmpty {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Clear all", role: .destructive) { confirmClear = true }
+                    }
+                }
             }
-            .sheet(item: $reading) { SafariView(url: $0.url).ignoresSafeArea() }
+            .confirmationDialog("Remove all saved stories?", isPresented: $confirmClear, titleVisibility: .visible) {
+                Button("Remove all", role: .destructive) { store.clearSaved() }
+            }
         }
+    }
+}
+
+/// Matches a story against typed words: every word must appear in its headline, summary or outlets.
+enum StorySearch {
+    static func matches(_ article: Article, _ query: String) -> Bool {
+        let haystack = ([article.displayTitle, article.title, article.displaySummary, article.source]
+            + (article.alsoCoveredBy ?? [])).joined(separator: " ")
+        return query.split(separator: " ").allSatisfy { haystack.localizedCaseInsensitiveContains($0) }
+    }
+
+    /// Stories in the edition and in Saved that match, edition first, no duplicates.
+    static func results(for query: String, in articles: [Article], saved: [Article]) -> [Article] {
+        let words = query.trimmingCharacters(in: .whitespaces)
+        guard !words.isEmpty else { return [] }
+        var seen = Set<String>()
+        return (articles + saved).filter { matches($0, words) && seen.insert($0.id).inserted }
+    }
+}
+
+/// Searches everything on this phone: the current edition's tabs and Saved.
+struct SearchView: View {
+    @EnvironmentObject private var store: NewsStore
+    @Environment(\.dismiss) private var dismiss
+    let onSelect: (Article) -> Void
+    @State private var query = ""
+
+    var body: some View {
+        let results = StorySearch.results(for: query, in: store.articles, saved: store.saved)
+        NavigationStack {
+            List(results) { article in
+                Button {
+                    dismiss()
+                    onSelect(article)
+                } label: { StoryRow(article: article) }
+            }
+            .listStyle(.plain)
+            .overlay {
+                if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                    ContentUnavailableView("Search stories", systemImage: "magnifyingglass",
+                                           description: Text("Find a story by headline, summary or outlet."))
+                } else if results.isEmpty {
+                    ContentUnavailableView.search(text: query)
+                }
+            }
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Headline, topic or outlet")
+            .navigationTitle("Search")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+    }
+}
+
+/// Every outlet reporting a story.
+struct CoverageSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let article: Article
+    let onRead: (Article) -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Button {
+                        dismiss()
+                        onRead(article)
+                    } label: {
+                        HStack(spacing: 12) {
+                            SourceMonogram(name: article.source, size: 32)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(article.source).font(.body.weight(.semibold)).foregroundStyle(.primary)
+                                Text(article.title).font(.footnote).foregroundStyle(Theme.metaText)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right").imageScale(.small).foregroundStyle(Theme.metaText)
+                        }
+                    }
+                    ForEach(article.alsoCoveredBy ?? [], id: \.self) { name in
+                        HStack(spacing: 12) {
+                            SourceMonogram(name: name, size: 32)
+                            Text(name)
+                        }
+                    }
+                } header: {
+                    Text("Covered by \(article.coverage) outlets · first reported \(RelativeTime.spoken(article.publishedAt)) by \(article.source)")
+                        .textCase(nil)
+                }
+                if let points = article.points {
+                    Section {
+                        Label("\(points) points on Hacker News", systemImage: "arrow.up.circle")
+                    }
+                }
+            }
+            .navigationTitle("Full coverage")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 
@@ -55,60 +209,65 @@ struct SettingsView: View {
     @Environment(\.openURL) private var openURL
     @AppStorage(Keys.digestEnabled) private var digestEnabled = false
     @AppStorage(Keys.digestMinute) private var digestMinute = 8 * 60
-    @State private var showDeniedAlert = false
     @AppStorage(Keys.breakingNews) private var breakingEnabled = false
+    @AppStorage(Keys.readerMode) private var readerMode = true
+    @State private var showDeniedAlert = false
+    @State private var sampleSent = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Toggle("Daily digest", isOn: digestBinding)
+                    Toggle("Morning gist", isOn: digestBinding)
                     if digestEnabled {
                         DatePicker("Time", selection: timeBinding, displayedComponents: .hourAndMinute)
+                    }
+                    Toggle("Big story alerts", isOn: breakingBinding)
+                    if digestEnabled || breakingEnabled, let story = store.topStory {
+                        Button(sampleSent ? "Sample alert on its way" : "Send a sample alert") {
+                            sampleSent = true
+                            Task { await StoryNotification.sendSample(story) }
+                        }
+                        .disabled(sampleSent)
                     }
                 } header: {
                     Text("Notifications")
                 } footer: {
-                    Text("One notification a day with the top tech story.")
+                    Text("One notification each morning with the top story, and an alert when a story is covered by several outlets at once, at most 3 a day. iOS decides when the app checks in the background, so alerts can arrive a few hours after a story breaks. A sample alert arrives in 5 seconds; lock the phone or go to the Home Screen to see it as it will look.")
                 }
 
                 Section {
-                    Toggle("Big story alerts", isOn: breakingBinding)
-                } footer: {
-                    Text("An alert when a story is covered by several outlets at once, at most 3 a day. iOS decides when the app checks in the background, so alerts can arrive a few hours after a story breaks.")
-                }
-
-                Section {
-                    Toggle("On-device summaries", isOn: $store.aiSummariesEnabled)
-                        .disabled(!Summarizer.isSupported)
+                    Toggle("Open stories in Reader view", isOn: $readerMode)
                 } header: {
-                    Text("Apple Intelligence")
+                    Text("Reading")
                 } footer: {
-                    Text(Summarizer.statusText)
+                    Text("Shows the publisher's story as clean text when the page supports it.")
                 }
 
-                ForEach(Category.allCases) { category in
-                    Section(category.rawValue) {
-                        ForEach(FeedSource.all.filter { $0.category == category }) { source in
-                            Toggle(source.name, isOn: sourceBinding(source))
-                        }
+                Section {
+                    NavigationLink {
+                        SourcesView()
+                    } label: {
+                        LabeledContent("Sources", value: store.disabledSources.isEmpty ? "All on" : "\(store.disabledSources.count) muted")
                     }
+                } footer: {
+                    Text("Muted sources don't appear in any tab. You can also mute a source by pressing and holding a story.")
                 }
 
                 Section {
                     LabeledContent("Version", value: Self.version)
                     switch store.origin {
-                    case .edition(let publishedAt):
-                        LabeledContent("Stories") {
-                            Text("Techgist edition, \(publishedAt, format: .relative(presentation: .named))")
-                        }
+                    case .edition(let publishedAt, _):
+                        LabeledContent("Stories", value: "Techgist edition, \(RelativeTime.spoken(publishedAt))")
                     case .direct:
                         LabeledContent("Stories", value: "Direct from publishers")
                     case nil:
                         EmptyView()
                     }
+                } header: {
+                    Text("About")
                 } footer: {
-                    Text("Headlines and excerpts come from each publisher's public feed and link to the original story. Your reading, saves and settings stay on this device.")
+                    Text("Headlines and summaries are written by Techgist's AI from each publisher's story, checked against it, and link to the original. Your reading, saves and settings stay on this device.")
                 }
             }
             .navigationTitle("Settings")
@@ -122,7 +281,7 @@ struct SettingsView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Allow notifications for Techgist in Settings to get the daily digest and big story alerts.")
+                Text("Allow notifications for Techgist in Settings to get the morning gist and big story alerts.")
             }
         }
     }
@@ -138,6 +297,7 @@ struct SettingsView: View {
                     digestEnabled = false
                 }
                 await DailyDigest.reschedule(with: store.topStory)
+                await PushRegistration.upload()
             }
         })
     }
@@ -153,6 +313,7 @@ struct SettingsView: View {
                     BreakingNews.disable()
                     breakingEnabled = false
                 }
+                await PushRegistration.upload()
             }
         })
     }
@@ -163,18 +324,49 @@ struct SettingsView: View {
         }, set: { date in
             let c = Calendar.current.dateComponents([.hour, .minute], from: date)
             digestMinute = (c.hour ?? 8) * 60 + (c.minute ?? 0)
-            Task { await DailyDigest.reschedule(with: store.topStory) }
-        })
-    }
-
-    private func sourceBinding(_ source: FeedSource) -> Binding<Bool> {
-        Binding(get: { !store.disabledSources.contains(source.name) }, set: { on in
-            if on { store.disabledSources.remove(source.name) } else { store.disabledSources.insert(source.name) }
+            Task {
+                await DailyDigest.reschedule(with: store.topStory)
+                await PushRegistration.upload()
+            }
         })
     }
 
     private static var version: String {
         let info = Bundle.main.infoDictionary
         return "\(info?["CFBundleShortVersionString"] as? String ?? "1.0") (\(info?["CFBundleVersion"] as? String ?? "1"))"
+    }
+}
+
+/// Every source in the current edition, with a switch to mute it.
+struct SourcesView: View {
+    @EnvironmentObject private var store: NewsStore
+
+    private var names: [String] {
+        Set(store.articles.map(\.source)).union(FeedSource.all.map(\.name)).union(store.disabledSources)
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    var body: some View {
+        List {
+            if !store.disabledSources.isEmpty {
+                Section {
+                    Button("Unmute all") { store.disabledSources = [] }
+                }
+            }
+            Section {
+                ForEach(names, id: \.self) { name in
+                    Toggle(isOn: Binding(get: { !store.disabledSources.contains(name) }, set: { on in
+                        if on { store.disabledSources.remove(name) } else { store.disabledSources.insert(name) }
+                    })) {
+                        HStack(spacing: 10) {
+                            SourceMonogram(name: name, size: 26)
+                            Text(name)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Sources")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
