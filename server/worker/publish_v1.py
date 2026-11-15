@@ -170,8 +170,7 @@ def event_candidate(ctx, ev):
         classified=ev["type"] is not None, boost=ctx.editorial.boost.get(ev["id"], 1.0),
         pin=frozenset(ctx.editorial.pins.get(ev["id"], ())), title=headline or lead["title"] or "",
         spice=_col(ev, "spice") or rank.SPICE_NEUTRAL,
-        lobsters_points=social.get("lobsters") or 0, on_reddit=bool(social.get("reddit")),
-        github_stars=social.get("github") or 0,
+        lobsters_points=social.get("lobsters") or 0, on_reddit=reddit_top(social.get("reddit")),
         unvetted=lead["source_id"] == sources_mod.WEB_ID,
         keys=frozenset().union(*(entity_keys(json.loads(m["entities"] or "{}")) for m in members)))
     c.data = {"lead": lead, "members": members, "publishers": publishers, "headline": headline, "summary": summary,
@@ -199,6 +198,13 @@ def first_report(db, eid, members):
     if row is not None and row["at"]:
         times.append(row["at"])
     return min(times)
+
+
+def reddit_top(points):
+    """Is the event's Reddit post among the day's first rank.REDDIT_TOP? `points` is its place in the listing
+    counted down from the top (fetch.REDDIT_LISTING for the first post)."""
+    from .fetch import REDDIT_LISTING
+    return (points or 0) > REDDIT_LISTING - rank.REDDIT_TOP
 
 
 def _col(row, name):

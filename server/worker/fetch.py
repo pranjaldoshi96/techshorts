@@ -182,36 +182,18 @@ def parse_json_entries(body, source, limit):
     return out[:limit], _JsonFeed(False)
 
 
-_TRENDING_ROW = re.compile(r'<article class="Box-row">(.*?)</article>', re.S)
-
-
-def parse_github_trending(body, limit):
-    """GitHub's trending page (HTML; there is no feed): one entry per repository, "owner/repo: description", with
-    the stars it gained today as points. The page has no dates, so entries are dated at first sight."""
-    page = body.decode("utf-8", "replace") if isinstance(body, bytes) else body
-    out = []
-    for row in _TRENDING_ROW.findall(page):
-        m = re.search(r'<h2[^>]*>\s*<a[^>]*href="/([\w.-]+/[\w.-]+)"', row, re.S)
-        if not m:
-            continue
-        repo = m.group(1)
-        desc = re.search(r'<p class="col-9[^"]*"[^>]*>(.*?)</p>', row, re.S)
-        stars = re.search(r"([\d,]+)\s+stars today", row)
-        url = f"https://github.com/{repo}"
-        out.append(Entry(url=url, url_canonical=canonical_url(url),
-                         title=f"{repo}: {plain(desc.group(1))}" if desc else repo,
-                         extra={"points": int(stars.group(1).replace(",", "")) if stars else 0}))
-    return out[:limit], _JsonFeed(not out)
+# Reddit's RSS of a subreddit's top posts of the day carries no score, but it is sorted by it: a post's place in
+# the listing is the signal. Stored as points, REDDIT_LISTING for the first post down to 1, so they refresh on
+# every poll like Hacker News points (rank.REDDIT_TOP is the bar that counts as traction).
+REDDIT_LISTING = 50
 
 
 def parse_entries(body, source, limit):
-    if source.format == "github_trending":
-        return parse_github_trending(body, limit)
     if source.format != "rss":
         return parse_json_entries(body, source, limit)
     feed = feedparser.parse(body)
     out = []
-    for e in feed.entries:
+    for place, e in enumerate(feed.entries):
         link = (e.get("link") or "").strip()
         title = plain(e.get("title"))
         if not title or not link.startswith(("http://", "https://")):
@@ -231,6 +213,8 @@ def parse_entries(body, source, limit):
                 {"author": plain(e.get("author"))} if e.get("author") else {}),
             tags=tuple(t.get("term") for t in e.get("tags") or () if t.get("term")),
         ))
+        if source.kind == "reddit":
+            out[-1].extra["points"] = max(1, REDDIT_LISTING - place)
     # Archive feeds (OpenAI lists 1,300+ posts) are not always newest-first; keep the newest `limit`.
     epoch = datetime.min.replace(tzinfo=timezone.utc)
     out.sort(key=lambda x: x.feed_published_at or epoch, reverse=True)
@@ -299,9 +283,7 @@ def classify(entry, source, sources, now, first_seen, first_run, cfg, vetted=Fal
         return "stale", None, published
     # On a source's first poll, anything older than 36 h (or undated, so of unknown age) already existed. A source
     # may reach further back (seed_days), capped at the age limit above.
-    # (GitHub's trending page has no dates at all: its entries are current by definition.)
-    if first_run and source.format != "github_trending" and (
-            entry.feed_published_at is None or now - published > seed_horizon(source, cfg)):
+    if first_run and (entry.feed_published_at is None or now - published > seed_horizon(source, cfg)):
         return "seen", None, published
     if sources.blocked(entry.url):
         return "dropped", "domain_blocklist", published

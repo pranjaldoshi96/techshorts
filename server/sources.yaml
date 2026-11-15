@@ -5,7 +5,7 @@
 # Fields: id, name, v1_name (exact 1.2 FeedSource name, or `name` for new sources), url,
 # tier (1 | 2 | signal), authority (0.5-1.2), reads, region (in | us | global), poll (3m | 10m),
 # fetch_page, images (source | generated). Optional: include_tags (keep only entries with one of these
-# feed categories, for site-wide feeds); format (rss | hn_algolia | lobsters | github_trending); kind (techmeme | hn | lobsters | reddit | github,
+# feed categories, for site-wide feeds); format (rss | hn_algolia | lobsters); kind (techmeme | hn | lobsters | reddit,
 # what a signal source is); seed_days (how far back the first poll reaches, for essays and developer posts;
 # default fetch.first_run_skip_hours); domains (hosts whose articles are this publisher's, for an article imported from a
 # Techmeme or Hacker News link). A source with domains and no url is never polled: it only names the publisher.
@@ -214,10 +214,10 @@ sources:
   # Hacker News through the Algolia API (points and comments on every poll; hnrss.org timed out from the VPS).
   - {id: hn, name: Hacker News, v1_name: Hacker News, url: "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=60", tier: signal, kind: hn, format: hn_algolia, authority: 0.8, poll: 3m, fetch_page: false}
   - {id: hn_100, name: Hacker News, v1_name: Hacker News, url: "https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=points%3E100&hitsPerPage=80", tier: signal, kind: hn, format: hn_algolia, authority: 0.8, poll: 3m, fetch_page: false}
-  # Reddit's top posts of the day (the RSS route; the entries carry no score, so being listed is the signal) and
-  # GitHub's trending repositories (stars today as points). Neither is imported as an article: they add to the
-  # traction of the event they are about (rank.coverage), each with its own capped multiplier.
+  # Reddit's top posts of the day (the RSS route: the entries carry no score, but the listing is sorted by it, so
+  # a post's place is the signal; the first ten count as traction, rank.REDDIT_TOP). A post attaches only to the
+  # event of the article it links, never by its title, and is never imported as an article.
   # One request for both subreddits: two feeds polled in the same tick got a 429 for the second.
+  # GitHub trending was a signal here until the third review: it attached to no event and moved no rank.
   - {id: reddit_technology, name: Reddit, v1_name: Reddit, url: "https://www.reddit.com/r/technology+programming/top/.rss?t=day&limit=50", tier: signal, kind: reddit, authority: 0.8, poll: 10m, fetch_page: false}
-  - {id: github_trending, name: GitHub Trending, v1_name: GitHub Trending, url: "https://github.com/trending?since=daily", tier: signal, kind: github, format: github_trending, authority: 0.8, poll: 10m, fetch_page: false}
   - {id: lobsters, name: Lobsters, v1_name: Lobsters, url: "https://lobste.rs/hottest.json", tier: signal, kind: lobsters, format: lobsters, authority: 0.8, poll: 10m, fetch_page: false}

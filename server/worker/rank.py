@@ -45,6 +45,11 @@ STORYLINE_EVENT = 8
 STRONG_PUBLISHERS = 3
 STRONG_HN = 300
 STRONG_LOBSTERS = 100
+# Reddit counts as traction for a story whose article is among the first REDDIT_TOP of the day's top posts in
+# r/technology and r/programming (the feed's order is its only score; fetch.REDDIT_LISTING). Being listed at all
+# used to count, for all 50 posts and for posts matched by title. GitHub trending is gone: in the third review's
+# run it attached to no event and moved no rank, and a repository's star count says nothing about a news story.
+REDDIT_TOP = 10
 # Spice (see the module docstring). An unscored card (written before spice existed, or unwritten) is neutral.
 SPICE_NEUTRAL = 5
 SPICY = 7               # at or above: may enter a tab below its importance minimum
@@ -228,8 +233,7 @@ class Candidate:
     title: str = ""                 # the headline the card shows (or the lead's title), for text rules
     spice: int = SPICE_NEUTRAL      # 1-10, how tap-worthy the story is (the writer's score)
     lobsters_points: int = 0
-    on_reddit: bool = False
-    github_stars: int = 0
+    on_reddit: bool = False         # among the first REDDIT_TOP of a subreddit's top posts of the day
     # The lead is an article imported from a Hacker News or Lobsters link under the catch-all source: nobody
     # chose the site (publish_v1.event_candidate).
     unvetted: bool = False
@@ -247,21 +251,20 @@ class Candidate:
         return max(0.0, a)
 
 
-def coverage(n_publishers, on_techmeme=False, hn_points=0, lobsters_points=0, on_reddit=False, github_stars=0):
+def coverage(n_publishers, on_techmeme=False, hn_points=0, lobsters_points=0, on_reddit=False):
     """Traction: how widely the story is covered and shared. Each platform has its own capped multiplier, so no
     single one decides the order."""
     c = min(2.2, 1 + 0.5 * math.log2(max(1, n_publishers)))
     c *= 1.25 if on_techmeme else 1
     c *= min(1.3, 1 + 0.15 * math.log2(max(1, (hn_points or 0) / 100)))
     c *= min(1.15, 1 + 0.075 * math.log2(max(1, (lobsters_points or 0) / 25)))
-    c *= 1.1 if on_reddit else 1            # among a subreddit's top posts of the day
-    c *= min(1.1, 1 + 0.05 * math.log2(max(1, (github_stars or 0) / 100)))     # stars today on GitHub trending
+    c *= 1.1 if on_reddit else 1            # among the day's first REDDIT_TOP posts of a subreddit
     return c
 
 
 def traction(c):
     """coverage() of a candidate, with every signal it carries."""
-    return coverage(c.n_publishers, c.on_techmeme, c.hn_points, c.lobsters_points, c.on_reddit, c.github_stars)
+    return coverage(c.n_publishers, c.on_techmeme, c.hn_points, c.lobsters_points, c.on_reddit)
 
 
 def spice_factor(spice):
@@ -270,10 +273,10 @@ def spice_factor(spice):
 
 
 def score(importance, n_publishers, on_techmeme, hn_points, authority, age_eff_h, tau_h, spice=SPICE_NEUTRAL,
-          lobsters_points=0, on_reddit=False, github_stars=0):
+          lobsters_points=0, on_reddit=False):
     i = (importance / 10) ** 1.5
-    return (i * spice_factor(spice) * coverage(n_publishers, on_techmeme, hn_points, lobsters_points, on_reddit,
-                                               github_stars) * authority * math.exp(-age_eff_h / tau_h))
+    return (i * spice_factor(spice) * coverage(n_publishers, on_techmeme, hn_points, lobsters_points, on_reddit)
+            * authority * math.exp(-age_eff_h / tau_h))
 
 
 def staying_power(c):
@@ -288,7 +291,7 @@ def cand_score(c, tab, now, degraded=False):
     spice = SPICE_NEUTRAL if degraded or not c.classified else c.spice
     age = c.age_eff(now)
     base = score(imp, c.n_publishers, c.on_techmeme, c.hn_points, c.authority, 0, tab.tau_h, spice,
-                 c.lobsters_points, c.on_reddit, c.github_stars) * c.boost
+                 c.lobsters_points, c.on_reddit) * c.boost
     return base * max(math.exp(-age / tab.tau_h), STAY_TAIL * math.exp(-age / (tab.tau_h * staying_power(c))))
 
 

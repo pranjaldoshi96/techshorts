@@ -328,11 +328,9 @@ def test_a_site_nobody_chose_needs_a_second_outlet_for_top_and_alerts():
     assert rank.eligible(backed, TOP, NOW) is None and rank.notifiable(backed)
 
 
-def test_reddit_and_github_trending_count_as_traction_with_capped_multipliers():
+def test_reddit_counts_as_traction_with_a_capped_multiplier():
     base = rank.coverage(2)
     assert rank.coverage(2, on_reddit=True) == pytest.approx(base * 1.1)
-    assert rank.coverage(2, github_stars=800) == pytest.approx(base * 1.1)          # capped
-    assert rank.coverage(2, github_stars=200) == pytest.approx(base * 1.05)
     c = _cand(n=2)
     c.on_reddit = True
     assert rank.traction(c) == pytest.approx(base * 1.1) and rank.widely_shared(c)

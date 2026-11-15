@@ -9,8 +9,9 @@ import pytest
 
 pytest.importorskip("feedparser")
 
-from worker import cluster, fetch, sources as sources_mod  # noqa: E402
-from test_spice_and_truth import NOW, S, SRCS, _db, _item  # noqa: E402
+from worker import cluster, embed, fetch, publish_v1, sources as sources_mod  # noqa: E402
+from worker.db import iso  # noqa: E402
+from test_spice_and_truth import NOW, S, SRCS, _db, _item, _judge  # noqa: E402
 
 
 # Signals: live points, JSON feeds, promotion to cards
@@ -200,42 +201,43 @@ REDDIT = b"""<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.or
 <updated>2026-11-15T15:00:00+00:00</updated>
 <content type="html">&lt;span&gt;&lt;a href="https://www.reddit.com/r/technology/comments/def/a_text_post/"&gt;[link]&lt;/a&gt;&lt;/span&gt;</content></entry>
 </feed>"""
-TRENDING = b"""<html><body><article class="Box-row"><h2 class="h3 lh-condensed">
-<a href="/acme/kestrel" class="Link"> acme / kestrel </a></h2>
-<p class="col-9 color-fg-muted my-1 pr-4"> A coding agent that runs in your terminal </p>
-<span class="d-inline-block float-sm-right"> 1,234 stars today </span></article>
-<article class="Box-row"><h2 class="h3"><a href="/x/y">x / y</a></h2></article></body></html>"""
-
-
-def test_reddit_and_github_trending_are_traction_signals_and_never_cards():
-    """sources.yaml had no Reddit or GitHub trending signal: the engine saw only Techmeme, Mediagazer, Hacker News
-    and Lobsters."""
-    reddit, trending = _source("reddit_technology"), _source("github_trending")
-    assert reddit.is_signal and reddit.kind == "reddit" and trending.kind == "github"
+def test_reddit_is_a_traction_signal_by_url_and_place_and_never_a_card():
+    """sources.yaml had no Reddit signal at first; then every listed post counted, matched by title or by link.
+    Now a post counts through the article it links, by its place in the day's listing. GitHub trending, which
+    attached to nothing, is no longer a source."""
+    reddit = _source("reddit_technology")
+    assert reddit.is_signal and reddit.kind == "reddit" and "github_trending" not in SRCS.by_id()
     entries, feed = fetch.parse_entries(REDDIT, reddit, 100)
     assert not feed.bozo and len(entries) == 2
     link = next(e for e in entries if e.title.startswith("ULA"))
-    assert link.extra == {"linked_url": "https://spaceflightnow.com/2026/11/15/vulcan/"}
-    assert next(e for e in entries if e.title == "A text post").extra == {}
-    repos, feed = fetch.parse_entries(TRENDING, trending, 100)
-    assert not feed.bozo and [(e.url, e.title, e.extra) for e in repos] == [
-        ("https://github.com/acme/kestrel", "acme/kestrel: A coding agent that runs in your terminal",
-         {"points": 1234}), ("https://github.com/x/y", "x/y", {"points": 0})]
-    assert fetch.parse_entries(b"<html>changed</html>", trending, 100)[1].bozo
-    # First poll: the trending page has no dates, and its entries are current (not "seen before the first poll").
+    # The listing is sorted by score: the first post gets fetch.REDDIT_LISTING points, the next one less.
+    assert link.extra == {"linked_url": "https://spaceflightnow.com/2026/11/15/vulcan/", "points": 50}
+    assert next(e for e in entries if e.title == "A text post").extra == {"points": 49}
     db = _db()
-    fetch.ingest(db, trending, SRCS, repos, NOW, True, CFG)
     fetch.ingest(db, reddit, SRCS, entries, NOW, False, CFG)
-    assert db.item("https://github.com/acme/kestrel")["status"] == "signal"
-    assert fetch.promote_signals(db, SRCS, {}, NOW) == 0            # neither is imported as an article
+    assert fetch.promote_signals(db, SRCS, {}, NOW) == 0            # never imported as an article
     # The Reddit post attaches to the event of the article it links, and the event's traction counts it.
     report = _item("https://spaceflightnow.com/2026/11/15/vulcan/", [1, 0, 0], "ULA loses Vulcan rocket",
                    source_id="spaceflightnow", people=())
-    store = cluster.Store(db, SRCS, S, NOW)
+    other = _item("https://example.test/text", [0, 1, 0], "A text post", source_id="verge", people=())
+    store = cluster.Store(db, SRCS, S, NOW, _judge({"A text post": "same"}, []))
     eid, _ = cluster.create(store, report)
+    oid, _ = cluster.create(store, other)
+    for r in db.q("SELECT url_canonical, title FROM items WHERE status = 'signal'"):
+        db.conn.execute("INSERT OR REPLACE INTO embeddings VALUES (?,?,?,?,?,?,?)",
+                        (r["url_canonical"], "query", "m", 3, None, embed.to_blob(embed.normalize([0, 1, 0])),
+                         iso(NOW)))
+    # A title match made before this rule is removed; the text post (same title as an event, the judge agreeing)
+    # attaches to nothing.
+    db.conn.execute("INSERT INTO event_signals VALUES (?,?,?,?,?,?,?,?)",
+                    (oid, "https://www.reddit.com/r/technology/comments/zzz/old/", "reddit_technology", "judge", None,
+                     None, None, iso(NOW)))
     assert cluster.attach_signals(store) == 1
+    assert [(r["event_id"], r["how"], r["points"]) for r in db.q("SELECT * FROM event_signals")] == [(eid, "url", 50)]
     cluster.refresh(store, store.events[eid], lambda s: True)
-    assert json.loads(store.events[eid].row["social"]) == {"reddit": 1}
+    assert json.loads(store.events[eid].row["social"]) == {"reddit": 50}
+    assert publish_v1.reddit_top(50) and publish_v1.reddit_top(41) and not publish_v1.reddit_top(40)
+    assert not publish_v1.reddit_top(1) and not publish_v1.reddit_top(None)     # listed, place unknown or low
 
 
 def test_outlets_that_break_news_are_polled_every_three_minutes():

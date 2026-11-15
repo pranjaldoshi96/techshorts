@@ -1061,6 +1061,13 @@ def attach_signals(store):
     db, now = store.db, store.now
     member_of = {r["url_canonical"]: r["event_id"] for r in db.q("SELECT url_canonical, event_id FROM event_members")}
     signal_ids = {s.id for s in store.srcs.sources if s.is_signal}
+    # A Reddit post attaches only through the article it links, never by its title: the title is a reader's own
+    # words. Of 23 Reddit posts attached in the third review's run, 15 were title matches, among them "MAGA turns
+    # on Lutnick amid China spy ..." on the Megaspeed blacklist card and "US aviation shutdown blamed on L3
+    # Harris ..." on the Juniper routers card. Matches made that way before this rule are removed.
+    by_url_only = {s.id for s in store.srcs.sources if s.is_signal and s.kind in URL_ONLY_KINDS}
+    for sid in by_url_only:
+        db.conn.execute("DELETE FROM event_signals WHERE source_id = ? AND how != 'url'", (sid,))
     attached = {(r["url_canonical"], r["source_id"]): (r["event_id"], r["how"])
                 for r in db.q("SELECT event_id, url_canonical, source_id, how FROM event_signals")}
     n = 0
@@ -1088,7 +1095,7 @@ def attach_signals(store):
             extra = json.loads(r["extra"] or "{}")
             linked = extra.get("linked_url") or r["url_canonical"]
             if linked in member_of or r["url_canonical"] in member_of or r["vec"] is None \
-                    or (r["url_canonical"], r["source_id"]) in attached:
+                    or (r["url_canonical"], r["source_id"]) in attached or r["source_id"] in by_url_only:
                 continue
             near = _near_events(store, r)
             if near and r["vec_key"] not in asked and any(store.ruling(r["vec_key"], ev.id) is None
@@ -1113,7 +1120,7 @@ def attach_signals(store):
             if attached[key][0] in store.events:
                 attach(attached[key][0], r["url_canonical"], r["source_id"], attached[key][1], extra)
             continue
-        if r["vec"] is None:
+        if r["vec"] is None or r["source_id"] in by_url_only:
             continue
         ranked = store.ranked(embed_mod.from_blob(r["vec"]))
         if not ranked or ranked[0][0] < store.s.t_signal:
@@ -1135,6 +1142,7 @@ def attach_signals(store):
 
 
 SIGNAL_CANDIDATES = 3
+URL_ONLY_KINDS = ("reddit",)
 
 
 def _near_events(store, r):
@@ -1168,14 +1176,15 @@ def _apply_signals(store, ev):
     best = max(hn, key=lambda r: r["points"] or 0, default=None)
     ev.row["hn"] = json.dumps({"points": best["points"] or 0, "comments": best["comments"] or 0,
                                "url": best["hn_url"] or best["url_canonical"]}) if best else None
-    # Other places a story is being shared (Lobsters today), each with its own capped multiplier in rank.coverage.
+    # Other places a story is being shared, each with its own capped multiplier in rank.coverage: Lobsters by its
+    # points, Reddit by the post's place among the day's top posts (fetch.REDDIT_LISTING; 1 = listed, place
+    # unknown, for rows attached before places were kept).
     social = {}
     for r in rows:
         kind = kinds[r["source_id"]]
-        if kind in ("lobsters", "github") and (r["points"] or 0) > social.get(kind, 0):
-            social[kind] = r["points"]
-        elif kind == "reddit":
-            social["reddit"] = 1        # listed among a subreddit's top posts of the day; the feed has no score
+        points = r["points"] or (1 if kind == "reddit" else 0)
+        if kind in ("lobsters", "reddit") and points > social.get(kind, 0):
+            social[kind] = points
     ev.row["social"] = json.dumps(social) if social else None
 
 

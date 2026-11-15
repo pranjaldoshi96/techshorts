@@ -115,7 +115,7 @@ cluster:
 
 # Signals that become cards (fetch.promote_signals): Techmeme and Mediagazer picks always; HN and Lobsters links
 # past these points. per_tick caps how many linked articles are imported in one tick.
-# Reddit's top posts and GitHub trending are traction only (rank.coverage), never imported.
+# Reddit's top posts are traction only (rank.coverage, the day's first ten), never imported.
 signals:
   promote: {techmeme: 0, hn: 150, lobsters: 60, max_age_h: 36, per_tick: 10}
 
