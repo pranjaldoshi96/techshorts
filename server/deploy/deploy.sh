@@ -25,6 +25,6 @@ if [ "${1:-}" = "--setup" ]; then
     exit 0
 fi
 # The unit file is part of the deploy: a changed one (a new key file, say) is installed before the restart.
-"${SSH[@]}" "$HOST" "cmp -s /opt/techgist/deploy/techgist-worker.service /etc/systemd/system/techgist-worker.service || { install -m 644 /opt/techgist/deploy/techgist-worker.service /etc/systemd/system/ && systemctl daemon-reload; }" </dev/null
+"${SSH[@]}" "$HOST" 'changed=0; for u in techgist-worker.service techgist-alert@.service techgist-watchdog.service techgist-watchdog.timer; do cmp -s /opt/techgist/deploy/$u /etc/systemd/system/$u || { install -m 644 /opt/techgist/deploy/$u /etc/systemd/system/ && changed=1; }; done; [ $changed = 1 ] && systemctl daemon-reload; systemctl enable --now techgist-watchdog.timer >/dev/null 2>&1; true' </dev/null
 "${SSH[@]}" "$HOST" "/opt/techgist/venv/bin/python -m compileall -q /opt/techgist/worker /opt/techgist/tools >/dev/null; systemctl restart techgist-worker && sleep 3 && systemctl is-active techgist-worker" </dev/null
 echo "deployed $REV"

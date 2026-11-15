@@ -190,6 +190,13 @@ BACKFILL = {("write_log", "attempt"): (
 # feedback, then drops: in the 2026-11 shadow run a third identical run passed 21% of the time, 2 h late.
 HOLD_RETRIES = (timedelta(minutes=30), timedelta(hours=2))
 CONTENT_RETRIES = (timedelta(minutes=30),)
+# An item the tech world is already sharing (a Techmeme pick, a Hacker News link past the import bar) is retried
+# within minutes: the FT's and Bloomberg's reports of Huang's comeback talks, Techmeme's lead story, were held
+# for 150 min, and The Information's failed card for 30.
+HOT_RETRIES = (timedelta(minutes=5), timedelta(minutes=20), timedelta(hours=1), timedelta(hours=2))
+HOT_CONTENT_RETRIES = (timedelta(minutes=5), timedelta(minutes=30))
+# A card that failed on a backup model during an outage of the primary waits this long and keeps its retries.
+BACKUP_RETRY = timedelta(minutes=15)
 TRANSIENT_REASONS = ("no_text", "llm_error", "bad_json", "model_gone")
 
 
@@ -309,13 +316,20 @@ class DB:
         """Items waiting for text + LLM: new ones, and held ones whose retry time has come."""
         return self.q("SELECT * FROM items WHERE status = 'new' OR (status = 'held' AND retry_at <= ?)", iso(now))
 
-    def hold(self, url_canonical, reason, now):
+    def hold(self, url_canonical, reason, now, hot=False):
         """Holds an item for a retry at +30 min, then +2 h; the third failure drops it. Never a permanent skip
         on the first failure, so a page that was briefly down or a model hiccup gets another chance. A content
         failure gets only the +30 min retry (see CONTENT_RETRIES)."""
         row = self.item(url_canonical)
+        if reason == "backup_failed":
+            self.conn.execute("UPDATE items SET status = 'held', retry_at = ?, hold_reason = ? WHERE url_canonical = ?",
+                              (iso(now + BACKUP_RETRY), reason, url_canonical))
+            return "held"
         attempts = (row["attempts"] or 0) + 1
-        schedule = HOLD_RETRIES if transient(reason) else CONTENT_RETRIES
+        if hot:
+            schedule = HOT_RETRIES if transient(reason) else HOT_CONTENT_RETRIES
+        else:
+            schedule = HOLD_RETRIES if transient(reason) else CONTENT_RETRIES
         if attempts > len(schedule):
             self.conn.execute("UPDATE items SET status = 'dropped', drop_rule = ?, attempts = ?, retry_at = NULL,"
                               " hold_reason = ? WHERE url_canonical = ?",

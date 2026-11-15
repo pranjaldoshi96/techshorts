@@ -4,7 +4,10 @@ Edition-wide outage, from the write_log the LLM stage already keeps:
   - auth:      the latest chat call got 401/403 (key revoked or expired), until a call succeeds again;
   - 429 storm: >= 10 rate-limit replies in 15 min and more of them than successful calls;
   - timeouts:  >= 5 chat timeouts, connection errors or 5xx in 15 min and more of them than successful calls;
-  - no_key:    the worker has no key or model at all.
+  - no_key:    the worker has no key or model at all;
+  - backup:    the primary models' endpoint is failing, a backup model is answering instead, and most of the cards
+               it writes fail the checks (backup_state). The backup's own calls log "ok", so without this an
+               outage of the hub (GPT and Gemini) looked healthy while every new item went to hold.
 Spec 2.14 also lists "a pass rate below 50% for 30 min". It is left out on purpose: a validation failure is a text
 problem, not an outage, and failing items already publish degraded one event at a time (spec 2.8). In the 2026-11
 shadow run it flagged 24 editions degraded while at most 3 of ~65 cards lacked AI text, and switched ranking to
@@ -56,10 +59,32 @@ def key_check(db, cfg, key, now, session=None):
     return None
 
 
+BACKUP_MIN = 5
+
+
+def backup_state(db, now):
+    """How much of the last 15 minutes' LLM work a backup model did: {"failovers", "primaryOk", "itemsOk",
+    "itemsFailed", "active", "failing"}. `active`: at least BACKUP_MIN calls failed over and they outnumber the
+    calls the primary models answered (the primary endpoint is out). `failing`: active, and the cards written
+    on the backup fail more often than they pass (then the edition is published degraded, as in any outage)."""
+    rows = db.q("SELECT kind, outcome FROM write_log WHERE at >= ?", iso(now - STORM_WINDOW))
+    calls = [r for r in rows if r["kind"] != "item"]
+    failovers = sum(r["outcome"] == "failover" for r in calls)
+    # Each failover has one "ok" row for the backup's answer; the rest of the ok rows are the primaries'.
+    primary_ok = max(0, sum(r["outcome"] == "ok" for r in calls) - failovers)
+    items_ok = sum(r["kind"] == "item" and r["outcome"] == "ok" for r in rows)
+    items_failed = sum(r["kind"] == "item" and r["outcome"] == "backup_failed" for r in rows)
+    active = failovers >= BACKUP_MIN and failovers > primary_ok
+    return {"failovers": failovers, "primaryOk": primary_ok, "itemsOk": items_ok, "itemsFailed": items_failed,
+            "active": active, "failing": active and items_failed >= BACKUP_MIN and items_failed > items_ok}
+
+
 def llm_outage(db, now, have_client=True):
     """The outage reason, or None when the LLM is working."""
     if not have_client:
         return "no_key"
+    if backup_state(db, now)["failing"]:
+        return "backup"
     # Auth: whichever came last of the latest chat outcome and the per-tick key check.
     signals = []
     last = db.one("SELECT at, outcome FROM write_log WHERE kind NOT IN ('item') AND outcome IS NOT NULL"
@@ -88,7 +113,7 @@ def outage_since(db, reason, now):
     this publish as outage singletons: anything older the LLM already judged, and that judgement stands.
     For auth it is the last success (chat ok or key check ok); with none on record, the first auth failure.
     The 429 storm and timeout outages are judged over a window, so their start is that window's start."""
-    if reason in ("rate_limited", "timeouts"):
+    if reason in ("rate_limited", "timeouts", "backup"):
         return now - STORM_WINDOW
     if reason != "auth":
         return None

@@ -8,6 +8,8 @@ source never drew), "matching the performance of Opus 5 ... while costing less p
 price was higher), "IPO priced at $70 to $78" (the source said "expected"). The prompt names the ways a fluent
 card goes wrong (tense and certainty, numbers moved to another thing, causes and superlatives added, allegations
 stated as fact, dropped sourcing, facts from two digest items joined), because a bare "is it entailed?" let them by.
+Class 10 (scene-setting) is not a truth failure but a card failure: sentences built from a paywall teaser or a
+podcast blurb were true to the text and told the reader nothing about the story.
 
 The gate is spec 2.8 as written: importance >= 6, OR relevance >= 2, OR breaking. A card needs relevance >= 2 to
 ship at all (rank.never_shipped), so every shipped card has passed this check.
@@ -44,6 +46,9 @@ to", "forcing").
 out who is alleging it.
 8. Joins facts from two separate items of a digest or list into one claim.
 9. Is a teaser that withholds the fact ("one key quality", "here is why") instead of stating it.
+10. Is scene-setting or colour instead of a fact about the story: what hung on a wall, where the writer was \
+sitting or how he felt, an app-store ranking or a biography line that is not what the story reports ("Framed \
+art by rock legends hung on the wall"; "Writing from the airport, he describes himself as grouchy").
 
 Reply with only JSON: {"entailed": "yes" or "no", "line": "which line fails, or empty", \
 "unsupported": "the unsupported claim and what the source actually says, in one sentence, or empty"}

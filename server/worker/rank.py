@@ -29,7 +29,17 @@ IMAGE_HAMMING = 6       # dHash distance at or under which two images count as t
 # freshest/highest scored first. The 2026-11 shadow Top had 3 Nvidia/Huang cards and 3 Anthropic-IPO cards.
 # 3 since each development of a saga is now its own card (cluster.py's judge): with 2, a day with five real
 # developments in one story showed two of them.
+# The cap of 3 holds for the head of a tab (its first STORYLINE_HEAD ranks) and for cards with no traction of
+# their own. Past the head, a development that is itself widely covered (STRONG_PUBLISHERS outlets, a Techmeme
+# headline or a big Hacker News thread) may still take a rank, up to STORYLINE_MAX: on 2026-11-15 the Nvidia saga
+# produced six Techmeme headlines in a day, and the cap cut "Megaspeed opens internal probe" (8 publishers,
+# Techmeme) and the petition and investor-letter cards while single-source items of spice 4 filled Top.
 STORYLINE_CAP = 3
+STORYLINE_HEAD = 12
+STORYLINE_MAX = 8
+STRONG_PUBLISHERS = 3
+STRONG_HN = 300
+STRONG_LOBSTERS = 100
 # Spice (see the module docstring). An unscored card (written before spice existed, or unwritten) is neutral.
 SPICE_NEUTRAL = 5
 SPICY = 7               # at or above: may enter a tab below its importance minimum
@@ -76,6 +86,29 @@ EXPLAINER_TITLE = re.compile(r"^(how|why|what|who|when|where|here's|inside|the [
 # Once a storyline has a card in a tab, another card of it must be this fresh (age_eff): a fresh angle may sit next
 # to the main card, a 3-day-old "targets a $1.4tn valuation" may not sit next to "the IPO lands".
 STORYLINE_SECOND_MAX_H = 24
+STORYLINE_SECOND_STRONG_H = 48
+# Traction opens a tab the way spice does: a story Techmeme headlines, Hacker News is discussing or several
+# outlets report may sit up to two importance points under a tab's minimum.
+TRACTION_PUBLISHERS = 4
+TRACTION_IMPORTANCE_GAP = 2
+TRACTION_MAX_H = 36
+# A widely shared essay or analysis may take a Top rank at this importance (it needs 8 otherwise), and a Reads
+# place whatever its publisher: "All AI-generated code should be Open Source" (HN 896, a personal blog) was in no
+# tab because Reads took only listed essay sources.
+SHARED_LABELLED_IMPORTANCE = 5
+# How a well-covered story stays up: next to the tab's own decay it has a slower tail, whose decay constant grows
+# with the number of publishers (x1.25 at 2, x1.5 at 4, x1.79 at 9, at most x2) and a Techmeme headline. With one
+# decay for all, a 9-publisher story a day old (the Starship catch) scored below every fresh single-source item
+# and sat last of Top's 30. STAY_TAIL keeps spec 2.11's property that Top's first card changes within a day: at
+# 24 h the tail of the best-covered story possible is 0.42 x e^-1.2 = 0.13, under a fresh importance-6 story.
+STAY_MAX = 2.0
+STAY_TAIL = 0.42
+WIDE_WINDOW_H = 48      # Top's window for a story with WIDE_PUBLISHERS outlets (72 h at importance 8+, 36 h otherwise)
+WIDE_PUBLISHERS = 5
+# Push alerts (notification_score): candidates need this much spice, and labelled commentary needs to be major.
+NOTIFY_MIN_SPICE = 7
+NOTIFY_LABELLED_IMPORTANCE = 8
+NOTIFY_BREAKING_H = 2
 
 
 @dataclass(frozen=True)
@@ -115,12 +148,15 @@ class Tab:
 
 
 TABS = {
-    "top": Tab("top", "Top", frozenset(TOP_TYPES), 6, 36, 10, 30),
-    "ai": Tab("ai", "AI", frozenset(TOP_TYPES + ("analysis", "opinion", "interview", "release_notes")), 5, 72, 18, 25),
-    "startups": Tab("startups", "Startups", frozenset(TOP_TYPES + ("analysis", "interview")), 5, 72, 24, 25),
-    "india": Tab("india", "India", frozenset(TOP_TYPES + ("analysis",)), 5, 72, 24, 20),
-    "dev": Tab("dev", "Dev", frozenset(TOP_TYPES + ("release_notes", "analysis", "tutorial")), 4, 7 * 24, 48, 20),
-    "reads": Tab("reads", "Reads", frozenset(("analysis", "opinion", "interview", "other")), 5, 14 * 24, 96, 15),
+    # Caps (the last number) were 30/25/25/20/20/15: the VPS test edition had 77 cards against the live feed's 235,
+    # and 80 well-covered events of the last 38 h (importance 6+, spice 7+, 2+ publishers or Techmeme) were cut.
+    # The owner asked for good stories, not fewer. Nothing is padded: the filters and the 25%-of-median floor decide.
+    "top": Tab("top", "Top", frozenset(TOP_TYPES), 6, 36, 10, 60),
+    "ai": Tab("ai", "AI", frozenset(TOP_TYPES + ("analysis", "opinion", "interview", "release_notes")), 5, 72, 18, 40),
+    "startups": Tab("startups", "Startups", frozenset(TOP_TYPES + ("analysis", "interview")), 5, 72, 24, 40),
+    "india": Tab("india", "India", frozenset(TOP_TYPES + ("analysis",)), 5, 72, 24, 30),
+    "dev": Tab("dev", "Dev", frozenset(TOP_TYPES + ("release_notes", "analysis", "tutorial")), 4, 7 * 24, 48, 30),
+    "reads": Tab("reads", "Reads", frozenset(("analysis", "opinion", "interview", "other")), 5, 14 * 24, 96, 25),
 }
 TAB_ORDER = ("top", "ai", "startups", "india", "dev", "reads")
 TUNABLE = ("min_importance", "window_h", "tau_h", "max")
@@ -166,6 +202,11 @@ class Candidate:
     title: str = ""                 # the headline the card shows (or the lead's title), for text rules
     spice: int = SPICE_NEUTRAL      # 1-10, how tap-worthy the story is (the writer's score)
     lobsters_points: int = 0
+    on_reddit: bool = False
+    github_stars: int = 0
+    # The lead is an article imported from a Hacker News or Lobsters link under the catch-all source: nobody
+    # chose the site (publish_v1.event_candidate).
+    unvetted: bool = False
     boost: float = 1.0              # editorial boost / bury multiplier
     pin: frozenset = frozenset()    # tabs this event is pinned to the head of
     data: dict = field(default_factory=dict)    # whatever publish_v1 needs later (lead row, text, members)
@@ -180,14 +221,21 @@ class Candidate:
         return max(0.0, a)
 
 
-def coverage(n_publishers, on_techmeme=False, hn_points=0, lobsters_points=0):
+def coverage(n_publishers, on_techmeme=False, hn_points=0, lobsters_points=0, on_reddit=False, github_stars=0):
     """Traction: how widely the story is covered and shared. Each platform has its own capped multiplier, so no
     single one decides the order."""
     c = min(2.2, 1 + 0.5 * math.log2(max(1, n_publishers)))
     c *= 1.25 if on_techmeme else 1
     c *= min(1.3, 1 + 0.15 * math.log2(max(1, (hn_points or 0) / 100)))
     c *= min(1.15, 1 + 0.075 * math.log2(max(1, (lobsters_points or 0) / 25)))
+    c *= 1.1 if on_reddit else 1            # among a subreddit's top posts of the day
+    c *= min(1.1, 1 + 0.05 * math.log2(max(1, (github_stars or 0) / 100)))     # stars today on GitHub trending
     return c
+
+
+def traction(c):
+    """coverage() of a candidate, with every signal it carries."""
+    return coverage(c.n_publishers, c.on_techmeme, c.hn_points, c.lobsters_points, c.on_reddit, c.github_stars)
 
 
 def spice_factor(spice):
@@ -196,10 +244,15 @@ def spice_factor(spice):
 
 
 def score(importance, n_publishers, on_techmeme, hn_points, authority, age_eff_h, tau_h, spice=SPICE_NEUTRAL,
-          lobsters_points=0):
+          lobsters_points=0, on_reddit=False, github_stars=0):
     i = (importance / 10) ** 1.5
-    return (i * spice_factor(spice) * coverage(n_publishers, on_techmeme, hn_points, lobsters_points) * authority
-            * math.exp(-age_eff_h / tau_h))
+    return (i * spice_factor(spice) * coverage(n_publishers, on_techmeme, hn_points, lobsters_points, on_reddit,
+                                               github_stars) * authority * math.exp(-age_eff_h / tau_h))
+
+
+def staying_power(c):
+    """The factor on a tab's decay constant in a well-covered story's slow tail (see STAY_MAX)."""
+    return min(STAY_MAX, 1 + 0.25 * math.log2(max(1, c.n_publishers)) + (0.15 if c.on_techmeme else 0))
 
 
 def cand_score(c, tab, now, degraded=False):
@@ -207,19 +260,67 @@ def cand_score(c, tab, now, degraded=False):
     if not c.ai_text and not degraded:
         imp = min(imp, UNWRITTEN_IMPORTANCE)
     spice = SPICE_NEUTRAL if degraded or not c.classified else c.spice
-    return score(imp, c.n_publishers, c.on_techmeme, c.hn_points, c.authority, c.age_eff(now), tab.tau_h, spice,
-                 c.lobsters_points) * c.boost
+    age = c.age_eff(now)
+    base = score(imp, c.n_publishers, c.on_techmeme, c.hn_points, c.authority, 0, tab.tau_h, spice,
+                 c.lobsters_points, c.on_reddit, c.github_stars) * c.boost
+    return base * max(math.exp(-age / tab.tau_h), STAY_TAIL * math.exp(-age / (tab.tau_h * staying_power(c))))
 
 
-def notification_score(c):
-    """Spice x importance x traction (the owner's ranking for push alerts), each on its own scale: a card needs
-    all three to lead."""
-    return (c.spice / 10) * (c.importance / 10) * coverage(c.n_publishers, c.on_techmeme, c.hn_points,
-                                                           c.lobsters_points)
+def notification_score(c, now=None):
+    """The order to push alerts in: spice x importance x traction (the owner's ranking), with spice squared and
+    recency counted when `now` is given.
+
+    Spice is squared because the alert exists to be tapped: with the three weighted alike, "Applied Digital seeks
+    guarantees" (spice 6, 2 publishers, Techmeme) ranked 4th and "ULA loses Vulcan and 40 Amazon satellites"
+    (spice 8, one publisher, an hour old) 12th. Recency halves the score over a card's first hours, and breaking
+    news (importance 6+, under 2 h old) gets a lift, since a single-source story minutes old has had no time to be
+    picked up and would otherwise always trail a morning story with three publishers."""
+    s = (c.spice / 10) ** 2 * (c.importance / 10) * traction(c)
+    if now is not None:
+        age = c.age_eff(now)
+        s *= 0.5 + 0.5 * math.exp(-age / 4)
+        if age <= NOTIFY_BREAKING_H and c.importance >= 6:
+            s *= 1.3
+    return s
+
+
+def notifiable(c):
+    """May this card be a push-alert candidate at all? Not below spice 7 (a flat alert teaches people to ignore
+    them), not commentary unless it is major, and not a site nobody vetted until a second outlet has the story."""
+    if c.spice < NOTIFY_MIN_SPICE:
+        return False
+    if c.type in LABELLED and c.importance < NOTIFY_LABELLED_IMPORTANCE:
+        return False
+    return not (c.unvetted and not corroborated(c))
 
 
 def has_traction(c):
-    return c.n_publishers >= 2 or c.on_techmeme or c.hn_points >= 100 or c.lobsters_points >= 40
+    return c.n_publishers >= 2 or c.on_techmeme or c.hn_points >= 100 or c.lobsters_points >= 40 or c.on_reddit
+
+
+def strong_traction(c):
+    """Widely covered or widely shared in its own right (see STORYLINE_CAP)."""
+    return (c.n_publishers >= STRONG_PUBLISHERS or c.on_techmeme or c.hn_points >= STRONG_HN
+            or c.lobsters_points >= STRONG_LOBSTERS)
+
+
+def widely_shared(c):
+    """What readers are passing around, whoever published it."""
+    return c.on_techmeme or c.hn_points >= STRONG_HN or c.lobsters_points >= STRONG_LOBSTERS or c.on_reddit
+
+
+def corroborated(c):
+    """A second outlet or an editor's pick stands behind the lead's report."""
+    return c.n_publishers >= 2 or c.on_techmeme
+
+
+def traction_pass(c, tab, now):
+    """A story the tech world is plainly following may sit up to two importance points under a tab's minimum
+    (see TRACTION_PUBLISHERS): Techmeme's headline of the hour scored importance 4-5 was in no tab."""
+    gap = tab.min_importance - c.importance
+    if not (c.ai_text and 0 < gap <= TRACTION_IMPORTANCE_GAP and c.age_eff(now) <= TRACTION_MAX_H):
+        return False
+    return widely_shared(c) or c.n_publishers >= TRACTION_PUBLISHERS
 
 
 def spicy_pass(c, tab, now):
@@ -237,6 +338,8 @@ def spicy_pass(c, tab, now):
 def window_h(c, tab):
     if tab.id == "top" and c.importance >= 8:
         return 72
+    if tab.id == "top" and (c.n_publishers >= WIDE_PUBLISHERS or (c.on_techmeme and c.n_publishers >= 3)):
+        return max(tab.window_h, WIDE_WINDOW_H)
     return tab.window_h
 
 
@@ -273,12 +376,19 @@ def eligible(c, tab, now, degraded=False):
         return "never_shipped"
     if not c.is_news and tab.id not in ("reads", "dev"):
         return "not_news"
-    # Top takes analysis, opinion and interview pieces only at importance >= 8.
-    if c.type not in tab.types and not (tab.id == "top" and c.type in LABELLED and c.importance >= 8):
+    # Top takes analysis, opinion and interview pieces only at importance >= 8, or from 5 when the piece itself is
+    # widely shared (a Techmeme headline, a big Hacker News thread).
+    if c.type not in tab.types and not (tab.id == "top" and c.type in LABELLED and (
+            c.importance >= 8 or (widely_shared(c) and c.ai_text and c.importance >= SHARED_LABELLED_IMPORTANCE))):
         return "type"
     if c.importance < tab.min_importance and not (tab.id == "top" and top_fresh(c, now)) \
-            and not spicy_pass(c, tab, now):
+            and not spicy_pass(c, tab, now) and not traction_pass(c, tab, now):
         return "importance"
+    # A hard-news report from a site nobody chose (imported from a Hacker News or Lobsters link) needs a second
+    # outlet or a Techmeme pick before it can take a Top rank: the fact-check reads the card against the page, not
+    # the page's reliability. An essay is its author's view and is labelled as such.
+    if tab.id == "top" and c.unvetted and c.type not in LABELLED and not corroborated(c):
+        return "unvetted"
     if tab.id == "top" and c.spice <= DRY and c.importance < DRY_TOP_IMPORTANCE:
         return "dry"
     if c.relevance < tab.min_relevance:
@@ -303,7 +413,7 @@ def eligible(c, tab, now, degraded=False):
             return "topic"
         if c.type in LABELLED and c.importance < DEV_LABELLED_MIN:
             return "importance"
-    if tab.id == "reads" and not c.lead_reads:
+    if tab.id == "reads" and not (c.lead_reads or (widely_shared(c) and c.ai_text)):
         return "not_reads"
     return None
 
@@ -347,12 +457,16 @@ def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None):
     def blocked(c, relax):
         """Why `c` can't take the next rank now (it may later), or None."""
         pub = c.lead_publisher or c.lead_source
-        cap = DIVERSITY_TAB if relax or len(out) >= 10 else DIVERSITY_TOP10
+        # 4 per publisher in a tab of up to 32 cards, an eighth of a longer one (7 of Top's 60).
+        cap = max(DIVERSITY_TAB, tab.max // 8) if relax or len(out) >= 10 else DIVERSITY_TOP10
         if per_pub.get(pub, 0) >= cap:
             return "diversity"
-        if c.storyline and per_story.get(c.storyline, 0) >= STORYLINE_CAP:
+        n_story = per_story.get(c.storyline, 0) if c.storyline else 0
+        if n_story >= STORYLINE_CAP and not (len(out) >= STORYLINE_HEAD and n_story < STORYLINE_MAX
+                                             and strong_traction(c)):
             return "storyline"
-        if c.storyline and per_story.get(c.storyline, 0) and c.age_eff(now) > STORYLINE_SECOND_MAX_H:
+        if n_story and c.age_eff(now) > (STORYLINE_SECOND_STRONG_H if strong_traction(c)
+                                         else STORYLINE_SECOND_MAX_H):
             return "storyline_stale"
         if tab.id == "dev" and c.type == "tutorial" and tutorials >= TUTORIAL_PER_10 * (1 + len(out) // 10):
             return "tutorial_cap"

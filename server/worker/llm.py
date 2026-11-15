@@ -190,8 +190,12 @@ class CircuitOpen(LLMError):
     the next tick instead of each blocking a worker thread for another timeout."""
 
 
-# Consecutive timeouts (across threads) that open the per-tick circuit. Reset by any answer and by reset_breaker().
+# Consecutive timeouts (across threads) that open the circuit. Any answer closes it. Once open it stays open for
+# BREAKER_COOLDOWN_S, across ticks: reset_breaker() at the start of a tick used to close it again, so during an
+# outage every tick paid the endpoint's full timeout before the backup model took over (60 s per item in the
+# 2026-11-15 hub-outage test). After the cooldown one call probes the endpoint; one more timeout re-opens it.
 BREAKER_TIMEOUTS = 2
+BREAKER_COOLDOWN_S = 300
 TIMEOUT_OUTCOMES = ("ReadTimeout", "ConnectTimeout", "Timeout")
 
 
@@ -218,10 +222,21 @@ class Client:
         self.events = []
         self.lock = threading.Lock()
         self.timeouts_in_row = 0
+        self.open_until = None
 
     def reset_breaker(self):
+        """Start of a tick: closes a circuit whose cooldown is over, leaving it one timeout from opening again."""
+        with self.lock:
+            if self.open_until is None:
+                self.timeouts_in_row = 0
+            elif self.clock() >= self.open_until:
+                self.timeouts_in_row = BREAKER_TIMEOUTS - 1
+                self.open_until = None
+
+    def _answered(self):
         with self.lock:
             self.timeouts_in_row = 0
+            self.open_until = None
 
     @property
     def circuit_open(self):
@@ -230,6 +245,8 @@ class Client:
     def _timed_out(self):
         with self.lock:
             self.timeouts_in_row += 1
+            if self.timeouts_in_row >= BREAKER_TIMEOUTS:
+                self.open_until = self.clock() + BREAKER_COOLDOWN_S
 
     def _event(self, kind, model, outcome, ms, tok_in=None, tok_out=None):
         with self.lock:
@@ -240,9 +257,11 @@ class Client:
             out, self.events = self.events, []
         return out
 
-    def chat(self, model, messages, max_tokens=1100, kind="write", tries=3, temperature=0.2):
+    def chat(self, model, messages, max_tokens=1100, kind="write", tries=3, temperature=0.2, params=None):
+        """`params` replaces the provider's extra request fields for this call (llm.model_params: a model that
+        rejects the provider's defaults)."""
         body = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens,
-                "response_format": {"type": "json_object"}, **self.params}
+                "response_format": {"type": "json_object"}, **(self.params if params is None else params)}
         for attempt in range(tries):
             if self.circuit_open:
                 raise CircuitOpen("circuit open after repeated timeouts")
@@ -260,7 +279,7 @@ class Client:
             except requests.RequestException as e:
                 self._event(kind, model, type(e).__name__, int((self.clock() - started) * 1000))
                 continue
-            self.reset_breaker()
+            self._answered()
             ms = int((self.clock() - started) * 1000)
             if r.status_code == 429:
                 self._event(kind, model, "http_429", ms)
@@ -306,15 +325,25 @@ class Router:
 
     A model is named "provider:model id" ("hub:openai/openai/gpt-6.1-sol"); a bare id goes to the default
     provider. When a call fails at the endpoint (timeout, 5xx, 429s, a bad key, a retired model, an open circuit)
-    and a backup model on another provider is configured, the same messages go there once: the reader-facing
-    decisions run on the hub's GPT/Gemini models, and an outage there costs quality, not the feed.
-    Calls are logged under the full "provider:model" name, so health.json shows who answered."""
+    the same messages go once to each backup model in turn: the reader-facing decisions run on the hub's
+    GPT/Gemini models, and an outage there costs quality, not the feed. A backup on the provider that just failed
+    as a whole (timed out, refused the key, circuit open) is skipped; one on the same provider is tried when only
+    the model failed (a 5xx or 429 from one vendor behind the hub).
+    Calls are logged under the full "provider:model" name, so health.json shows who answered, and every call a
+    backup answered adds a "failover" event under the model that should have: that count is the outage signal
+    (degraded.backup_state), since the backup's own calls log "ok"."""
 
-    def __init__(self, clients, default, backup=None, known=()):
-        self.clients, self.default, self.backup = dict(clients), default, backup
+    def __init__(self, clients, default, backup=None, known=(), model_params=None):
+        self.clients, self.default = dict(clients), default
+        self.backups = [b for b in (backup if isinstance(backup, (list, tuple)) else [backup]) if b]
+        self.backup = self.backups[0] if self.backups else None
         # Every configured provider, with or without a key: a model on a keyless one fails over to the backup
         # instead of being sent to the default endpoint under a name it doesn't know.
         self.known = set(known) | set(self.clients)
+        self.model_params = dict(model_params or {})
+        self.failovers = []
+        self.lock = threading.Lock()
+        self._local = threading.local()
 
     def split(self, model):
         prov, sep, name = (model or "").partition(":")
@@ -334,25 +363,61 @@ class Router:
     def circuit_open(self):
         return all(c.circuit_open for c in self.clients.values())
 
+    def provider_down(self, model):
+        """True when `model`'s provider cannot be asked now (no key, or its circuit is open)."""
+        prov, _ = self.split(model)
+        return prov not in self.clients or self.clients[prov].circuit_open
+
+    def answered_by_backup(self):
+        """Whether this thread's last chat call was answered by a backup model."""
+        return bool(getattr(self._local, "backup", False))
+
     def drain(self):
         out = []
         for prov, c in self.clients.items():
             out += [(kind, f"{prov}:{model}", *rest) for kind, model, *rest in c.drain()]
+        with self.lock:
+            out += self.failovers
+            self.failovers = []
         return out
 
-    def chat(self, model, messages, **kw):
+    def _full(self, model):
         prov, name = self.split(model)
-        try:
-            if prov not in self.clients:
-                raise LLMError(f"no key for provider {prov}")
-            return self.clients[prov].chat(name, messages, **kw)
-        except LLMError as first:
-            bprov, bname = self.split(self.backup) if self.backup else (None, None)
-            if not bname or bprov == prov or bprov not in self.clients or self.clients[bprov].circuit_open:
-                raise
-            log.info("%s failed (%s); trying %s", model, type(first).__name__, self.backup)
-            # One try: the backup is there to keep the tick moving, not to wait out a second outage.
-            return self.clients[bprov].chat(bname, messages, **{**kw, "tries": 1})
+        return f"{prov}:{name}"
+
+    def chat(self, model, messages, **kw):
+        self._local.backup = False
+        first, dead = None, set()
+        chain = [model] + [b for b in self.backups if self._full(b) != self._full(model)]
+        for i, m in enumerate(chain):
+            prov, name = self.split(m)
+            client = self.clients.get(prov)
+            if prov in dead or (i and (client is None or client.circuit_open)):
+                continue
+            try:
+                if client is None:
+                    raise LLMError(f"no key for provider {prov}")
+                call = dict(kw)
+                if i:
+                    # One try: a backup is there to keep the tick moving, not to wait out a second outage.
+                    call["tries"] = 1
+                if self._full(m) in self.model_params:
+                    call["params"] = self.model_params[self._full(m)]
+                out = client.chat(name, messages, **call)
+            except LLMError as e:
+                first = first or e
+                if client is None or client.circuit_open or isinstance(e, AuthError) or str(e) == "timeout":
+                    dead.add(prov)
+                if i + 1 < len(chain):
+                    # Debug only: in an outage this is every call. The failover count is in health.json.
+                    log.debug("%s failed (%s); trying the next backup", m, type(e).__name__)
+                continue
+            if i:
+                self._local.backup = True
+                with self.lock:
+                    self.failovers.append((kw.get("kind", "write"), self._full(model), "failover", 0, None, None))
+            return out
+        raise first
 
 
 def make_router(cfg, keys=api_key):
@@ -375,7 +440,8 @@ def make_router(cfg, keys=api_key):
     default = llm_cfg.get("default_provider")
     if default not in clients:
         default = "nvidia" if "nvidia" in clients else next(iter(clients))
-    return Router(clients, default, llm_cfg.get("backup_model"), known=providers)
+    backups = llm_cfg.get("backup_models") or llm_cfg.get("backup_model")
+    return Router(clients, default, backups, known=providers, model_params=llm_cfg.get("model_params"))
 
 
 def role_model(cfg, role):
@@ -460,11 +526,22 @@ quality", "here is what happened").
 - Also give other lengths, same facts, still complete sentences: headline_alt (at most 55 characters) and \
 headline_short (at most 40 characters); s1_alt, s2_alt, s3_alt (11 to 14 words each). Techgist picks the versions \
 that fit the card.
-- notif_title: the push alert's title, at most 40 characters: who or what, and the gist ("Nvidia CEO ousted", \
-"Meta fined 805M euros").
+- notif_title: the push alert's title, at most 40 characters: who or what, and what happened ("Nvidia CEO \
+ousted", "Meta fined 805M euros"). Never only a name ("Gary Marcus", "Nvidia"): it must say what happened.
 - notif_line: the push alert's body, one sentence of at most 110 characters, written to be tapped: the single \
 most striking concrete fact of the story (a name, a number, a quoted word), worded differently from the \
-headline. Every accuracy rule below applies to it. Not a question and not a teaser.
+headline. Every accuracy rule below applies to it. Not a question and not a teaser. A flat line restates the \
+topic; a good one hands over the detail a friend would repeat. Examples of the difference (invented stories):
+  flat "Varnet is seeking guarantees from its tenants."  ->  good "Varnet wants its tenants, Orbitly among \
+them, to guarantee $4B of its power bills."
+  flat "A rocket failed after launch on Sunday."  ->  good "Kestrel's rocket broke up 4 minutes after liftoff, \
+taking 40 Novacloud satellites with it."
+  flat "The CEO commented on remote work in a memo."  ->  good "'Tourists': that is what Novacloud's CEO calls \
+remote staff in a leaked memo."
+- A short text (under 150 words: a teaser, a paywall's opening, a blurb): write the headline, s1 and s2 from \
+its facts and leave s3 and s3_alt empty. Every sentence states a fact about the story itself; never fill a \
+sentence with scene-setting or colour (what hung on a wall, where the writer was sitting, how someone felt, an \
+app-store ranking that is not the news).
 Length example only (its facts are invented; never reuse them):
 {"headline": "Acme fires CEO Dana Ruiz a week after its $40M raise",
  "headline_alt": "Acme fires CEO a week after $40M raise",
@@ -545,6 +622,10 @@ def build_messages(item, source_name, text, attribution=None, candidates=()):
 
 # Room for the card JSON plus a reasoning model's short thinking (the hub's GPT models count it against the limit).
 WRITE_TOKENS = 2200
+# Under this many words of text a card is two sentences, not three. A third sentence written from a paywall's
+# 80-word teaser or a podcast blurb was colour, not information ("Framed art by rock legends John Lennon and David
+# Bowie hung on the wall"; "he describes himself as grouchy").
+SHORT_TEXT_WORDS = 150
 
 
 @dataclass
@@ -567,6 +648,22 @@ class WriteResult:
     passed_at: int = None               # rung that passed: 1, 2 or 3
     model: str = None
     steps: list = field(default_factory=list)
+    # A backup model answered a write or fact-check call of this run (the primary's endpoint was failing).
+    by_backup: bool = False
+
+
+# Extra feedback retries for a card being written by a backup model (write_item).
+BACKUP_EXTRA_RUNGS = 1
+
+
+def _primary_down(client, model):
+    fn = getattr(client, "provider_down", None)
+    return bool(fn and fn(model))
+
+
+def _by_backup(client):
+    fn = getattr(client, "answered_by_backup", None)
+    return bool(fn and fn())
 
 
 def write_item(client, cfg, item, source_name, text, attribution=None, author=None, candidates=(), prior=None):
@@ -582,12 +679,23 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
         rungs.append((3, llm_cfg["fallback_model"]))
     base = build_messages(item, source_name, text.text, attribution, candidates)
     feedback, last_reply, last_out, steps = [], None, None, []
+    by_backup = False
     continued = bool(prior and prior[0] and prior[1])
     if continued:
         last_reply, feedback = prior[0], list(prior[1])
     hedge_scope = validate.hedge_scope(item["title"], text.lead() or text.text)
     gone = set()
-    for rung, model in rungs:
+    extra_rungs = BACKUP_EXTRA_RUNGS
+    i = -1
+    while i + 1 < len(rungs):
+        i += 1
+        rung, model = rungs[i]
+        # A backup model needs more tries to pass the same checks (the 2026-11-15 replay with the hub taken away:
+        # half its failures were a second "ungrounded" after fixing the first). While a backup is answering, a
+        # failed feedback retry gets one more, with the latest feedback; the checks themselves do not change.
+        if i == len(rungs) - 1 and rung == 2 and extra_rungs and (by_backup or _primary_down(client, model)):
+            extra_rungs -= 1
+            rungs.append((2, model))
         if model in gone:
             continue
         messages = list(base)
@@ -601,7 +709,10 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
             # A hold retry continues the last run: its first call is already a feedback turn, its second warmer still.
             temperature = (0.2 if rung == 3 else {1: 0.5, 2: 0.7}[rung] if continued
                            else 0.5 if rung == 2 else 0.2)
+            if i >= 2 and rung == 2:
+                temperature = 0.7       # the extra retry on a backup model
             reply = client.chat(model, messages, kind="write", temperature=temperature, max_tokens=WRITE_TOKENS)
+            by_backup = by_backup or _by_backup(client)
         except ModelGone:
             gone.add(model)
             steps.append(Step(rung, model, "llm_error", "model_gone"))
@@ -621,7 +732,8 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
         attribution_mod.apply(out, attribution, item["url"], item["title"])
         validate.select(out, attribution, hedge_source=hedge_scope)
         last_out = out
-        v = validate.check(out, text.text, item["title"], source_name, attribution, author, text.lead())
+        v = validate.check(out, text.text, item["title"], source_name, attribution, author, text.lead(),
+                           short_card=text.words < SHORT_TEXT_WORDS)
         if not v.ok:
             feedback = v.feedback
             steps.append(Step(rung, model, "invalid", v.reason, feedback))
@@ -633,6 +745,7 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
                                  entail.context(out, text, attribution), out.headline, out.s1, out.s2,
                                  out.s3 if v.full != v.short else "", out.notif_title, out.notif_line,
                                  source_name)
+                by_backup = by_backup or _by_backup(client)
             except (AuthError, CircuitOpen):
                 raise
             except (LLMError, ValueError) as err:
@@ -644,12 +757,12 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
                 continue
             entailed = True
         steps.append(Step(rung, model, "ok"))
-        return WriteResult("ok", out, v.full, v.short, None, entailed, rung, model, steps)
+        return WriteResult("ok", out, v.full, v.short, None, entailed, rung, model, steps, by_backup=by_backup)
     # The classification of a failed write is still kept (type, relevance...), but never its text.
     content = [s for s in steps if s.outcome in ("invalid", "entail_fail")]
     if content:
         # A timeout on the feedback retry doesn't hide that the text failed validation first.
-        return WriteResult("failed", output=last_out, reason=content[-1].reason, steps=steps)
+        return WriteResult("failed", output=last_out, reason=content[-1].reason, steps=steps, by_backup=by_backup)
     if steps and all(s.outcome == "llm_error" for s in steps):
         # The endpoint failed, not the text: transient, held, and kept out of the validation pass rate.
         return WriteResult("llm_error", output=last_out, reason="llm_error", steps=steps)
@@ -752,6 +865,11 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
             db.log_write(now, None, kind, model, outcome, None, ms, tok_in=tok_in, tok_out=tok_out)
         db.commit()
         return stats
+    # Items the tech world is already passing around (a Techmeme pick, a Hacker News or Lobsters link past the
+    # import bar): a failed or text-less one is retried within minutes, not at +30 min and +2 h.
+    techmeme_urls = _techmeme_linked(db)
+    hot = {r["url_canonical"] for r in rows
+           if r["url_canonical"] in techmeme_urls or json.loads(r["extra"] or "{}").get("via")}
     triaged = {r["url_canonical"] for r in db.q("SELECT url_canonical FROM writes WHERE status = 'thin'")}
     # A thin item can only ever join an event, and its event often didn't exist yet at its first triage. So a retry
     # of a thin item that is still in no event asks again when there are candidates now (one call, no writing).
@@ -829,8 +947,16 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
             stats["written"] += 1
             stats[f"passed_at_{result.passed_at}"] += 1
             db.log_write(now, url, "item", result.model, "ok", None, attempt=attempt)
+        elif result.status == "failed" and result.by_backup:
+            # The card failed on a backup model while the writer's or fact-checker's endpoint was out. That says
+            # little about the card: it waits for the primary without using up its retries (it used to be held,
+            # retried on the backup again, and dropped). Counted apart from the validation pass rate; a run of
+            # these is what turns an outage into a degraded edition (degraded.backup_state).
+            db.hold(url, BACKUP_FAILED, now)
+            stats["backup_failed"] += 1
+            db.log_write(now, url, "item", result.model, BACKUP_FAILED, result.reason, attempt=attempt)
         else:
-            outcome = db.hold(url, result.reason or "no_text", now)
+            outcome = db.hold(url, result.reason or "no_text", now, hot=url in hot)
             stats[outcome] += 1
             logged = "thin" if result.status.startswith("thin") else result.status
             stats[logged] += 1
@@ -842,6 +968,111 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
         stats["auth_failed"] += 1
     db.commit()
     return stats
+
+
+BACKUP_FAILED = "backup_failed"
+
+
+# Briefs: a short attributed card for a story with traction and no full text (cluster.brief_due)
+
+BRIEF_PROMPT = """A story is breaking and only short reports of it are available: paywalled outlets' headlines \
+and opening lines, and Techmeme's summary of the report. Write a short card from these LINES and nothing else.
+
+Return this JSON object:
+{"spice": 1-10, "headline": "...", "headline_alt": "...", "headline_short": "...", "s1": "...", "s2": "...",
+ "notif_title": "...", "notif_line": "..."}
+
+- spice: <<spice>>
+- headline: 50 to 70 characters, leading with the most striking fact in the LINES. Sentence case, numbers as \
+digits, no question, no teaser, no final period. It says whose reporting this is: start with "Report:" or name \
+the outlet ("FT: ...", "..., Bloomberg reports"). headline_alt: the same in at most 55 characters. \
+headline_short: at most 40 characters.
+- s1 (12 to 24 words): the next fact in the LINES after the headline, naming the outlet that reports it.
+- s2 (8 to 22 words): one more fact stated in the LINES; an empty string when they hold no further fact. Never \
+pad, never explain what the story means, never add background from memory.
+- notif_title: at most 40 characters: who or what, and what happened; never only a name.
+- notif_line: one sentence of at most 110 characters written to be tapped: the most striking concrete fact in \
+the LINES, worded differently from the headline. Not a question, not a teaser.
+- Accuracy: use only facts in the LINES; names, numbers and wording as given. Tense and certainty as given: \
+what is discussed, planned, expected or sought stays that way. Keep hedges and sourcing ("sources say", \
+"reportedly", "according to"). Allegations are written as allegations with who makes them. Never add a cause, \
+motive, superlative or consequence. Plain text, no first person, never "the article" or "the lines".
+
+LINES
+<<lines>>"""
+BRIEF_PROMPT = BRIEF_PROMPT.replace("<<spice>>", "see the scale below")
+
+
+def brief_event(client, cfg, store, ev):
+    """One call (plus one feedback retry) that writes a brief for an event with traction and no full text, from
+    the lines available (cluster.brief_lines), checked by the same deterministic rules as any card and
+    fact-checked against those lines only. Returns True when the event got a card.
+
+    The card names whose reporting it is, links to the best-placed outlet (the event's lead) and is replaced by
+    a member's own validated card as soon as an open outlet reports the story (cluster.refresh)."""
+    from . import cluster
+    row, now = ev.row, store.now
+    lead = next((m for m in ev.members if m.url == row.get("lead_url")), None)
+    lines = cluster.brief_lines(store, ev)
+    if lead is None or not lines:
+        return False
+    row["rewritten_at"] = cluster.iso(now)
+    row["rewrite_publishers"] = row.get("publishers")
+    outlets = [name for name, _, _ in lines]
+    block = "\n".join(f"{name.upper()}: {title}" + (f" | {text}" if text else "") for name, title, text in lines)
+    source_text = "\n".join(f"{name}: {title}. {text}" for name, title, text in lines)
+    base = [{"role": "system", "content": SYSTEM},
+            {"role": "user", "content": entail.fill(BRIEF_PROMPT, lines=block) + "\n\nSpice scale: " + SPICE}]
+    model = role_model(cfg, "write")
+    feedback, reply = None, None
+    for attempt in range(2):
+        messages = list(base)
+        if feedback:
+            messages += [{"role": "assistant", "content": reply},
+                         {"role": "user", "content": "Your answer failed these checks:\n- " + "\n- ".join(feedback)
+                          + "\nFix them and reply with the whole JSON object again."}]
+        try:
+            reply = client.chat(model, messages, kind="brief", temperature=0.5 if attempt else 0.2,
+                                max_tokens=WRITE_TOKENS)
+            data = json.loads(re.search(r"\{.*\}", reply or "", re.S).group(0))
+            out = WriteOutput.model_validate({
+                "is_news": lead.is_news, "type": lead.type, "relevance": lead.relevance, "region": lead.region,
+                "topics": lead.topics, "importance": lead.importance, "s2": "",
+                **{k: v for k, v in data.items() if k in ("spice", "headline", "headline_alt", "headline_short",
+                                                          "s1", "s2", "notif_line", "notif_title") and v}})
+        except AuthError:
+            raise
+        except (LLMError, AttributeError, ValueError, ValidationError) as e:
+            log.info("brief %s: %s", ev.id, type(e).__name__)
+            return False
+        if out.s2 == ".":
+            out.s2 = ""
+        heads = [h for h in (out.headline, out.headline_alt) if h and not validate.headline_problems(h)]
+        out.headline = heads[0] if heads else out.headline
+        if not 0 < len(out.notif_title) <= validate.NOTIF_TITLE_MAX or validate.name_only(out.notif_title):
+            short = out.headline_short
+            out.notif_title = short if 0 < len(short) <= validate.NOTIF_TITLE_MAX else ""
+        v = validate.check(out, source_text, lead.title, lead.publisher or "", None, None, source_text,
+                           brief=True, outlets=outlets)
+        if not v.ok:
+            feedback = v.feedback
+            continue
+        try:
+            e = entail.check(client, role_model(cfg, "judge"), lead.title, block, out.headline, out.s1, out.s2,
+                             "", out.notif_title, out.notif_line, outlets[0])
+        except AuthError:
+            raise
+        except (LLMError, ValueError):
+            return False
+        if not e.ok:
+            feedback = [e.feedback()]
+            continue
+        row["rewrite_spice"] = out.spice
+        cluster._set_text(row, out.headline, v.full, v.short, out.notif_line, out.s1, 1, cluster.BRIEF, now,
+                          out.notif_title)
+        log.info("brief written for %s from %d lines: %s", ev.id, len(lines), out.headline)
+        return True
+    return False
 
 
 # Event rewrite (spec 2.9 "Event text")
@@ -891,17 +1122,24 @@ $25-100M round (>= $15M in India), a regulator's formal move, a mid-size acquisi
 5 a smaller launch or round, a policy proposal, a notable open source release, a new claim in a running story. \
 4 a routine update, a small round, a partnership, strong analysis. 3 release notes, minor features, local \
 events. 1-2 how-to, reviews, explainers, promos.
-  Follow-ups: when the story is already a candidate event below, or the article is a reaction, explainer, live \
-blog, profile or colour piece on a known story, score only the new fact it adds (usually 4-6). 8 or more only \
-for a new major development (a resignation, a ruling, a new deal).
+  A running story: a new development is scored as the news it is, on the scale above, whether or not the \
+story is already a candidate event below. A government or minister acting on or publicly pressing a top \
+company, a board or major investors moving, a probe opening, a ruling, a resignation or a comeback bid in a \
+top company's crisis are 7 or 8, not 5. A reaction, explainer, live blog, profile, market wrap or colour piece \
+on a known story is 4 to 5.
   Calibration examples (invented stories, for the scale only):
   "Orbitly files for IPO targeting a $900B valuation, the largest tech listing ever" = 10, news
   "Kestrel AI releases Kestrel 5, topping every major coding and reasoning benchmark" = 9, launch
+  "Orbitly CEO resigns after the board learns of an undisclosed relationship with a supplier" = 9, news
   "Hackers steal 80 million customer records from telecom giant Varnet" = 8, security_incident
+  "Finance minister publicly urges Orbitly's board to pick an outsider as its next CEO" = 8, policy
+  "Ousted Orbitly CEO has discussed a comeback with allies, sources say" = 7, news
+  "Prosecutors open a probe into Varnet's chip sales to a sanctioned buyer" = 7, policy
+  "Orbitly supplier opens an internal probe after reports on its chip orders" = 6, news
   "Novacloud beats on revenue and lifts full-year guidance" = 7, earnings
   "Regulator sues Varnet over hidden fees charged to 12 million customers" = 7, policy
   "Brightloop co-founder and CTO quits to start a rival" = 7, news
-  "Orbitly shares fall 6% a day after its CEO's exit" (a follow-up with a new fact) = 6, news
+  "Orbitly shares fall 6% a day after its CEO's exit" (a market reaction) = 5, news
   "Brightloop raises $80M Series B for warehouse robots" = 6, funding
   "Zentra releases a 1T-parameter open model for coding agents" = 6, launch
   "Markets regulator to issue rules for AI use by stock brokers" = 5, policy
@@ -1046,9 +1284,13 @@ firings and resignations, lawsuits, scandals, leaks, layoffs, big money (IPOs, v
 outages and hacks, bans and government fights, culture-war and viral moments involving tech companies or people, \
 and creators, gaming, crypto, space, EVs, gadgets and science when the story is big or surprising.
 
+A tech person or company in a culture moment counts as a tech angle: a comedy sketch, talk show, film, meme or \
+celebrity story about tech founders or products is kept ("SNL gathers all the tech tycoons for a lesson in \
+dating and spycraft" is a keep).
+
 For each numbered item decide whether a writer should spend time on it. DROP only when you are sure:
-- "offtopic": no tech company, tech person or technology in it (general politics, sport, lifestyle, personal \
-finance, celebrity, crime or business news with no tech angle).
+- "offtopic": no tech company, tech person or technology in it at all (general politics, sport, lifestyle, \
+personal finance, celebrity, crime or business news that names no tech company, founder, executive or product).
 - "shopping": deals, buying guides, product comparisons, reviews, how-tos, listicles, horoscopes, quizzes.
 - "dull": routine items nobody would tap: minor version bumps, award or event announcements, sponsored or \
 press-release fluff, generic market wraps, small local items.

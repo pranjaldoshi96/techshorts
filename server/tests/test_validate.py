@@ -548,7 +548,8 @@ def test_held_item_is_written_when_text_arrives():
     assert stats["written"] == 1 and db.item(item["url_canonical"])["status"] == "written"
     w = db.write_row(item["url_canonical"])
     assert w["status"] == "ok" and w["headline"] == DAYLIGHT["headline"]
-    assert 45 <= validate.word_count(w["summary"]) <= 62 and 28 <= validate.word_count(w["summary_short"]) <= 42
+    # The fixture text is under llm.SHORT_TEXT_WORDS, so the card is two sentences (S1 + S2), not three.
+    assert w["summary"] == w["summary_short"] and 28 <= validate.word_count(w["summary"]) <= 42 and not w["s3"]
 
 
 def test_failed_ladder_holds_instead_of_skipping():

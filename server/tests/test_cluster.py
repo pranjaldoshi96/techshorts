@@ -351,7 +351,8 @@ def M(pub, tier1=True, type="news", imp=9, topics=("ai",), amounts=()):
 
 
 @pytest.mark.parametrize("members,kw,expected,clamps", [
-    ([M("a")], {}, 6, ["single_source"]),
+    ([M("a")], {}, 7, ["single_source"]),               # a tier-1 outlet's own report may be a 7
+    ([M("a", tier1=False)], {}, 6, ["single_source"]),
     ([M("a"), M("b")], {}, 9, []),
     ([M("a")], {"on_techmeme": True}, 9, []),           # 1 tier-1 + Techmeme is corroboration (clamp 3)
     ([M("a")], {"hn_points": 150}, 7, ["no_tier1_corroboration"]),
@@ -364,7 +365,21 @@ def M(pub, tier1=True, type="news", imp=9, topics=("ai",), amounts=()):
     # The floor needs clamp 3's corroboration: one tier-1 alone doesn't get it.
     ([M("a", type="funding", imp=6, amounts=["$2B"]), M("b", tier1=False, type="funding", imp=6)],
      {"event_type": "funding"}, 6, []),
-    ([M("a", imp=7, topics=("consumer", "hardware"))], {}, 5, ["single_source", "gadget"]),
+    ([M("a", imp=7, topics=("consumer", "hardware"))], {}, 5, ["gadget"]),
+    # Coverage is evidence the writer cannot see: "Bessent urges Nvidia to pick an outsider" (9 publishers,
+    # Techmeme) and "Megaspeed opens internal probe" (8 publishers, Techmeme) were scored 5.
+    ([M(c, imp=5) for c in "abcde"], {}, 7, ["wide_coverage"]),
+    ([M(c, imp=5) for c in "abc"], {"on_techmeme": True}, 7, ["wide_coverage"]),
+    ([M(c, imp=5) for c in "abc"], {}, 6, ["coverage"]),
+    ([M(c, imp=4) for c in "ab"], {"on_techmeme": True}, 6, ["coverage"]),
+    ([M(c, imp=5) for c in "ab"], {}, 5, []),
+    # Commentary is not lifted by coverage, and a how-to never is.
+    ([M(c, type="analysis", imp=4) for c in "abcde"], {"event_type": "analysis"}, 4, []),
+    # What Hacker News is discussing: "All AI-generated code should be Open Source" (896 points) was a 3.
+    ([M("a", type="opinion", imp=3, tier1=False)], {"event_type": "opinion", "hn_points": 896}, 6, ["widely_shared"]),
+    ([M("a", type="analysis", imp=3, tier1=False)], {"event_type": "analysis", "hn_points": 309}, 5,
+     ["widely_shared"]),
+    ([M("a", type="tutorial", imp=3, tier1=False)], {"event_type": "tutorial", "hn_points": 900}, 3, []),
 ])
 def test_importance_clamps(members, kw, expected, clamps):
     kw = dict(kw)

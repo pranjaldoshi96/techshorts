@@ -148,3 +148,104 @@ def test_a_source_can_seed_further_back_than_36_hours():
                         "feed_published_at": NOW - timedelta(days=age), "status": st})
     assert reseed.reseed(db, SRCS, cfg, NOW) == {"infoq": 2, "stratechery": 1}
     assert [db.item(f"https://x.test/{i}")["status"] for i in range(5)] == ["new", "new", "seen", "new", "written"]
+
+
+# The review of the second VPS test run (2026-11-15)
+
+def test_an_editors_pick_overrules_the_category_filter_and_the_screening_call():
+    """Semafor's "Under pressure, Lutnick joins Trump in China" was dropped by rule source_tags while Techmeme
+    headlined it; TechCrunch's "SNL gathers all the tech tycoons" was dropped triage_offtopic."""
+    db = _db()
+    semafor = _source("semafor")
+    url = "https://www.semafor.com/article/11/15/2026/lutnick-joins-trump-in-china"
+    tm = "https://www.techmeme.com/261115/p11"
+    db.insert_item({"url_canonical": tm, "url": tm, "source_id": "techmeme",
+                    "title": "Under pressure, Lutnick joins Trump in China (Semafor)", "extra": {"linked_url": url},
+                    "first_seen_at": NOW, "published_at": NOW, "feed_published_at": NOW, "status": "signal"})
+    picked = fetch.Entry(url=url, url_canonical=url, title="Under pressure, Lutnick joins Trump in China",
+                         feed_published_at=NOW, tags=("Politics",))
+    other = fetch.Entry(url=url + "-2", url_canonical=url + "-2", title="A politics story nobody picked",
+                        feed_published_at=NOW, tags=("Politics",))
+    fetch.ingest(db, semafor, SRCS, [picked, other], NOW, False, CFG)
+    assert db.item(url)["status"] == "new" and db.item(url + "-2")["drop_rule"] == "source_tags"
+    # Dropped first, picked later: the pick revives it, and it skips the screening call.
+    snl = "https://techcrunch.com/2026/11/15/snl-gathers-all-the-tech-tycoons/"
+    db.insert_item({"url_canonical": snl, "url": snl, "source_id": "techcrunch", "first_seen_at": NOW,
+                    "title": "SNL gathers all the tech tycoons for a lesson in dating and spycraft",
+                    "published_at": NOW, "feed_published_at": NOW, "status": "dropped",
+                    "drop_rule": "triage_offtopic"})
+    tm2 = "https://www.techmeme.com/261115/p16"
+    db.insert_item({"url_canonical": tm2, "url": tm2, "source_id": "techmeme", "extra": {"linked_url": snl},
+                    "title": "SNL gathers the tech tycoons (TechCrunch)", "first_seen_at": NOW, "published_at": NOW,
+                    "feed_published_at": NOW, "status": "signal"})
+    assert fetch.promote_signals(db, SRCS, {}, NOW) == 1
+    row = db.item(snl)
+    assert row["status"] == "new" and row["drop_rule"] is None and row["triaged"] == 1
+    assert json.loads(row["extra"])["via"] == "techmeme"
+    # A shopping or roundup drop is a rule about the item, not the topic: it stays dropped.
+    deal = "https://techcrunch.com/2026/11/15/deal/"
+    db.insert_item({"url_canonical": deal, "url": deal, "source_id": "techcrunch", "first_seen_at": NOW,
+                    "title": "A deal", "published_at": NOW, "status": "dropped", "drop_rule": "title_shopping"})
+    tm3 = "https://www.techmeme.com/261115/p17"
+    db.insert_item({"url_canonical": tm3, "url": tm3, "source_id": "techmeme", "extra": {"linked_url": deal},
+                    "title": "A deal (TechCrunch)", "first_seen_at": NOW, "published_at": NOW, "status": "signal"})
+    assert fetch.promote_signals(db, SRCS, {}, NOW) == 0 and db.item(deal)["status"] == "dropped"
+
+
+REDDIT = b"""<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom">
+<entry><title>ULA loses Vulcan rocket and 40 Amazon satellites</title>
+<link href="https://www.reddit.com/r/technology/comments/abc/ula_loses_vulcan/"/><updated>2026-11-15T16:00:00+00:00</updated>
+<content type="html">&lt;a href="https://www.reddit.com/user/x"&gt; /u/x &lt;/a&gt; &lt;span&gt;&lt;a href="https://spaceflightnow.com/2026/11/15/vulcan/?utm_source=reddit"&gt;[link]&lt;/a&gt;&lt;/span&gt; &lt;span&gt;&lt;a href="https://www.reddit.com/r/technology/comments/abc/ula_loses_vulcan/"&gt;[comments]&lt;/a&gt;&lt;/span&gt;</content></entry>
+<entry><title>A text post</title><link href="https://www.reddit.com/r/technology/comments/def/a_text_post/"/>
+<updated>2026-11-15T15:00:00+00:00</updated>
+<content type="html">&lt;span&gt;&lt;a href="https://www.reddit.com/r/technology/comments/def/a_text_post/"&gt;[link]&lt;/a&gt;&lt;/span&gt;</content></entry>
+</feed>"""
+TRENDING = b"""<html><body><article class="Box-row"><h2 class="h3 lh-condensed">
+<a href="/acme/kestrel" class="Link"> acme / kestrel </a></h2>
+<p class="col-9 color-fg-muted my-1 pr-4"> A coding agent that runs in your terminal </p>
+<span class="d-inline-block float-sm-right"> 1,234 stars today </span></article>
+<article class="Box-row"><h2 class="h3"><a href="/x/y">x / y</a></h2></article></body></html>"""
+
+
+def test_reddit_and_github_trending_are_traction_signals_and_never_cards():
+    """sources.yaml had no Reddit or GitHub trending signal: the engine saw only Techmeme, Mediagazer, Hacker News
+    and Lobsters."""
+    reddit, trending = _source("reddit_technology"), _source("github_trending")
+    assert reddit.is_signal and reddit.kind == "reddit" and trending.kind == "github"
+    entries, feed = fetch.parse_entries(REDDIT, reddit, 100)
+    assert not feed.bozo and len(entries) == 2
+    link = next(e for e in entries if e.title.startswith("ULA"))
+    assert link.extra == {"linked_url": "https://spaceflightnow.com/2026/11/15/vulcan/"}
+    assert next(e for e in entries if e.title == "A text post").extra == {}
+    repos, feed = fetch.parse_entries(TRENDING, trending, 100)
+    assert not feed.bozo and [(e.url, e.title, e.extra) for e in repos] == [
+        ("https://github.com/acme/kestrel", "acme/kestrel: A coding agent that runs in your terminal",
+         {"points": 1234}), ("https://github.com/x/y", "x/y", {"points": 0})]
+    assert fetch.parse_entries(b"<html>changed</html>", trending, 100)[1].bozo
+    # First poll: the trending page has no dates, and its entries are current (not "seen before the first poll").
+    db = _db()
+    fetch.ingest(db, trending, SRCS, repos, NOW, True, CFG)
+    fetch.ingest(db, reddit, SRCS, entries, NOW, False, CFG)
+    assert db.item("https://github.com/acme/kestrel")["status"] == "signal"
+    assert fetch.promote_signals(db, SRCS, {}, NOW) == 0            # neither is imported as an article
+    # The Reddit post attaches to the event of the article it links, and the event's traction counts it.
+    report = _item("https://spaceflightnow.com/2026/11/15/vulcan/", [1, 0, 0], "ULA loses Vulcan rocket",
+                   source_id="spaceflightnow", people=())
+    store = cluster.Store(db, SRCS, S, NOW)
+    eid, _ = cluster.create(store, report)
+    assert cluster.attach_signals(store) == 1
+    cluster.refresh(store, store.events[eid], lambda s: True)
+    assert json.loads(store.events[eid].row["social"]) == {"reddit": 1}
+
+
+def test_outlets_that_break_news_are_polled_every_three_minutes():
+    """21 feeds polled at 3m and 104 at the default 10m: Engadget items were seen 14-22 min after publication."""
+    by_id = SRCS.by_id()
+    for sid in ("ft", "fortune", "nypost_business", "gizmodo", "spaceflightnow", "livemint_companies", "et_startups",
+                "engadget", "axios", "bleeping", "decoder"):
+        assert by_id[sid].poll == "3m", sid
+    assert sum(s.poll == "3m" and not s.is_signal for s in SRCS.sources) >= 55
+    assert by_id["stratechery"].poll == "10m" and by_id["rust_blog"].poll == "10m"
+    # More open feeds for the Dev and Startups tabs.
+    for sid in ("geekwire", "siliconangle", "tc_startups", "infoworld", "sdtimes", "jetbrains"):
+        assert sid in by_id

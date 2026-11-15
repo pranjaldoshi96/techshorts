@@ -148,10 +148,12 @@ def test_one_card_for_the_ipo(replayed, edition):
 
 
 def test_event_age_is_from_event_published_at(edition):
-    """Freshness is judged from event_published_at, the earliest member's publisher time, never the worker's clock."""
+    """Freshness is judged from event_published_at, the publisher's time of the event's first hard-news report
+    (cluster.refresh: a profile or explainer that joined does not move the clock back), never the worker's clock."""
     for ranked in edition[3].values():
         for c, _ in ranked:
-            assert c.published_at == min(tc.from_iso(m["published_at"]) for m in c.data["members"])
+            hard = [m for m in c.data["members"] if m["type"] in rank.TOP_TYPES and m["status"] != "thin"]
+            assert c.published_at == min(tc.from_iso(m["published_at"]) for m in hard or c.data["members"])
 
 
 def test_windows_at_publish_time(replayed, edition):

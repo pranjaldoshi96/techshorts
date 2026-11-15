@@ -7,6 +7,10 @@ LLM stage tries it once more, continuing from its stored answer and feedback, an
 
 Run from server/ against a test copy's state only:
   TECHGIST_STATE=~/.techshorts-r1 python3 -m tools.requeue --hours 12 [--all-tiers] [--dry-run]
+  --no-text   only the items dropped for having too little text (paywalled feeds), with a fresh set of retries:
+              for after the change that lets such an item start an event and get a brief (cluster.thin_can_seed).
+              A thin item's retry costs no LLM call, and one more failed retry would otherwise drop it before
+              clustering sees it.
 """
 import argparse
 import os
@@ -19,15 +23,18 @@ from worker import config, sources as sources_mod  # noqa: E402
 from worker.db import DB, iso, utcnow  # noqa: E402
 
 
-def requeue(db, srcs, now, hours, all_tiers=False):
+def requeue(db, srcs, now, hours, all_tiers=False, no_text=False):
     """[(url_canonical, source_id, drop_rule, title)] re-queued."""
     tier1 = {s.id for s in srcs.sources if s.tier == 1}
     rows = db.q("SELECT url_canonical, source_id, drop_rule, title FROM items WHERE status = 'dropped'"
                 " AND drop_rule LIKE 'held_out:%' AND published_at >= ?", iso(now - timedelta(hours=hours)))
-    picked = [r for r in rows if all_tiers or r["source_id"] in tier1]
+    picked = [r for r in rows if (all_tiers or r["source_id"] in tier1)
+              and (not no_text or r["drop_rule"] == "held_out:no_text")]
     for r in picked:
         db.conn.execute("UPDATE items SET status = 'held', retry_at = ?, drop_rule = NULL WHERE url_canonical = ?",
                         (iso(now), r["url_canonical"]))
+        if no_text:
+            db.conn.execute("UPDATE items SET attempts = 0 WHERE url_canonical = ?", (r["url_canonical"],))
     db.commit()
     return [(r["url_canonical"], r["source_id"], r["drop_rule"], r["title"]) for r in picked]
 
@@ -37,6 +44,7 @@ def main():
     ap.add_argument("--hours", type=float, default=12)
     ap.add_argument("--all-tiers", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--no-text", action="store_true")
     args = ap.parse_args()
     cfg = config.load()
     if os.path.realpath(os.path.expanduser(cfg["state_dir"])) == os.path.realpath(os.path.expanduser("~/.techshorts")):
@@ -46,7 +54,7 @@ def main():
     srcs = sources_mod.load()
     if args.dry_run:
         db.commit = lambda: db.conn.rollback()
-    for url, sid, rule, title in requeue(db, srcs, utcnow(), args.hours, args.all_tiers):
+    for url, sid, rule, title in requeue(db, srcs, utcnow(), args.hours, args.all_tiers, args.no_text):
         print(f"{sid:12} {rule:28} {(title or '')[:70]}")
 
 

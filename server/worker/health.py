@@ -214,23 +214,46 @@ def freshness(db, since):
     saw it (a Reads item after downtime) counts in the first only for what it is: old."""
     # A twin (the same story as an event that already shipped) isn't a first ship; it is merged away now (cluster.
     # merge_twins), but older rows still count it 1-2 days late.
-    rows = db.q("SELECT published_at, first_at, first_seen_at FROM shipped WHERE first_at >= ?"
-                " AND event_id NOT IN (SELECT twin_id FROM twins)", iso(since))
+    rows = db.q("SELECT s.published_at, s.first_at, s.first_seen_at, i.source_id FROM shipped s"
+                " LEFT JOIN events e ON e.id = s.event_id LEFT JOIN items i ON i.url_canonical = e.lead_url"
+                " WHERE s.first_at >= ? AND s.event_id NOT IN (SELECT twin_id FROM twins)", iso(since))
     pub = sorted((from_iso(r["first_at"]) - from_iso(r["published_at"])).total_seconds() / 60 for r in rows)
     seen = sorted((from_iso(r["first_at"]) - from_iso(r["first_seen_at"])).total_seconds() / 60
                   for r in rows if r["first_seen_at"])
     rnd = lambda v: None if v is None else round(v, 1)  # noqa: E731
-    # Stories that arrived while the worker was polling (first seen within LIVE_MIN of the publisher's time):
-    # the only rows that measure how fast a new story reaches the edition. A seed or a catch-up after downtime
-    # ships hours-old posts, which made the overall p50 read 1,431 min on the VPS test run's first day.
-    live = sorted((from_iso(r["first_at"]) - from_iso(r["published_at"])).total_seconds() / 60 for r in rows
-                  if r["first_seen_at"] and (from_iso(r["first_seen_at"]) - from_iso(r["published_at"])
-                                             ).total_seconds() <= LIVE_MIN * 60)
+    # Stories published while the worker was polling: the only rows that measure how fast a new story reaches the
+    # edition. A seed or a catch-up after downtime ships hours-old posts, which made the overall p50 read 1,431 min
+    # on the VPS test run's first day. "While polling" is judged by the worker's own poll log (a poll in the
+    # LIVE_MIN minutes before the publisher's time), not by how soon the story was seen: the old rule (first seen
+    # within 20 min of publication) threw out exactly the slow samples, a feed that lists a story 45 min late.
+    live_rows = [r for r in rows if r["first_seen_at"] and was_polling(db, from_iso(r["published_at"]))]
+    # Never negative: an event's clock is its first full report, and a paywalled outlet's thin item of the same
+    # story may have been seen before that report was published.
+    lag = lambda r, a, b: max(0.0, (from_iso(r[a]) - from_iso(r[b])).total_seconds() / 60)  # noqa: E731
+    live = sorted(lag(r, "first_at", "published_at") for r in live_rows)
+    feed = sorted(lag(r, "first_seen_at", "published_at") for r in live_rows)
+    by_source = {}
+    for r in live_rows:
+        by_source.setdefault(r["source_id"] or "?", []).append(r)
+    sources = {sid: {"events": len(v),
+                     # publisher -> first seen is the feed's own delay plus the poll interval; first seen -> app
+                     # is the worker's (text, write, fact-check, cluster, publish).
+                     "feedLagMin": rnd(_pct(sorted(lag(r, "first_seen_at", "published_at") for r in v), 0.5)),
+                     "publisherToAppMin": rnd(_pct(sorted(lag(r, "first_at", "published_at") for r in v), 0.5))}
+               for sid, v in sorted(by_source.items(), key=lambda kv: -len(kv[1]))}
     return {"window": "24h", "events": len(rows),
             "publisherToAppMin": {"p50": rnd(_pct(pub, 0.5)), "p95": rnd(_pct(pub, 0.95))},
             "firstSeenToAppMin": {"p50": rnd(_pct(seen, 0.5)), "p95": rnd(_pct(seen, 0.95))},
             "live": {"events": len(live), "publisherToAppMin": {"p50": rnd(_pct(live, 0.5)),
-                                                                "p95": rnd(_pct(live, 0.95))}}}
+                                                                "p95": rnd(_pct(live, 0.95))},
+                     "feedLagMin": {"p50": rnd(_pct(feed, 0.5)), "p95": rnd(_pct(feed, 0.95))},
+                     "bySource": sources}}
+
+
+def was_polling(db, at):
+    """Was the worker polling feeds in the LIVE_MIN minutes up to `at`?"""
+    return db.one("SELECT 1 FROM polls WHERE at <= ? AND at >= ? LIMIT 1", iso(at),
+                  iso(at - timedelta(minutes=LIVE_MIN))) is not None
 
 
 def alerts(db, now, started_at=None, top_min=12):

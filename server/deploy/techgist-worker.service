@@ -5,9 +5,10 @@ Description=Techgist worker (fetch, write, rank, publish)
 After=network-online.target
 Wants=network-online.target
 OnFailure=techgist-alert@%n.service
-# Restart forever, but if it crash-loops (5 starts in 10 min) give up so OnFailure alerts the owner.
-StartLimitIntervalSec=600
-StartLimitBurst=5
+# Restart forever. With a start limit (5 starts in 10 min) systemd gave up for good after a crash loop, and with
+# NTFY_TOPIC unset nobody was told: the worker stayed down until someone looked. A crash loop is now noticed by
+# techgist-watchdog.timer, which checks the edition's age from outside the worker and alerts.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -23,7 +24,7 @@ Environment=HUB_API_KEY_FILE=/etc/techgist/hub_key
 EnvironmentFile=-/etc/techgist/env
 ExecStart=/opt/techgist/venv/bin/python -m worker.main --out /var/lib/techgist/edition
 Restart=always
-RestartSec=10
+RestartSec=15
 # The worker only needs its state directory, outbound HTTPS and the key files.
 NoNewPrivileges=true
 ProtectSystem=strict

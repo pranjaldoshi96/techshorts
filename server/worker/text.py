@@ -190,6 +190,8 @@ _EXTRACT_LOCK = threading.Lock()
 
 
 def extract_paragraphs(page_html):
+    if not (page_html or "").strip():
+        return []       # an empty 200 (a script-rendered page): nothing to extract, and nothing to log
     try:
         import trafilatura
         with _EXTRACT_LOCK:

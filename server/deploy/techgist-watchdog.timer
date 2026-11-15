@@ -1,0 +1,10 @@
+[Unit]
+Description=Techgist edition freshness check, every 5 minutes
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

@@ -57,8 +57,14 @@ def test_a_timeout_is_not_retried_and_two_open_the_circuit():
     except llm.CircuitOpen:
         pass
     assert session.calls == 2                       # no call while open
+    # A new tick does not close it: each tick of an outage used to pay the endpoint's timeout again before the
+    # backup model took over. After the cooldown one call probes the endpoint.
     client.reset_breaker()
-    assert client.chat("m", []) == "{}"
+    assert client.circuit_open
+    client.open_until = client.clock() - 1
+    client.reset_breaker()
+    assert not client.circuit_open and client.timeouts_in_row == llm.BREAKER_TIMEOUTS - 1
+    assert client.chat("m", []) == "{}" and client.timeouts_in_row == 0
     assert [e[2] for e in client.drain()] == ["ReadTimeout", "ReadTimeout", "ok"]
 
 
@@ -209,7 +215,7 @@ def test_importance_anchors_name_no_real_story_and_are_shared_with_the_rewrite()
         assert live not in llm.IMPORTANCE
     assert llm.IMPORTANCE in llm.PROMPT and llm.IMPORTANCE in llm.REWRITE_PROMPT
     assert "= 6, launch" in llm.IMPORTANCE and "= 5, policy" in llm.IMPORTANCE
-    assert "Follow-ups" in llm.IMPORTANCE
+    assert "A running story" in llm.IMPORTANCE and "= 8, policy" in llm.IMPORTANCE
 
 
 # Ranking: Dev, the calibrated duplicate guard, storylines

@@ -509,9 +509,10 @@ def test_notifications_rank_by_spice_importance_and_traction():
         c.data = {"notif_title": "Short title", "notif_line": "A hook to tap.", "headline": "H",
                   "lead": {"url_canonical": f"https://x.test/{c.id}"}}
     bare.data = {"notif_title": None, "notif_line": None, "headline": "H", "lead": {"url_canonical": "u"}}
-    assert rank.notification_score(big) == pytest.approx(0.9 * 0.9 * rank.coverage(4, True, 800))
+    assert rank.notification_score(big) == pytest.approx(0.9 ** 2 * 0.9 * rank.coverage(4, True, 800))
     got = publish_v1.notification_candidates({"top": [(c, 1.0) for c in (solo, big, dull, old, bare)]}, NOW)
-    assert [n["eventId"] for n in got] == ["big", "solo", "dull"]         # stale and hook-less cards never push
+    # Stale, hook-less and flat (spice under 7) cards never push.
+    assert [n["eventId"] for n in got] == ["big", "solo"]
     assert got[0]["title"] == "Short title" and got[0]["body"] == "A hook to tap." and got[0]["spice"] == 9
 
 
@@ -523,8 +524,10 @@ def test_article_carries_spice_and_a_bounded_notification():
     assert a["spice"] == 8 and a["notification"] == {"title": "Nvidia CEO ousted", "body": "x" * 110}
     c.data["notif_line"] = "x" * 111
     assert "notification" not in publish_v1.article(c, "Top", 0, None)
-    c.data.update(notif_line="A hook.", notif_title="y" * 41)
-    assert publish_v1.article(c, "Top", 0, None)["notification"] == {"title": "ev_a", "body": "A hook."}
+    # An over-long title gives way to the card's own headline, never to the publisher's name.
+    c.data.update(notif_line="A hook.", notif_title="y" * 41, headline="Nvidia board ousts its CEO")
+    assert publish_v1.article(c, "Top", 0, None)["notification"] == {"title": "Nvidia board ousts its CEO",
+                                                                     "body": "A hook."}
     c.ai_text = False       # a degraded card has no checked hook
     c.data["lead"]["feed_text"] = "Feed text."
     assert "notification" not in publish_v1.article(c, "Top", 0, None)
@@ -566,6 +569,9 @@ def test_live_lag_counts_only_stories_that_arrived_while_polling():
             ("ev_live", NOW - timedelta(minutes=6), NOW - timedelta(minutes=4), NOW)]         # arrived live
     for eid, pub, seen, first in rows:
         db.conn.execute("INSERT INTO shipped VALUES (?,?,?,?,?)", (eid, iso(pub), iso(first), iso(first), iso(seen)))
+    # The worker started polling an hour ago.
+    for m in range(0, 60, 3):
+        db.log_poll(NOW - timedelta(minutes=m), "techcrunch", 304, 0, 0, 100, None)
     f = health.freshness(db, NOW - timedelta(hours=24))
     assert f["events"] == 2 and f["live"]["events"] == 1 and f["live"]["publisherToAppMin"]["p50"] == 6.0
 

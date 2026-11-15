@@ -169,14 +169,17 @@ def test_publisher_diversity_2_in_top10_4_per_tab():
     ranked = rank.assemble(cs, TOP, NOW)
     first10 = [c.lead_publisher for c, _ in ranked[:10]]
     assert first10.count("Same") == 2
-    assert [c.lead_publisher for c, _ in ranked].count("Same") <= 4
+    # 4 per publisher in a tab of up to 32 cards, an eighth of a longer one.
+    assert [c.lead_publisher for c, _ in ranked].count("Same") == max(4, TOP.max // 8) == 7
+    short = rank.Tab(**{**TOP.__dict__, "max": 30})
+    assert [c.lead_publisher for c, _ in rank.assemble(cs, short, NOW)].count("Same") == 4
 
 
 def test_capped_cards_wait_for_a_later_rank_instead_of_ending_the_tab():
     # Three busy publishers: 2 each fill ranks 1-6; then the 4-per-tab cap applies rather than stopping at 6.
     cs = [cand(f"ev_{p}{i}", importance=7, n=2, age_h=i * 0.5 + j * 0.1, publisher=p)
           for j, p in enumerate("ABC") for i in range(6)]
-    ranked = rank.assemble(cs, TOP, NOW)
+    ranked = rank.assemble(cs, rank.Tab(**{**TOP.__dict__, "max": 30}), NOW)
     pubs = [c.lead_publisher for c, _ in ranked]
     assert len(ranked) == 12 and all(pubs.count(p) == 4 for p in "ABC")
     assert all(pubs[:6].count(p) == 2 for p in "ABC")

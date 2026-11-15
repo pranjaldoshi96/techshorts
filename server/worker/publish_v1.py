@@ -31,7 +31,7 @@ from datetime import timedelta
 from urllib.parse import quote
 
 from . import (attribution as attribution_mod, degraded as degraded_mod, editorial as editorial_mod, embed as embed_mod, images as images_mod,
-               importance as importance_mod, rank, sources as sources_mod)
+               importance as importance_mod, rank, sources as sources_mod, validate)
 from .cluster import entity_keys
 from .db import from_iso, iso
 from .llm import LLMError
@@ -61,7 +61,7 @@ def _words(s):
 
 MEMBER_SQL = """
 SELECT i.url_canonical, i.url, i.source_id, i.title, i.feed_text, i.image, i.og_image, i.published_at,
-       i.first_seen_at, i.extra, w.status, w.text, w.entities
+       i.first_seen_at, i.extra, w.status, w.text, w.entities, w.type
 FROM event_members em JOIN items i ON i.url_canonical = em.url_canonical
 LEFT JOIN writes w ON w.url_canonical = em.url_canonical
 WHERE em.event_id = ?
@@ -139,13 +139,16 @@ def event_candidate(ctx, ev):
         if name not in publishers:
             publishers.append(name)
     hn = json.loads(ev["hn"] or "null") or {}
+    social = json.loads(_col(ev, "social") or "null") or {}
     over = ctx.editorial.override.get(ev["id"]) or {}
     headline = over.get("headline") or ev["headline"]
     summary = over.get("summary") or ev["summary"]
     ai_text = bool(headline and summary)
     lead_tier1 = ctx.tier1(lead["source_id"])
-    if not ai_text and not (len(publishers) >= 2 or lead_tier1):
-        return None, "no_text"      # held; publishes once its text validates or coverage grows
+    if not ai_text and (not (len(publishers) >= 2 or lead_tier1) or lead["status"] == "thin"):
+        # Held; publishes once its text validates or coverage grows. An event led by a thin item (a paywalled
+        # feed's title and sentence; cluster.thin_can_seed) never ships as a raw title: it waits for its brief.
+        return None, "no_text"
     if self_promo(ctx.pub(lead), lead["title"]):
         return None, "self_promo"
     importance = ev["importance"] or 1
@@ -165,13 +168,16 @@ def event_candidate(ctx, ev):
         classified=ev["type"] is not None, boost=ctx.editorial.boost.get(ev["id"], 1.0),
         pin=frozenset(ctx.editorial.pins.get(ev["id"], ())), title=headline or lead["title"] or "",
         spice=_col(ev, "spice") or rank.SPICE_NEUTRAL,
-        lobsters_points=(json.loads(_col(ev, "social") or "null") or {}).get("lobsters") or 0,
+        lobsters_points=social.get("lobsters") or 0, on_reddit=bool(social.get("reddit")),
+        github_stars=social.get("github") or 0,
+        unvetted=lead["source_id"] == sources_mod.WEB_ID,
         keys=frozenset().union(*(entity_keys(json.loads(m["entities"] or "{}")) for m in members)))
     c.data = {"lead": lead, "members": members, "publishers": publishers, "headline": headline, "summary": summary,
               "hn": hn, "parent_id": ev["parent_id"], "title_words": _words(lead["title"]),
               "first_seen_at": min(m["first_seen_at"] for m in members),
               "images": image_sources(ctx, lead, members), "orgs": primary_orgs(members),
               # An owner's override replaces the card's text, so the alert written for the old text is dropped.
+              "people": people(members),
               "notif_title": None if over else _col(ev, "notif_title"),
               "notif_line": None if over else ev["notif_line"]}
     return c, None
@@ -214,6 +220,16 @@ def self_promo(publisher, title):
         return False
     pat = re.compile(r"(?<![\w])" + re.escape(publisher) + r"(?![\w])", re.I)
     return bool(pat.search(title)) and bool(PROMO_WORDS.search(title))
+
+
+def people(members):
+    """Every person the members name, lower-cased (an alert title must be more than one of these)."""
+    out = set()
+    for m in members:
+        for name in (json.loads(m.get("entities") or "{}") or {}).get("people") or []:
+            if name.strip():
+                out.add(" ".join(name.lower().split()))
+    return out
 
 
 def primary_orgs(members):
@@ -511,16 +527,54 @@ def article(c, category, top_rank, image_url):
 NOTIF_TITLE_MAX, NOTIF_BODY_MAX = 40, 110
 
 
+def bare_name(title, c):
+    """True when an alert title says nothing but who: a person's or an outlet's name, or a single word. One
+    card's alert was titled just "Gary Marcus" (the publisher's name, used when the writer gave no title)."""
+    t = " ".join(re.sub(r"[^\w\s'’&.-]", " ", (title or "").lower()).split()).strip(" .")
+    if len(t.split()) < 2:
+        return True
+    names = {n.lower() for n in (c.lead_publisher, c.lead_source) if n} | set(c.data.get("people") or ())
+    names |= {o for o in c.data.get("orgs") or ()}
+    return t in names or any(t == n.split()[-1] for n in names if n)
+
+
+def alert_title(c):
+    """The alert's title: the writer's, when it fits and says more than a name; else the card's headline when that
+    fits, else the headline cut at a clause boundary (a colon, comma or dash) that fits. Every fallback is text
+    that passed the card's checks. None when nothing fits: the card then has no alert rather than an empty one."""
+    title = (c.data.get("notif_title") or "").strip()
+    if title and len(title) <= NOTIF_TITLE_MAX and not bare_name(title, c):
+        return title
+    head = (c.data.get("headline") or "").strip()
+    if head and len(head) <= NOTIF_TITLE_MAX and not bare_name(head, c):
+        return head
+    # A cut headline must stay a true statement: only its opening clause, never a cut mid-claim, and never a
+    # clause that leans on what was dropped ("Report: X" keeps its label; "Marcus: ..." is never cut down to the
+    # claim without its author).
+    for m in re.finditer(r"(?<!\bReport)(?<!\bSources)[:,;–—]\s|\s[-–—]\s", head):
+        part, tail = head[:m.start()].strip(), head[m.start():]
+        # The dropped tail must not be what made the clause true: its attribution, hedge or condition
+        # ("Nvidia sold chips to China, lawsuit claims" must never become "Nvidia sold chips to China").
+        if validate.HEDGE_KEPT.search(tail) or validate.SOURCING_KEPT.search(tail) or _QUALIFIER.search(tail):
+            continue
+        if 12 <= len(part) <= NOTIF_TITLE_MAX and len(part.split()) >= 3 and not bare_name(part, c):
+            return part
+    return None
+
+
+_QUALIFIER = re.compile(r"\b(says?|said|claims?|alleg\w+|accus\w+|suspect\w*|if|unless|not|no|denies|denied)\b", re.I)
+
+
 def notification(c):
     """{title, body} for a push alert, or None. Only for a card with validated text: the hook went through the
-    same grounding, tense and fact checks as the headline. A missing or over-long title falls back to the
-    publisher's name, which is always true."""
+    same grounding, tense and fact checks as the headline. Without a usable title (see alert_title) there is no
+    alert."""
     body = (c.data.get("notif_line") or "").strip()
     if not c.ai_text or not body or len(body) > NOTIF_BODY_MAX:
         return None
-    title = (c.data.get("notif_title") or "").strip()
-    if not title or len(title) > NOTIF_TITLE_MAX:
-        title = c.lead_publisher or "Techgist"
+    title = alert_title(c)
+    if not title:
+        return None
     return {"title": title, "body": body}
 
 
@@ -529,18 +583,21 @@ NOTIFY_LIST = 20
 
 
 def notification_candidates(tabs, now):
-    """The edition's cards ranked for push alerts: spice x importance x traction (rank.notification_score), fresh
-    cards only. The next app release decides how many to send; this is the order to send them in."""
+    """The edition's cards ranked for push alerts: spice x importance x traction with recency
+    (rank.notification_score), fresh cards that are worth a tap only (rank.notifiable: spice 7+, no minor
+    commentary, no unvetted single-source site). The next app release decides how many to send; this is the order
+    to send them in."""
     seen, out = set(), []
     for ranked in tabs.values():
         for c, _ in ranked:
             note = notification(c)
-            if c.id in seen or note is None or c.age_eff(now) > NOTIFY_MAX_AGE_H:
+            if c.id in seen or note is None or c.age_eff(now) > NOTIFY_MAX_AGE_H or not rank.notifiable(c):
                 continue
             seen.add(c.id)
-            out.append({"eventId": c.id, "score": round(rank.notification_score(c), 4), "spice": int(c.spice),
+            out.append({"eventId": c.id, "score": round(rank.notification_score(c, now), 4), "spice": int(c.spice),
                         "importance": int(c.importance), "publishers": int(c.n_publishers),
                         "onTechmeme": bool(c.on_techmeme), "hnPoints": int(c.hn_points or 0),
+                        "onReddit": bool(c.on_reddit), "type": c.type,
                         "ageH": round(c.age_eff(now), 1), "title": note["title"], "body": note["body"],
                         "headline": c.data.get("headline"), "url": clean_url(c.data["lead"]["url_canonical"])})
     out.sort(key=lambda n: (-n["score"], n["eventId"]))

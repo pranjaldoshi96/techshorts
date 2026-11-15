@@ -10,7 +10,7 @@ from . import config
 
 POLL_SECONDS = {"3m": 180, "10m": 600}
 TIERS = {1, 2, "signal"}
-FORMATS = {"rss", "hn_algolia", "lobsters"}
+FORMATS = {"rss", "hn_algolia", "lobsters", "github_trending"}
 # The catch-all publisher for an article imported from a signal's link whose host no source lists; the card shows
 # the host name (items.extra.publisher).
 WEB_ID = "web"

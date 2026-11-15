@@ -84,7 +84,7 @@ def make_client(cfg):
     if client is None:
         log.warning("no LLM model or API key; card writing is off")
         return None
-    if client.split(cfg["llm"]["model"])[0] not in client.clients and not cfg["llm"].get("backup_model"):
+    if client.split(cfg["llm"]["model"])[0] not in client.clients and not client.backups:
         log.warning("the writing model's provider has no key and there is no backup; card writing is off")
         return None
     log.info("LLM providers with a key: %s", ", ".join(sorted(client.clients)))
@@ -135,8 +135,9 @@ def tick(db, cfg, poll_all=False, client=None, embedder=None, out_dir=None, star
     rewriter = (lambda store, ev: llm.rewrite_event(client, cfg, store, ev)) if client is not None else None
     judge = (lambda title, text, events: llm.judge_events(client, cfg, title, text, events)) \
         if client is not None else None
+    briefer = (lambda store, ev: llm.brief_event(client, cfg, store, ev)) if client is not None else None
     counts.update({f"cluster_{k}": v for k, v in cluster.run(db, cfg, srcs, utcnow(), embedder,
-                                                             rewriter, judge).items() if v})
+                                                             rewriter, judge, briefer).items() if v})
     now = utcnow()
     if client is not None:
         # The clustering stage's calls (judge, rewrite, its entailment check) are logged with this tick.
@@ -155,12 +156,21 @@ def tick(db, cfg, poll_all=False, client=None, embedder=None, out_dir=None, star
             log.warning("degraded publish (%s): %d cards, %d without AI text", outage, report["articles"],
                         report["degradedCards"])
     alerts = health.alerts(db, now, started_at)
+    backup = degraded.backup_state(db, now)
+    if backup["active"]:
+        health.notify(db, "llm_backup", f"the primary LLM endpoint is failing: {backup['failovers']} calls in 15 min"
+                                        f" were answered by a backup model ({backup['itemsOk']} cards passed,"
+                                        f" {backup['itemsFailed']} failed and wait for the primary)")
+        alerts.append("llm_backup")
+    if int(db.get_meta("embed_failed_ticks") or 0) >= cluster.EMBED_ALERT_TICKS:
+        alerts.append("embeddings_down")
     if report and report.get("published") and report.get("emptyCategories"):
         empty = ", ".join(report["emptyCategories"])
         log.warning("v1 edition has no %s articles; 1.2 shows those tabs empty", empty)
         health.notify(db, "v1_empty_category", f"1.2 tabs with no articles: {empty}")
         alerts.append("v1_empty_category")
-    extra = {"llmOutage": outage, "alerts": alerts,
+    extra = {"llmOutage": outage, "alerts": alerts, "llmBackup": backup,
+             "embedFailedTicks": int(db.get_meta("embed_failed_ticks") or 0),
              "llmBudget": {"used24h": db.llm_calls_since(now - timedelta(hours=24)),
                            "daily": cfg["llm"].get("daily_budget")}}
     health.write(db, srcs, config.state_path(cfg, "health.json"), report, now, extra)
@@ -180,7 +190,9 @@ def main():
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     # trafilatura logs "discarding data: None" at WARNING for every empty extraction (54 in 4 days), burying real ones.
-    logging.getLogger("trafilatura").setLevel(logging.ERROR)
+    # ... and "lxml parsing failed: Document is empty" at ERROR for a page with no markup; neither is the worker's
+    # error, and both made a clean journal look broken.
+    logging.getLogger("trafilatura").setLevel(logging.CRITICAL)
     cfg = config.load()
     db = DB(config.state_path(cfg, "state.db"))
     out_dir = None if args.no_publish else os.path.expanduser(

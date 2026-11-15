@@ -170,6 +170,8 @@ class Item:
     spice: int = None
     notif_title: str = None
     publisher: str = None       # items.extra.publisher: the outlet of an item imported from a signal's link
+    feed_text: str = None
+    via: str = None             # items.extra.via: the signal source whose link this article was imported from
     keys: set = field(default_factory=set)
 
     @property
@@ -189,7 +191,7 @@ ITEM_SQL = """
 SELECT i.url_canonical, i.source_id, i.title, i.published_at, w.status, w.type, w.is_news, w.relevance,
        w.importance, w.breaking, w.sensitive, w.region, w.topics, w.entities, w.event, w.material_update,
        w.text_words, w.headline, w.summary, w.summary_short, w.notif_line, w.s1, w.entailed, w.text, e.vec,
-       w.spice, w.notif_title, i.extra
+       w.spice, w.notif_title, i.extra, i.feed_text
 FROM items i JOIN writes w ON w.url_canonical = i.url_canonical
 JOIN embeddings e ON e.url_canonical = i.url_canonical AND e.kind = 'passage'
 """
@@ -197,6 +199,7 @@ JOIN embeddings e ON e.url_canonical = i.url_canonical AND e.kind = 'passage'
 
 def _item(r):
     ents = json.loads(r["entities"] or "{}")
+    extra = json.loads(r["extra"] or "{}")
     it = Item(url=r["url_canonical"], source_id=r["source_id"], title=r["title"],
               published_at=from_iso(r["published_at"]), status=r["status"], type=r["type"],
               is_news=bool(r["is_news"]), relevance=r["relevance"] or 0, importance=r["importance"] or 1,
@@ -206,7 +209,7 @@ def _item(r):
               vec=embed_mod.from_blob(r["vec"]), headline=r["headline"], summary=r["summary"],
               summary_short=r["summary_short"], notif_line=r["notif_line"], s1=r["s1"],
               entailed=r["entailed"], text=r["text"], spice=r["spice"], notif_title=r["notif_title"],
-              publisher=json.loads(r["extra"] or "{}").get("publisher"))
+              publisher=extra.get("publisher"), feed_text=r["feed_text"], via=extra.get("via"))
     it.keys = entity_keys(ents)
     return it
 
@@ -358,6 +361,14 @@ def assign(store, item):
     kind, picked = parse_pick(item.pick)
     if picked:
         picked = store.resolve(picked)
+    if not item.vec.any():
+        # No embedding (the endpoint was down; cluster.embed_fallback): title words stand in for the vector.
+        ev = title_match(store, item)
+        if ev is not None:
+            return join(store, ev, item, 0.0, "title_fallback")
+        if item.thin:
+            return None, "thin_unmatched"
+        return create(store, item, how="new_no_vector")
     ranked = store.ranked(item.vec)
     if store.judge is not None:
         return assign_judged(store, item, ranked, picked)
@@ -450,7 +461,7 @@ def assign_judged(store, item, ranked, picked):
     for cos, ev in cands:
         if rel.get(ev.id) == "same":
             return join(store, ev, item, cos, "judge")
-    if item.thin:
+    if item.thin and not thin_can_seed(store, item):
         # A thin item is classification only: it can back an event up, never start one.
         return None, "thin_unmatched"
     for cos, ev in cands:
@@ -459,7 +470,23 @@ def assign_judged(store, item, ranked, picked):
             return create(store, item, parent_id=ev.row.get("parent_id") or ev.id, how="followup_judge")
     if too_old is not None and item.material_update and item.importance >= 8:
         return create(store, item, parent_id=too_old.id, how="followup_material")
-    return create(store, item)
+    return create(store, item, how="thin_seed" if item.thin else "new")
+
+
+# A paywalled outlet's scoop arrives as a title and a sentence. Such an item used to wait for an event to join
+# and, when the scoop was exclusive, never found one: on 2026-11-15 the FT's "Huang has discussed a comeback as
+# Nvidia CEO" (Techmeme's lead story), the NYT's Lutnick investigation (HN 361) and the FT's Pax Silica accord had
+# no event and no card an hour after they broke. A thin hard-news item from an outlet that breaks news (authority
+# >= SEED_AUTHORITY), or one Techmeme picked, now starts an event. The event has no card until it has traction
+# and a brief written from the lines available (brief_due, llm.brief_event), or an open outlet's report joins.
+SEED_AUTHORITY = 1.1
+
+
+def thin_can_seed(store, item):
+    if not item.hard or item.relevance < 2:
+        return False
+    via = store.by_id.get(item.via) if item.via else None
+    return store.authority(item.source_id) >= SEED_AUTHORITY or (via is not None and via.kind == "techmeme")
 
 
 def create(store, item, parent_id=None, how="new"):
@@ -630,16 +657,24 @@ def choose_lead(store, ev):
     write beats a failed one. Opinion, analysis and interview lead only when there is no hard-news member."""
     members = ev.members
     pool = [m for m in members if m.can_lead]
+    if not any(m.status == "ok" for m in pool):
+        # No full-length report validated: a shorter hard-news report that did (NY Post's 114 words on Huang's
+        # allies) leads before a longer one whose card failed, which would leave the event with no text.
+        short_ok = [m for m in members if m.hard and not m.thin and m.status == "ok"]
+        pool = short_ok or pool
     if not pool:
         hard = [m for m in members if m.hard and not m.thin]
         pool = hard or [m for m in members if not m.thin]
     if not pool:
-        return None
+        # Only thin members (paywalled feeds: a title and a sentence each). The best-placed outlet is the lead a
+        # brief names and links to; the event has no card until a brief is written (brief_due).
+        return min(members, key=lambda m: (-store.authority(m.source_id), m.published_at, m.url), default=None)
     anchor = ev.anchor.vec
 
     def key(m):
         score = float(np.dot(m.vec, anchor)) * store.authority(m.source_id)
-        return (m.status != "ok", -round(score, 4), m.published_at, m.url)
+        # A listed outlet leads before a site imported from a Hacker News link under the catch-all source.
+        return (m.status != "ok", m.source_id == sources_mod.WEB_ID, -round(score, 4), m.published_at, m.url)
     return min(pool, key=key)
 
 
@@ -676,7 +711,10 @@ def refresh(store, ev, tier1_ok):
     if lead is not None:
         row.update(type=lead.type, topics=json.dumps(lead.topics), region=lead.region, relevance=lead.relevance,
                    is_news=int(lead.is_news))
-        if row.get("text_from") != "rewrite" or prev_lead != lead.url:
+        own = bool(lead.headline and lead.status == "ok")
+        if row.get("text_from") == BRIEF and not own and row.get("headline"):
+            pass        # the brief stands until a member's own card validates (an open outlet's report)
+        elif row.get("text_from") != "rewrite" or prev_lead != lead.url:
             _set_text(row, lead.headline, lead.summary, lead.summary_short, lead.notif_line, lead.s1,
                       lead.entailed, lead.url, store.now, lead.notif_title)
             row["rewrite_spice"] = None
@@ -709,12 +747,73 @@ def refresh(store, ev, tier1_ok):
 def event_spice(row, members, lead):
     """The event's spice: the rewrite call's score when the card is a rewrite, else the lead's (the card shows
     the lead's angle), else the median of the scored hard-news members. None when nothing was scored."""
-    if row.get("text_from") == "rewrite" and row.get("rewrite_spice"):
+    if row.get("text_from") in ("rewrite", BRIEF) and row.get("rewrite_spice"):
         return int(row["rewrite_spice"])
     if lead is not None and lead.spice:
         return int(lead.spice)
     scored = sorted(m.spice for m in members if m.spice and m.hard) or sorted(m.spice for m in members if m.spice)
     return scored[len(scored) // 2] if scored else None
+
+
+# Briefs: a short attributed card for a story that has traction but no member with enough text to write from.
+BRIEF = "brief"
+BRIEF_MAX_AGE_H = 24
+BRIEF_RETRY = timedelta(minutes=20)
+BRIEF_MIN_WORDS = 25
+BRIEF_HN = 150
+BRIEF_SOLO_IMPORTANCE = 7
+MAX_BRIEFS = 3
+
+
+def brief_lines(store, ev):
+    """What is known about an event with no full text: [(outlet, title, text)] from its members, best-placed
+    outlet first, then Techmeme's own summary line when Techmeme picked the story. Text is each item's own (the
+    feed sentence or the page's opening); nothing is taken from anywhere else."""
+    out, seen = [], set()
+    members = sorted(ev.members, key=lambda m: (-store.authority(m.source_id), m.published_at, m.url))
+    for m in members:
+        src = store.by_id.get(m.source_id)
+        name = m.publisher or (src.name if src else m.source_id)
+        text = " ".join((m.text or m.feed_text or "").split()[:90])
+        key = (m.title.strip().lower(), text[:60].lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((name, m.title.strip(), text))
+    kinds = {s.id for s in store.srcs.sources if s.is_signal and s.kind == "techmeme"}
+    for r in store.db.q("SELECT i.source_id, i.title, i.feed_text FROM event_signals s JOIN items i"
+                        " ON i.url_canonical = s.url_canonical WHERE s.event_id = ?", ev.id):
+        if r["source_id"] in kinds and (r["title"].strip().lower(), "") not in seen:
+            src = store.by_id[r["source_id"]]
+            text = " ".join((r["feed_text"] or "").split()[:90])
+            if not any(text[:60].lower() == t[:60].lower() for _, _, t in out):
+                out.append((f"{src.name} (summary of the report)", r["title"].strip(), text))
+    return out
+
+
+def brief_due(store, ev):
+    """True when `ev` should get a brief now: no validated text from any member, hard news with a tech angle, under
+    a day old, enough lines to write from, and traction: a Techmeme pick, a second publisher, a big Hacker News
+    thread, or a scoop-breaking outlet's own report rated significant."""
+    row, now = ev.row, store.now
+    if row.get("headline") or not ev.members or row.get("type") not in HARD_NEWS or (row.get("relevance") or 0) < 2:
+        return False
+    if any(m.status == "ok" and m.headline for m in ev.members):
+        return False
+    if now - from_iso(row["published_at"]) > timedelta(hours=BRIEF_MAX_AGE_H):
+        return False
+    hn = (json.loads(row.get("hn") or "null") or {}).get("points") or 0
+    lead = next((m for m in ev.members if m.url == row.get("lead_url")), None)
+    solo = (lead is not None and store.authority(lead.source_id) >= SEED_AUTHORITY
+            and (row.get("importance_raw") or 0) >= BRIEF_SOLO_IMPORTANCE)
+    if not (row.get("on_techmeme") or (row.get("n_publishers") or 0) >= 2 or hn >= BRIEF_HN or solo):
+        return False
+    lines = brief_lines(store, ev)
+    if sum(len(f"{title} {text}".split()) for _, title, text in lines) < BRIEF_MIN_WORDS:
+        return False
+    last = from_iso(row.get("rewritten_at"))
+    return (last is None or now - last >= BRIEF_RETRY
+            or row.get("rewrite_publishers") != row.get("publishers"))
 
 
 def story_start(row):
@@ -746,14 +845,38 @@ def save(db, row):
 
 # Signals (Techmeme, HN, The Information)
 
+ORPHAN_KEY = "sigq:"
+
+
 def signal_items(db, srcs, now, hours=48):
+    """Signal sightings that may still need an event, as dicts: the signal sources' own rows, and the "orphans".
+
+    An orphan is a Hacker News or Lobsters link that was imported as an article (fetch.promote_signals turns the
+    signal's row into the article's, since both are the same URL) but could not be written and is in no event:
+    a company page, a PDF landing page, a paywalled piece. Its points used to vanish with it. "SpaceX catches the
+    Starship to end Flight 15" (spacex.com, HN 1,581) was held with no text while the Starship card, 9 publishers,
+    showed no Hacker News points and sat last in Top. An orphan is matched to an event by its title like any
+    signal, once per signal source that listed it; its query vector is stored under ORPHAN_KEY + url because the
+    URL's own embedding row holds the article's passage vector."""
     signal_ids = [s.id for s in srcs.sources if s.is_signal]
     if not signal_ids:
         return []
     marks = ",".join("?" * len(signal_ids))
-    return db.q(f"SELECT i.*, e.vec FROM items i LEFT JOIN embeddings e ON e.url_canonical = i.url_canonical"
-                f" AND e.kind = 'query' WHERE i.status = 'signal' AND i.source_id IN ({marks})"
-                f" AND i.published_at >= ?", *signal_ids, iso(now - timedelta(hours=hours)))
+    since = iso(now - timedelta(hours=hours))
+    out = [dict(r) for r in db.q(
+        f"SELECT i.*, e.vec FROM items i LEFT JOIN embeddings e ON e.url_canonical = i.url_canonical"
+        f" AND e.kind = 'query' WHERE i.status = 'signal' AND i.source_id IN ({marks})"
+        f" AND i.published_at >= ?", *signal_ids, since)]
+    for r in out:
+        r["vec_key"] = r["url_canonical"]
+    for r in db.q("SELECT i.*, e.vec FROM items i LEFT JOIN embeddings e ON e.url_canonical = ? || i.url_canonical"
+                  " WHERE i.status != 'signal' AND i.extra LIKE '%\"signals\"%' AND i.published_at >= ?"
+                  " AND i.url_canonical NOT IN (SELECT url_canonical FROM event_members)", ORPHAN_KEY, since):
+        for sid, pts in (json.loads(r["extra"] or "{}").get("signals") or {}).items():
+            if sid in signal_ids:
+                out.append({**dict(r), "source_id": sid, "extra": json.dumps(_points(pts)),
+                            "vec_key": ORPHAN_KEY + r["url_canonical"], "orphan": True})
+    return out
 
 
 def _points(extra):
@@ -795,17 +918,20 @@ def attach_signals(store):
     rows = signal_items(db, store.srcs, now)
     if store.judge is not None:
         # The title matches that need a ruling, newest first, asked in parallel up to the pass's budget.
-        need = []
+        need, asked = [], set()
         for r in sorted(rows, key=lambda r: r["published_at"], reverse=True):
             extra = json.loads(r["extra"] or "{}")
             linked = extra.get("linked_url") or r["url_canonical"]
             if linked in member_of or r["url_canonical"] in member_of or r["vec"] is None \
                     or (r["url_canonical"], r["source_id"]) in attached:
                 continue
-            ranked = store.ranked(embed_mod.from_blob(r["vec"]))
-            if ranked and ranked[0][0] >= store.s.t_signal and store.ruling(r["url_canonical"],
-                                                                             ranked[0][1].id) is None:
-                need.append((r["url_canonical"], r["title"], r["feed_text"] or "", [ranked[0][1]]))
+            near = _near_events(store, r)
+            if near and r["vec_key"] not in asked and any(store.ruling(r["vec_key"], ev.id) is None
+                                                          for ev in near):
+                asked.add(r["vec_key"])
+                # An orphan is ruled on under its own key: the article's ruling as an item asked a different
+                # question (is this report the same development), with the page's text.
+                need.append((r["vec_key"], r["title"], "" if r.get("orphan") else r["feed_text"] or "", near))
             if len(need) >= budget:
                 break
         prefetch_rulings(store, need)
@@ -834,11 +960,25 @@ def attach_signals(store):
             if words & names:
                 attach(ev.id, r["url_canonical"], r["source_id"], "cosine", extra)
             continue
-        # Ruled above, or waiting for a later pass (over budget, or the judge could not be asked).
-        verdict = store.ruling(r["url_canonical"], ev.id)
-        if verdict == "same":
-            attach(ev.id, r["url_canonical"], r["source_id"], "judge", extra)
+        # Ruled above, or waiting for a later pass (over budget, or the judge could not be asked). The nearest
+        # event the judge calls the same development gets the signal.
+        for ev in _near_events(store, r):
+            if store.ruling(r["vec_key"], ev.id) == "same":
+                attach(ev.id, r["url_canonical"], r["source_id"], "judge", extra)
+                break
     return n
+
+
+SIGNAL_CANDIDATES = 3
+
+
+def _near_events(store, r):
+    """The events a signal's title may be about: the nearest SIGNAL_CANDIDATES at cosine >= T_signal. Only the
+    nearest was tried at first, and for a saga it is often a sibling: Hacker News's "SpaceX catches the Starship
+    to end Flight 15" sat nearest "SpaceX aborts booster catch" (0.61, rightly ruled a different development)
+    and never reached "SpaceX catches Starship upper stage" (0.52)."""
+    ranked = store.ranked(embed_mod.from_blob(r["vec"]))
+    return [ev for cos, ev in ranked[:SIGNAL_CANDIDATES] if cos >= store.s.t_signal]
 
 
 def _attach(db, eid, url, source_id, how, extra, now):
@@ -866,8 +1006,11 @@ def _apply_signals(store, ev):
     # Other places a story is being shared (Lobsters today), each with its own capped multiplier in rank.coverage.
     social = {}
     for r in rows:
-        if kinds[r["source_id"]] == "lobsters" and (r["points"] or 0) > social.get("lobsters", 0):
-            social["lobsters"] = r["points"]
+        kind = kinds[r["source_id"]]
+        if kind in ("lobsters", "github") and (r["points"] or 0) > social.get(kind, 0):
+            social[kind] = r["points"]
+        elif kind == "reddit":
+            social["reddit"] = 1        # listed among a subreddit's top posts of the day; the feed has no score
     ev.row["social"] = json.dumps(social) if social else None
 
 
@@ -922,8 +1065,8 @@ def embed_backlog(db, cfg, embedder, now, limit=50):
         return 0
     rows = db.q("SELECT i.url_canonical, i.title, w.text FROM items i JOIN writes w ON w.url_canonical = i.url_canonical"
                 " LEFT JOIN embeddings e ON e.url_canonical = i.url_canonical WHERE w.type IS NOT NULL"
-                " AND e.url_canonical IS NULL AND i.status != 'dropped' AND i.published_at >= ? LIMIT ?",
-                iso(now - timedelta(days=14)), limit)
+                " AND (e.url_canonical IS NULL OR e.model = ?) AND i.status != 'dropped' AND i.published_at >= ?"
+                " LIMIT ?", FALLBACK_MODEL, iso(now - timedelta(days=14)), limit)
     if not rows:
         return 0
     lead_words = cfg["embed"].get("lead_words", 120)
@@ -936,35 +1079,99 @@ def embed_backlog(db, cfg, embedder, now, limit=50):
     return len(rows)
 
 
+FALLBACK_MODEL = "fallback"
+EMBED_ALERT_TICKS = 5
+TITLE_MATCH = 0.6
+_STOP = set("""the and for with from that this will are was were has have had its into over after about than new says
+say said how why what who when where more most can could would should not but you your our their they them his her
+him she one two all out off now just also amid back big inc report reports""".split())
+
+
+def embed_fallback(db, cfg, now, limit=200):
+    """Embedding endpoint down: classified items with no vector get a zero vector (model "fallback"), so they
+    reach clustering. A zero vector is near nothing; `assign` then matches such an item to an event by title
+    words (title_match) or starts its own, so a single-publisher card still ships. embed_backlog replaces the
+    zero vectors when the endpoint answers again, and the merge pass and the edition's duplicate guard then join
+    what title words kept apart."""
+    rows = db.q("SELECT i.url_canonical FROM items i JOIN writes w ON w.url_canonical = i.url_canonical"
+                " LEFT JOIN embeddings e ON e.url_canonical = i.url_canonical WHERE w.type IS NOT NULL"
+                " AND e.url_canonical IS NULL AND i.status != 'dropped' AND i.published_at >= ? LIMIT ?",
+                iso(now - timedelta(days=14)), limit)
+    dims = (cfg.get("embed") or {}).get("dims") or 1024
+    zero = embed_mod.to_blob(np.zeros(dims, dtype=np.float32))
+    for r in rows:
+        db.conn.execute("INSERT OR REPLACE INTO embeddings VALUES (?,?,?,?,?,?,?)",
+                        (r["url_canonical"], "passage", FALLBACK_MODEL, dims, None, zero, iso(now)))
+    return len(rows)
+
+
+def _title_words(title):
+    return {w for w in re.findall(r"[a-z0-9$]+", (title or "").lower()) if len(w) > 2 and w not in _STOP}
+
+
+def title_match(store, item):
+    """The live event a vector-less item belongs to by title words: at least TITLE_MATCH of the words of its title
+    and a member's are shared (Jaccard), and the event passes the age rules. None when there is none."""
+    words = _title_words(item.title)
+    if len(words) < 3:
+        return None
+    best = None
+    for ev in store.events.values():
+        if ev.anchor is None or joinable(item, ev, 1.0, False, store.now, store.s, judged=True) is not None:
+            continue
+        for m in ev.members:
+            other = _title_words(m.title)
+            share = len(words & other) / len(words | other) if other else 0
+            if share >= TITLE_MATCH and (best is None or share > best[0]):
+                best = (share, ev)
+    return best[1] if best else None
+
+
 def embed_signals(db, embedder, srcs, now, limit=50):
     """Signal headlines get a query vector (they have no text of their own)."""
     if embedder is None:
         return 0
-    rows = [r for r in signal_items(db, srcs, now) if r["vec"] is None][:limit]
-    if not rows:
+    todo = {}
+    for r in signal_items(db, srcs, now):
+        if r["vec"] is None:
+            todo.setdefault(r["vec_key"], r["title"])
+    todo = list(todo.items())[:limit]
+    if not todo:
         return 0
-    vecs = _embed(embedder, [r["title"] for r in rows], "query")
-    for r, v in zip(rows, vecs):
+    vecs = _embed(embedder, [title for _, title in todo], "query")
+    for (key, _), v in zip(todo, vecs):
         db.conn.execute("INSERT OR REPLACE INTO embeddings VALUES (?,?,?,?,?,?,?)",
-                        (r["url_canonical"], "query", embedder.model, len(v), None, embed_mod.to_blob(v), iso(now)))
-    return len(rows)
+                        (key, "query", embedder.model, len(v), None, embed_mod.to_blob(v), iso(now)))
+    return len(todo)
 
 
 # The stage
 
-def run(db, cfg, srcs, now, embedder=None, rewriter=None, judge=None):
+def run(db, cfg, srcs, now, embedder=None, rewriter=None, judge=None, briefer=None):
     """One clustering pass: assign pending items serially, attach signals, merge, then refresh changed events.
     `rewriter(store, ev)` is the event rewrite call (llm.rewrite_event), skipped when None. `judge(title, text,
-    events)` is the same-development ruling (llm.judge_events); without it the entity rule decides."""
+    events)` is the same-development ruling (llm.judge_events); without it the entity rule decides.
+    `briefer(store, ev)` writes a brief for an event with traction and no full text (llm.brief_event)."""
     s = Settings.from_cfg(cfg)
     stats = Counter()
     if embedder is not None:
         try:
             stats["embedded_backlog"] = embed_backlog(db, cfg, embedder, now)
             stats["signals_embedded"] = embed_signals(db, embedder, srcs, now)
+            db.set_meta("embed_failed_ticks", "0")
         except LLMError as e:
             log.warning("embedding failed: %s", e)
             stats["embed_failed"] += 1
+            failed = int(db.get_meta("embed_failed_ticks") or 0) + 1
+            db.set_meta("embed_failed_ticks", str(failed))
+            # The embedding endpoint is the one stage with no second provider (the thresholds are calibrated for
+            # its model). Without a vector an item never reached clustering, so no new card appeared while it was
+            # down. Written items now cluster by title words until it is back (see embed_fallback).
+            stats["embed_fallback"] = embed_fallback(db, cfg, now)
+            if failed >= EMBED_ALERT_TICKS:
+                from . import health
+                health.notify(db, "embeddings_down", f"the embedding endpoint has failed {failed} ticks in a row "
+                                                     f"({e}); new items cluster by title words until it answers")
     store = Store(db, srcs, s, now, judge)
     pending = pending_items(db, now)
     if judge is not None:
@@ -996,6 +1203,18 @@ def run(db, cfg, srcs, now, embedder=None, rewriter=None, judge=None):
                 log.warning("event rewrite stopped: %s", e)
                 break
             stats["rewritten" if done else "rewrite_failed"] += 1
+            refresh(store, ev, tier1_ok)
+    if briefer is not None:
+        due = [ev for ev in store.events.values() if brief_due(store, ev)]
+        due.sort(key=lambda ev: (-(ev.row.get("on_techmeme") or 0), -(ev.row.get("n_publishers") or 0),
+                                 -(ev.row.get("importance") or 0), ev.id))
+        for ev in due[:MAX_BRIEFS]:
+            try:
+                done = briefer(store, ev)
+            except LLMError as e:
+                log.warning("brief stopped: %s", e)
+                break
+            stats["briefed" if done else "brief_failed"] += 1
             refresh(store, ev, tier1_ok)
     stats["judge_calls"] = store.judge_calls
     db.conn.execute("DELETE FROM judgements WHERE at < ?", (iso(now - timedelta(days=s.candidate_days)),))

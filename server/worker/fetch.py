@@ -122,6 +122,11 @@ def _signal_extra(source, e, summary_html):
         links = [u for u in re.findall(r'href="(https?://[^"]+)"', summary_html) if "techmeme.com" not in u]
         if links:
             extra["linked_url"] = canonical_url(html.unescape(links[0]))
+    elif source.kind == "reddit":
+        # A link post's entry carries the article behind an anchor labelled [link]; a text post links to itself.
+        m = re.search(r'<a href="(https?://[^"]+)">\s*\[link\]\s*</a>', summary_html)
+        if m and not re.search(r"//([\w.]+\.)?(reddit\.com|redd\.it)/", m.group(1)):
+            extra["linked_url"] = canonical_url(html.unescape(m.group(1)))
     return extra
 
 
@@ -177,7 +182,31 @@ def parse_json_entries(body, source, limit):
     return out[:limit], _JsonFeed(False)
 
 
+_TRENDING_ROW = re.compile(r'<article class="Box-row">(.*?)</article>', re.S)
+
+
+def parse_github_trending(body, limit):
+    """GitHub's trending page (HTML; there is no feed): one entry per repository, "owner/repo: description", with
+    the stars it gained today as points. The page has no dates, so entries are dated at first sight."""
+    page = body.decode("utf-8", "replace") if isinstance(body, bytes) else body
+    out = []
+    for row in _TRENDING_ROW.findall(page):
+        m = re.search(r'<h2[^>]*>\s*<a[^>]*href="/([\w.-]+/[\w.-]+)"', row, re.S)
+        if not m:
+            continue
+        repo = m.group(1)
+        desc = re.search(r'<p class="col-9[^"]*"[^>]*>(.*?)</p>', row, re.S)
+        stars = re.search(r"([\d,]+)\s+stars today", row)
+        url = f"https://github.com/{repo}"
+        out.append(Entry(url=url, url_canonical=canonical_url(url),
+                         title=f"{repo}: {plain(desc.group(1))}" if desc else repo,
+                         extra={"points": int(stars.group(1).replace(",", "")) if stars else 0}))
+    return out[:limit], _JsonFeed(not out)
+
+
 def parse_entries(body, source, limit):
+    if source.format == "github_trending":
+        return parse_github_trending(body, limit)
     if source.format != "rss":
         return parse_json_entries(body, source, limit)
     feed = feedparser.parse(body)
@@ -258,20 +287,25 @@ class IngestStats:
     sightings: int = 0
 
 
-def classify(entry, source, sources, now, first_seen, first_run, cfg):
+def classify(entry, source, sources, now, first_seen, first_run, cfg, vetted=False):
     """Decides an entry's status at first sight. Returns (status, drop_rule, published_at).
 
-    Age rules run before the prefilter so health.json counts only drops of items that would otherwise ship."""
+    Age rules run before the prefilter so health.json counts only drops of items that would otherwise ship.
+    `vetted`: Techmeme links to this article, so its editors already judged it tech news; the feed's category
+    filter (include_tags) does not apply. Semafor's "Under pressure, Lutnick joins Trump in China" was dropped for
+    its category while Techmeme headlined it."""
     published = resolve_published(entry.feed_published_at, first_seen)
     if is_stale(published, now, source, cfg):
         return "stale", None, published
     # On a source's first poll, anything older than 36 h (or undated, so of unknown age) already existed. A source
     # may reach further back (seed_days), capped at the age limit above.
-    if first_run and (entry.feed_published_at is None or now - published > seed_horizon(source, cfg)):
+    # (GitHub's trending page has no dates at all: its entries are current by definition.)
+    if first_run and source.format != "github_trending" and (
+            entry.feed_published_at is None or now - published > seed_horizon(source, cfg)):
         return "seen", None, published
     if sources.blocked(entry.url):
         return "dropped", "domain_blocklist", published
-    if source.include_tags and not set(entry.tags) & set(source.include_tags):
+    if source.include_tags and not set(entry.tags) & set(source.include_tags) and not vetted:
         return "dropped", "source_tags", published
     rule = prefilter.check(entry.title, entry.url)
     if rule:
@@ -291,7 +325,9 @@ def ingest(db, source, sources, entries, now, first_run, cfg):
         # A URL first seen only on a signal source becomes a real item when a news source lists it.
         if existing and not (existing["status"] == "signal" and not source.is_signal):
             continue
-        status, rule, published = classify(e, source, sources, now, first_seen, first_run, cfg)
+        status, rule, published = classify(e, source, sources, now, first_seen, first_run, cfg,
+                                           vetted=bool(source.include_tags)
+                                           and techmeme_linked(db, e.url_canonical))
         extra = e.extra
         if existing and not source.is_signal:
             extra = {**e.extra, **_carried(existing)}
@@ -311,6 +347,14 @@ def ingest(db, source, sources, entries, now, first_run, cfg):
     return stats
 
 
+def techmeme_linked(db, url):
+    """Does a Techmeme-kind signal row link to `url`? (Cheap: a signal's extra holds its linked URL as JSON text.)"""
+    return db.one("SELECT 1 FROM items WHERE status = 'signal' AND extra LIKE ? LIMIT 1",
+                  f'%"linked_url": {json.dumps(url)}%') is not None
+
+
+# Drops that are a judgement about the topic, which an editor's pick overrules (promote_signals revives them).
+REVIVABLE = ("source_tags", "triage_offtopic", "triage_dull")
 POINT_KEYS = ("points", "comments", "hn_url")
 
 
@@ -433,6 +477,14 @@ def promote_signals(db, srcs, cfg, now):
             if existing["url_canonical"] != r["url_canonical"]:
                 db.add_sighting(target, r["source_id"], r["title"], from_iso(r["feed_published_at"]), now)
                 done("item")
+            made += 1
+        elif existing["status"] == "dropped" and existing["drop_rule"] in REVIVABLE and kind == "techmeme":
+            # The feed's category filter or the screening call dropped it as off-topic or dull, and Techmeme's
+            # editors then picked it: their judgement wins, and the item is written after all.
+            keep = json.loads(existing["extra"] or "{}")
+            db.conn.execute("UPDATE items SET status = 'new', drop_rule = NULL, triaged = 1, extra = ?"
+                            " WHERE url_canonical = ?", (json.dumps({**keep, "via": r["source_id"]}), target))
+            done("revived")
             made += 1
         else:
             done("known")       # a news source already carries the linked article

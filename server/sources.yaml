@@ -5,7 +5,7 @@
 # Fields: id, name, v1_name (exact 1.2 FeedSource name, or `name` for new sources), url,
 # tier (1 | 2 | signal), authority (0.5-1.2), reads, region (in | us | global), poll (3m | 10m),
 # fetch_page, images (source | generated). Optional: include_tags (keep only entries with one of these
-# feed categories, for site-wide feeds); format (rss | hn_algolia | lobsters); kind (techmeme | hn | lobsters,
+# feed categories, for site-wide feeds); format (rss | hn_algolia | lobsters | github_trending); kind (techmeme | hn | lobsters | reddit | github,
 # what a signal source is); seed_days (how far back the first poll reaches, for essays and developer posts;
 # default fetch.first_run_skip_hours); domains (hosts whose articles are this publisher's, for an article imported from a
 # Techmeme or Hacker News link). A source with domains and no url is never polled: it only names the publisher.
@@ -16,10 +16,14 @@
 # (llm.triage_batch) drops it before it costs a write. The sources added on 2026-11-15 each returned 200 with
 # items from the VPS with the worker's UA that day.
 #
+# Polling: 3m for the outlets that break news (a story published at :01 on a 10-minute feed was seen at :06-:16,
+# and Engadget items 14-22 min after publication), 10m for blogs, essays and company posts. Every poll is a
+# conditional GET.
+#
 # Left out because they fail from the server today: Moneycontrol Tech (403 to a non-browser UA),
 # ETtech's own site (tech.economictimes.indiatimes.com times out; the ET Tech section feed below works),
-# Anthropic's site (no RSS; a community-built mirror is used instead), Reddit (429/403 to the VPS, so r/technology
-# is not a traction signal yet), VentureBeat and Pirate Wires (429), Techdirt, AP, the FTC and SEC litigation feeds
+# Anthropic's site (no RSS; a community-built mirror is used instead), Reddit's JSON API and old.reddit.com (403 to
+# the VPS; the www.reddit.com RSS of a subreddit's top posts answers, see the signals), VentureBeat and Pirate Wires (429), Techdirt, AP, the FTC and SEC litigation feeds
 # and Business Standard (403), Reuters (no public feed; its articles still arrive through Techmeme links).
 
 defaults:
@@ -43,68 +47,68 @@ sources:
   # CNBC's top stories: where its tech-adjacent business scoops (Treasury on Nvidia, IPO pricing) appear first.
   - {id: cnbc_top, name: CNBC, v1_name: CNBC Tech, url: "https://www.cnbc.com/id/100003114/device/rss/rss.html", tier: 1, authority: 1.1, poll: 3m}
   - {id: bbc, name: BBC Technology, v1_name: BBC Technology, url: "https://feeds.bbci.co.uk/news/technology/rss.xml", tier: 1, authority: 1.1, poll: 3m, domains: [bbc.com, bbc.co.uk]}
-  - {id: bbc_business, name: BBC Business, v1_name: BBC Technology, url: "https://feeds.bbci.co.uk/news/business/rss.xml", tier: 1, authority: 1.1}
+  - {id: bbc_business, name: BBC Business, v1_name: BBC Technology, url: "https://feeds.bbci.co.uk/news/business/rss.xml", tier: 1, authority: 1.1, poll: 3m}
   - {id: nyt, name: New York Times, v1_name: New York Times, url: "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml", tier: 1, authority: 1.1, poll: 3m, fetch_page: false, domains: [nytimes.com]}
-  - {id: nyt_business, name: New York Times Business, v1_name: New York Times, url: "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", tier: 1, authority: 1.1, fetch_page: false}
+  - {id: nyt_business, name: New York Times Business, v1_name: New York Times, url: "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", tier: 1, authority: 1.1, fetch_page: false, poll: 3m}
   - {id: guardian, name: The Guardian, v1_name: The Guardian, url: "https://www.theguardian.com/uk/technology/rss", tier: 1, authority: 1.1, poll: 3m, domains: [theguardian.com]}
   # Paywalled business press: the feeds carry a title and a sentence, so these mostly back up an event another
   # outlet leads (a second or third publisher, tier-1 corroboration) rather than lead one themselves.
   - {id: bloomberg, name: Bloomberg, v1_name: Bloomberg, url: "https://feeds.bloomberg.com/technology/news.rss", tier: 1, authority: 1.2, poll: 3m, fetch_page: false, domains: [bloomberg.com]}
   - {id: wsj, name: Wall Street Journal, v1_name: Wall Street Journal, url: "https://feeds.content.dowjones.io/public/rss/RSSWSJD", tier: 1, authority: 1.2, poll: 3m, fetch_page: false, domains: [wsj.com]}
-  - {id: ft, name: Financial Times, v1_name: Financial Times, url: "https://www.ft.com/technology?format=rss", tier: 1, authority: 1.2, fetch_page: false, domains: [ft.com]}
+  - {id: ft, name: Financial Times, v1_name: Financial Times, url: "https://www.ft.com/technology?format=rss", tier: 1, authority: 1.2, fetch_page: false, domains: [ft.com], poll: 3m}
   # The Information's feed gives each scoop's opening (about 80 words), enough for a card.
   - {id: the_information, name: The Information, v1_name: The Information, url: "https://www.theinformation.com/feed", authority: 1.1, poll: 3m, fetch_page: false, domains: [theinformation.com]}
 
   # News, 10 min poll.
-  - {id: ars, name: Ars Technica, v1_name: Ars Technica, url: "https://feeds.arstechnica.com/arstechnica/index", domains: [arstechnica.com]}
-  - {id: wired, name: Wired, v1_name: Wired, url: "https://www.wired.com/feed/rss", domains: [wired.com]}
-  - {id: engadget, name: Engadget, v1_name: Engadget, url: "https://www.engadget.com/rss.xml", authority: 0.8, domains: [engadget.com]}
-  - {id: decoder, name: The Decoder, v1_name: The Decoder, url: "https://the-decoder.com/feed/", domains: [the-decoder.com]}
+  - {id: ars, name: Ars Technica, v1_name: Ars Technica, url: "https://feeds.arstechnica.com/arstechnica/index", domains: [arstechnica.com], poll: 3m}
+  - {id: wired, name: Wired, v1_name: Wired, url: "https://www.wired.com/feed/rss", domains: [wired.com], poll: 3m}
+  - {id: engadget, name: Engadget, v1_name: Engadget, url: "https://www.engadget.com/rss.xml", authority: 0.8, domains: [engadget.com], poll: 3m}
+  - {id: decoder, name: The Decoder, v1_name: The Decoder, url: "https://the-decoder.com/feed/", domains: [the-decoder.com], poll: 3m}
   - {id: mittr_ai, name: MIT Tech Review, v1_name: MIT Tech Review, url: "https://www.technologyreview.com/topic/artificial-intelligence/feed", domains: [technologyreview.com]}
   # Semafor has no tech-only feed; the site feed is filtered to its Technology and Business categories.
-  - {id: semafor, name: Semafor Tech, v1_name: Semafor Tech, url: "https://www.semafor.com/rss.xml", include_tags: [Technology, Business], domains: [semafor.com]}
-  - {id: 404media, name: 404 Media, v1_name: 404 Media, url: "https://www.404media.co/rss/", domains: [404media.co]}
+  - {id: semafor, name: Semafor Tech, v1_name: Semafor Tech, url: "https://www.semafor.com/rss.xml", include_tags: [Technology, Business], domains: [semafor.com], poll: 3m}
+  - {id: 404media, name: 404 Media, v1_name: 404 Media, url: "https://www.404media.co/rss/", domains: [404media.co], poll: 3m}
   - {id: platformer, name: Platformer, v1_name: Platformer, url: "https://www.platformer.news/rss/", domains: [platformer.news]}
-  - {id: register, name: The Register, v1_name: The Register, url: "https://www.theregister.com/headlines.atom", domains: [theregister.com]}
-  - {id: thenextweb, name: The Next Web, v1_name: The Next Web, url: "https://thenextweb.com/feed", authority: 0.9, domains: [thenextweb.com]}
+  - {id: register, name: The Register, v1_name: The Register, url: "https://www.theregister.com/headlines.atom", domains: [theregister.com], poll: 3m}
+  - {id: thenextweb, name: The Next Web, v1_name: The Next Web, url: "https://thenextweb.com/feed", authority: 0.9, domains: [thenextweb.com], poll: 3m}
   - {id: restofworld, name: Rest of World, v1_name: Rest of World, url: "https://restofworld.org/feed/latest", domains: [restofworld.org]}
-  - {id: tomshardware, name: Tom's Hardware, v1_name: Tom's Hardware, url: "https://www.tomshardware.com/feeds/all", authority: 0.9, domains: [tomshardware.com]}
+  - {id: tomshardware, name: Tom's Hardware, v1_name: Tom's Hardware, url: "https://www.tomshardware.com/feeds/all", authority: 0.9, domains: [tomshardware.com], poll: 3m}
   - {id: ieee, name: IEEE Spectrum, v1_name: IEEE Spectrum, url: "https://spectrum.ieee.org/feeds/feed.rss", domains: [spectrum.ieee.org]}
 
   # Business press and outlets that break founder drama, leaks, lawsuits and viral tech stories. General feeds:
   # the screening call keeps only what has a tech angle.
-  - {id: businessinsider, name: Business Insider, v1_name: Business Insider, url: "https://www.businessinsider.com/rss", authority: 0.9, domains: [businessinsider.com]}
-  - {id: fortune, name: Fortune, v1_name: Fortune, url: "https://fortune.com/feed/fortune-feeds/?id=3230629", domains: [fortune.com]}
-  - {id: axios, name: Axios, v1_name: Axios, url: "https://api.axios.com/feed/", domains: [axios.com]}
+  - {id: businessinsider, name: Business Insider, v1_name: Business Insider, url: "https://www.businessinsider.com/rss", authority: 0.9, domains: [businessinsider.com], poll: 3m}
+  - {id: fortune, name: Fortune, v1_name: Fortune, url: "https://fortune.com/feed/fortune-feeds/?id=3230629", domains: [fortune.com], poll: 3m}
+  - {id: axios, name: Axios, v1_name: Axios, url: "https://api.axios.com/feed/", domains: [axios.com], poll: 3m}
   - {id: nypost_tech, name: New York Post, v1_name: New York Post, url: "https://nypost.com/tech/feed/", authority: 0.8, poll: 3m, domains: [nypost.com]}
-  - {id: nypost_business, name: New York Post Business, v1_name: New York Post, url: "https://nypost.com/business/feed/", authority: 0.8}
-  - {id: futurism, name: Futurism, v1_name: Futurism, url: "https://futurism.com/feed", authority: 0.8, domains: [futurism.com]}
-  - {id: gizmodo, name: Gizmodo, v1_name: Gizmodo, url: "https://gizmodo.com/feed", authority: 0.8, domains: [gizmodo.com]}
+  - {id: nypost_business, name: New York Post Business, v1_name: New York Post, url: "https://nypost.com/business/feed/", authority: 0.8, poll: 3m}
+  - {id: futurism, name: Futurism, v1_name: Futurism, url: "https://futurism.com/feed", authority: 0.8, domains: [futurism.com], poll: 3m}
+  - {id: gizmodo, name: Gizmodo, v1_name: Gizmodo, url: "https://gizmodo.com/feed", authority: 0.8, domains: [gizmodo.com], poll: 3m}
   - {id: fastcompany, name: Fast Company, v1_name: Fast Company, url: "https://www.fastcompany.com/technology/rss", authority: 0.9, domains: [fastcompany.com]}
   - {id: variety, name: Variety, v1_name: Variety, url: "https://variety.com/v/digital/feed/", authority: 0.9, domains: [variety.com]}
   - {id: torrentfreak, name: TorrentFreak, v1_name: TorrentFreak, url: "https://torrentfreak.com/feed/", authority: 0.9, domains: [torrentfreak.com]}
 
   # Gadgets, EVs, space, gaming and crypto: they ship when the story is big or juicy (spice and importance decide).
-  - {id: 9to5mac, name: 9to5Mac, v1_name: 9to5Mac, url: "https://9to5mac.com/feed/", authority: 0.9, domains: [9to5mac.com]}
-  - {id: 9to5google, name: 9to5Google, v1_name: 9to5Google, url: "https://9to5google.com/feed/", authority: 0.9, domains: [9to5google.com]}
-  - {id: macrumors, name: MacRumors, v1_name: MacRumors, url: "https://feeds.macrumors.com/MacRumors-All", authority: 0.8, domains: [macrumors.com]}
-  - {id: electrek, name: Electrek, v1_name: Electrek, url: "https://electrek.co/feed/", authority: 0.9, domains: [electrek.co]}
-  - {id: teslarati, name: Teslarati, v1_name: Teslarati, url: "https://www.teslarati.com/feed/", authority: 0.8, domains: [teslarati.com]}
-  - {id: spacenews, name: SpaceNews, v1_name: SpaceNews, url: "https://spacenews.com/feed/", authority: 0.9, domains: [spacenews.com]}
-  - {id: spaceflightnow, name: Spaceflight Now, v1_name: Spaceflight Now, url: "https://spaceflightnow.com/feed/", authority: 0.9, domains: [spaceflightnow.com]}
+  - {id: 9to5mac, name: 9to5Mac, v1_name: 9to5Mac, url: "https://9to5mac.com/feed/", authority: 0.9, domains: [9to5mac.com], poll: 3m}
+  - {id: 9to5google, name: 9to5Google, v1_name: 9to5Google, url: "https://9to5google.com/feed/", authority: 0.9, domains: [9to5google.com], poll: 3m}
+  - {id: macrumors, name: MacRumors, v1_name: MacRumors, url: "https://feeds.macrumors.com/MacRumors-All", authority: 0.8, domains: [macrumors.com], poll: 3m}
+  - {id: electrek, name: Electrek, v1_name: Electrek, url: "https://electrek.co/feed/", authority: 0.9, domains: [electrek.co], poll: 3m}
+  - {id: teslarati, name: Teslarati, v1_name: Teslarati, url: "https://www.teslarati.com/feed/", authority: 0.8, domains: [teslarati.com], poll: 3m}
+  - {id: spacenews, name: SpaceNews, v1_name: SpaceNews, url: "https://spacenews.com/feed/", authority: 0.9, domains: [spacenews.com], poll: 3m}
+  - {id: spaceflightnow, name: Spaceflight Now, v1_name: Spaceflight Now, url: "https://spaceflightnow.com/feed/", authority: 0.9, domains: [spaceflightnow.com], poll: 3m}
   - {id: ign, name: IGN, v1_name: IGN, url: "https://feeds.feedburner.com/ign/news", authority: 0.8, domains: [ign.com]}
   - {id: eurogamer, name: Eurogamer, v1_name: Eurogamer, url: "https://www.eurogamer.net/feed", authority: 0.8, domains: [eurogamer.net]}
   - {id: kotaku, name: Kotaku, v1_name: Kotaku, url: "https://kotaku.com/rss", authority: 0.8, domains: [kotaku.com]}
-  - {id: coindesk, name: CoinDesk, v1_name: CoinDesk, url: "https://www.coindesk.com/arc/outboundfeeds/rss/", authority: 0.8, domains: [coindesk.com]}
-  - {id: theblock, name: The Block, v1_name: The Block, url: "https://www.theblock.co/rss.xml", authority: 0.8, domains: [theblock.co]}
+  - {id: coindesk, name: CoinDesk, v1_name: CoinDesk, url: "https://www.coindesk.com/arc/outboundfeeds/rss/", authority: 0.8, domains: [coindesk.com], poll: 3m}
+  - {id: theblock, name: The Block, v1_name: The Block, url: "https://www.theblock.co/rss.xml", authority: 0.8, domains: [theblock.co], poll: 3m}
   - {id: decrypt, name: Decrypt, v1_name: Decrypt, url: "https://decrypt.co/feed", authority: 0.8, domains: [decrypt.co]}
   - {id: newscientist, name: New Scientist, v1_name: New Scientist, url: "https://www.newscientist.com/subject/technology/feed/", authority: 0.9, domains: [newscientist.com]}
   - {id: quanta, name: Quanta Magazine, v1_name: Quanta Magazine, url: "https://api.quantamagazine.org/feed/", authority: 0.9, domains: [quantamagazine.org]}
 
   # Security.
-  - {id: bleeping, name: BleepingComputer, v1_name: BleepingComputer, url: "https://www.bleepingcomputer.com/feed/", domains: [bleepingcomputer.com]}
-  - {id: thehackernews, name: The Hacker News, v1_name: The Hacker News, url: "https://feeds.feedburner.com/TheHackersNews", authority: 0.9, domains: [thehackernews.com]}
-  - {id: therecord, name: The Record, v1_name: The Record, url: "https://therecord.media/feed", domains: [therecord.media]}
+  - {id: bleeping, name: BleepingComputer, v1_name: BleepingComputer, url: "https://www.bleepingcomputer.com/feed/", domains: [bleepingcomputer.com], poll: 3m}
+  - {id: thehackernews, name: The Hacker News, v1_name: The Hacker News, url: "https://feeds.feedburner.com/TheHackersNews", authority: 0.9, domains: [thehackernews.com], poll: 3m}
+  - {id: therecord, name: The Record, v1_name: The Record, url: "https://therecord.media/feed", domains: [therecord.media], poll: 3m}
   - {id: krebs, name: Krebs on Security, v1_name: Krebs on Security, url: "https://krebsonsecurity.com/feed/", domains: [krebsonsecurity.com]}
 
   # Regulators and prosecutors: enforcement actions and charges, first-hand.
@@ -113,26 +117,33 @@ sources:
 
   # India, 3 min poll, tier-1 for region=in (ET Tech, Inc42; Moneycontrol is unavailable, see top).
   - {id: ettech, name: ET Tech, v1_name: ET Tech, url: "https://economictimes.indiatimes.com/tech/rssfeeds/13357270.cms", tier: 1, region: in, poll: 3m, domains: [economictimes.indiatimes.com, economictimes.com]}
-  - {id: et_startups, name: ET Startups, v1_name: ET Tech, url: "https://economictimes.indiatimes.com/tech/startups/rssfeeds/78570550.cms", tier: 1, region: in}
-  - {id: et_funding, name: ET Funding, v1_name: ET Tech, url: "https://economictimes.indiatimes.com/tech/funding/rssfeeds/78570561.cms", tier: 1, region: in}
+  - {id: et_startups, name: ET Startups, v1_name: ET Tech, url: "https://economictimes.indiatimes.com/tech/startups/rssfeeds/78570550.cms", tier: 1, region: in, poll: 3m}
+  - {id: et_funding, name: ET Funding, v1_name: ET Tech, url: "https://economictimes.indiatimes.com/tech/funding/rssfeeds/78570561.cms", tier: 1, region: in, poll: 3m}
   - {id: inc42, name: Inc42, v1_name: Inc42, url: "https://inc42.com/feed/", tier: 1, region: in, poll: 3m, domains: [inc42.com]}
   - {id: yourstory, name: YourStory, v1_name: YourStory, url: "https://yourstory.com/feed", region: in, poll: 3m, domains: [yourstory.com]}
   - {id: entrackr, name: Entrackr, v1_name: Entrackr, url: "https://entrackr.com/rss", region: in, poll: 3m, domains: [entrackr.com]}
   - {id: medianama, name: MediaNama, v1_name: MediaNama, url: "https://www.medianama.com/feed/", region: in, poll: 3m, authority: 0.9, domains: [medianama.com]}
   - {id: livemint_tech, name: Mint, v1_name: Mint, url: "https://www.livemint.com/rss/technology", region: in, poll: 3m, domains: [livemint.com]}
-  - {id: livemint_companies, name: Mint Companies, v1_name: Mint, url: "https://www.livemint.com/rss/companies", region: in}
-  - {id: indianexpress, name: Indian Express, v1_name: Indian Express, url: "https://indianexpress.com/section/technology/feed/", region: in, authority: 0.9, domains: [indianexpress.com]}
-  - {id: hindu_tech, name: The Hindu, v1_name: The Hindu, url: "https://www.thehindu.com/sci-tech/technology/feeder/default.rss", region: in, authority: 0.9, domains: [thehindu.com]}
-  - {id: ht_tech, name: Hindustan Times, v1_name: Hindustan Times, url: "https://www.hindustantimes.com/feeds/rss/technology/rssfeed.xml", region: in, authority: 0.8, domains: [hindustantimes.com]}
-  - {id: indiatoday_tech, name: India Today, v1_name: India Today, url: "https://www.indiatoday.in/rss/1206688", region: in, authority: 0.8, domains: [indiatoday.in]}
+  - {id: livemint_companies, name: Mint Companies, v1_name: Mint, url: "https://www.livemint.com/rss/companies", region: in, poll: 3m}
+  - {id: indianexpress, name: Indian Express, v1_name: Indian Express, url: "https://indianexpress.com/section/technology/feed/", region: in, authority: 0.9, domains: [indianexpress.com], poll: 3m}
+  - {id: hindu_tech, name: The Hindu, v1_name: The Hindu, url: "https://www.thehindu.com/sci-tech/technology/feeder/default.rss", region: in, authority: 0.9, domains: [thehindu.com], poll: 3m}
+  - {id: ht_tech, name: Hindustan Times, v1_name: Hindustan Times, url: "https://www.hindustantimes.com/feeds/rss/technology/rssfeed.xml", region: in, authority: 0.8, domains: [hindustantimes.com], poll: 3m}
+  - {id: indiatoday_tech, name: India Today, v1_name: India Today, url: "https://www.indiatoday.in/rss/1206688", region: in, authority: 0.8, domains: [indiatoday.in], poll: 3m}
   - {id: aim, name: Analytics India Magazine, v1_name: Analytics India Magazine, url: "https://analyticsindiamag.com/feed/", region: in, authority: 0.9, domains: [analyticsindiamag.com]}
-  - {id: techinasia, name: Tech in Asia, v1_name: Tech in Asia, url: "https://www.techinasia.com/feed", authority: 0.9, domains: [techinasia.com]}
+  - {id: techinasia, name: Tech in Asia, v1_name: Tech in Asia, url: "https://www.techinasia.com/feed", authority: 0.9, domains: [techinasia.com], poll: 3m}
 
   # Startups and venture.
-  - {id: crunchbase, name: Crunchbase News, v1_name: Crunchbase News, url: "https://news.crunchbase.com/feed/", domains: [news.crunchbase.com]}
+  - {id: crunchbase, name: Crunchbase News, v1_name: Crunchbase News, url: "https://news.crunchbase.com/feed/", domains: [news.crunchbase.com], poll: 3m}
   - {id: sifted, name: Sifted, v1_name: Sifted, url: "https://sifted.eu/feed", domains: [sifted.eu]}
   - {id: techeu, name: Tech.eu, v1_name: Tech.eu, url: "https://tech.eu/feed/", authority: 0.9, domains: [tech.eu]}
   - {id: eustartups, name: EU-Startups, v1_name: EU-Startups, url: "https://www.eu-startups.com/feed/", authority: 0.8, domains: [eu-startups.com]}
+  - {id: geekwire, name: GeekWire, v1_name: GeekWire, url: "https://www.geekwire.com/feed/", authority: 0.9, poll: 3m, domains: [geekwire.com]}
+  - {id: siliconangle, name: SiliconANGLE, v1_name: SiliconANGLE, url: "https://siliconangle.com/feed/", authority: 0.9, domains: [siliconangle.com]}
+  - {id: tc_startups, name: TechCrunch Startups, v1_name: TechCrunch, url: "https://techcrunch.com/category/startups/feed/", tier: 1, authority: 1.2, poll: 3m}
+  - {id: e27, name: e27, v1_name: e27, url: "https://e27.co/feed/", authority: 0.8, domains: [e27.co]}
+  - {id: betakit, name: BetaKit, v1_name: BetaKit, url: "https://betakit.com/feed/", authority: 0.8, domains: [betakit.com]}
+  - {id: pymnts, name: PYMNTS, v1_name: PYMNTS, url: "https://www.pymnts.com/feed/", authority: 0.8, domains: [pymnts.com]}
+  - {id: livemint_ai, name: Mint AI, v1_name: Mint, url: "https://www.livemint.com/rss/AI", region: in, poll: 3m}
   - {id: newcomer, name: Newcomer, v1_name: Newcomer, url: "https://www.newcomer.co/feed", reads: true, authority: 0.9, domains: [newcomer.co], seed_days: 14}
 
   # Developers.
@@ -147,6 +158,12 @@ sources:
   - {id: rust_blog, name: Rust Blog, v1_name: Rust Blog, url: "https://blog.rust-lang.org/feed.xml", domains: [blog.rust-lang.org], seed_days: 7}
   - {id: go_blog, name: Go Blog, v1_name: Go Blog, url: "https://go.dev/blog/feed.atom", domains: [go.dev], seed_days: 7}
   - {id: python_insider, name: Python Insider, v1_name: Python Insider, url: "https://blog.python.org/feeds/posts/default", domains: [blog.python.org], seed_days: 7}
+  - {id: infoworld, name: InfoWorld, v1_name: InfoWorld, url: "https://www.infoworld.com/feed/", authority: 0.9, domains: [infoworld.com], seed_days: 7}
+  - {id: sdtimes, name: SD Times, v1_name: SD Times, url: "https://sdtimes.com/feed/", authority: 0.9, domains: [sdtimes.com], seed_days: 7}
+  - {id: jetbrains, name: JetBrains Blog, v1_name: JetBrains Blog, url: "https://blog.jetbrains.com/feed/", authority: 0.9, domains: [blog.jetbrains.com], seed_days: 7}
+  - {id: socket, name: Socket, v1_name: Socket, url: "https://socket.dev/api/blog/feed.atom", authority: 0.9, domains: [socket.dev], seed_days: 7}
+  - {id: aws_news, name: AWS News Blog, v1_name: AWS News Blog, url: "https://aws.amazon.com/blogs/aws/feed/", authority: 0.9, seed_days: 7}
+  - {id: ms_devblogs, name: Microsoft DevBlogs, v1_name: Microsoft DevBlogs, url: "https://devblogs.microsoft.com/feed/", authority: 0.9, domains: [devblogs.microsoft.com], seed_days: 7}
   - {id: k8s, name: Kubernetes Blog, v1_name: Kubernetes Blog, url: "https://kubernetes.io/feed.xml", domains: [kubernetes.io], seed_days: 7}
 
   # Lab and company blogs, 10 min poll.
@@ -197,4 +214,10 @@ sources:
   # Hacker News through the Algolia API (points and comments on every poll; hnrss.org timed out from the VPS).
   - {id: hn, name: Hacker News, v1_name: Hacker News, url: "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=60", tier: signal, kind: hn, format: hn_algolia, authority: 0.8, poll: 3m, fetch_page: false}
   - {id: hn_100, name: Hacker News, v1_name: Hacker News, url: "https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=points%3E100&hitsPerPage=80", tier: signal, kind: hn, format: hn_algolia, authority: 0.8, poll: 3m, fetch_page: false}
+  # Reddit's top posts of the day (the RSS route; the entries carry no score, so being listed is the signal) and
+  # GitHub's trending repositories (stars today as points). Neither is imported as an article: they add to the
+  # traction of the event they are about (rank.coverage), each with its own capped multiplier.
+  # One request for both subreddits: two feeds polled in the same tick got a 429 for the second.
+  - {id: reddit_technology, name: Reddit, v1_name: Reddit, url: "https://www.reddit.com/r/technology+programming/top/.rss?t=day&limit=50", tier: signal, kind: reddit, authority: 0.8, poll: 10m, fetch_page: false}
+  - {id: github_trending, name: GitHub Trending, v1_name: GitHub Trending, url: "https://github.com/trending?since=daily", tier: signal, kind: github, format: github_trending, authority: 0.8, poll: 10m, fetch_page: false}
   - {id: lobsters, name: Lobsters, v1_name: Lobsters, url: "https://lobste.rs/hottest.json", tier: signal, kind: lobsters, format: lobsters, authority: 0.8, poll: 10m, fetch_page: false}

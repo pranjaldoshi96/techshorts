@@ -1,0 +1,11 @@
+# Checks the published edition's age from outside the worker (deploy/check_freshness.py) and restarts the worker
+# when it has not published for 30 min: a hung tick or a crashed worker is then noticed and recovered without
+# anyone watching. Runs as root because it may restart a unit; it reads one file and touches nothing else.
+[Unit]
+Description=Techgist edition freshness check
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/techgist/deploy/check_freshness.py /var/lib/techgist/edition/edition.json --max-age-min 30 --restart techgist-worker
+# Stale is an answer, not a failure of this unit.
+SuccessExitStatus=1

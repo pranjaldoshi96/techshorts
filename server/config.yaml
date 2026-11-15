@@ -34,7 +34,9 @@ check_every_hours: 24
 #   judge_model   fact-checks every card line against the source and rules whether two reports are one development.
 #                 A different model family from the writer, so the check does not share the writer's blind spots.
 #   triage_model  screens a tick's new titles in one call before any of them costs a full write.
-#   backup_model  gets the same call once when the primary's endpoint fails (timeout, 5xx, 429s, bad key).
+#   backup_models get the same call once each, in order, when the primary's endpoint fails (timeout, 5xx, 429s,
+#                 bad key). Every such call is logged as a failover; health.json llmBackup and the llm_backup
+#                 alert report an outage of the primary, and cards that fail on a backup wait for the primary.
 llm:
   base_url: https://integrate.api.nvidia.com/v1      # embeddings and the per-tick key check
   default_provider: nvidia
@@ -43,13 +45,17 @@ llm:
       base_url: https://inference-api.nvidia.com/v1
       key_env: HUB_API_KEY
       rate_per_min: 90
-      timeout_s: 60
+      # A card takes 9 s (p95 14 s). Two timeouts in a row open the provider's circuit for 5 minutes
+      # (llm.BREAKER_COOLDOWN_S), during which calls go straight to the backup models.
+      timeout_s: 45
       params: {reasoning_effort: low}
     nvidia:
       base_url: https://integrate.api.nvidia.com/v1
       key_env: NVIDIA_API_KEY
       rate_per_min: 30
-      timeout_s: 30
+      # The large backup model writes a card in 11 s on average with a long tail; at 30 s its slow calls timed out
+      # and took the smaller backup's turn with them (a timeout marks the provider down for that call).
+      timeout_s: 60
       params: {chat_template_kwargs: {enable_thinking: false}}
   model: hub:openai/openai/gpt-6.1-sol
   judge_model: hub:gcp/google/gemini-4-argon
@@ -57,7 +63,17 @@ llm:
   # Same-development rulings for clustering (cluster.py). On the test run's Nvidia saga (tools/recluster.py) this
   # model and the fact-checker's agreed on all but one of 44 rulings, at 1.7 s a call against 4.1 s.
   cluster_model: hub:gcp/google/gemini-3.8-flash
-  backup_model: nvidia:nvidia/nemotron-3.5-lightning-30b-a3b
+  # Tried in order, once each, when a call's own model fails at the endpoint. Measured on the VPS on 2026-11-15
+  # with the hub taken away (tools/eval_cards.py STATE --recent 50 --without hub --min-pass 0.6): the large
+  # Nemotron wrote and fact-checked 35 of 50 cards that passed every check (11 s a write), with the one extra
+  # feedback retry a backup gets (llm.BACKUP_EXTRA_RUNGS); the small one, the only backup until then, 2 of 16.
+  # The hub's Claude models are not usable as backups through this client: they reject `temperature`.
+  # After changing a prompt, a check or this list, re-run that command; it exits 1 under the bar.
+  backup_models:
+    - nvidia:nvidia/nemotron-3-ultra-550b-a55b
+    - nvidia:nvidia/nemotron-3.5-lightning-30b-a3b
+  # Request fields for one model, replacing its provider's `params` (for a model that rejects them):
+  #   model_params: {"hub:vendor/model": {}}
   # Third rung of the retry ladder (section 2.8): another model gets one try after a failed feedback retry. Off.
   fallback_model: null
   triage: true
@@ -99,6 +115,7 @@ cluster:
 
 # Signals that become cards (fetch.promote_signals): Techmeme and Mediagazer picks always; HN and Lobsters links
 # past these points. per_tick caps how many linked articles are imported in one tick.
+# Reddit's top posts and GitHub trending are traction only (rank.coverage), never imported.
 signals:
   promote: {techmeme: 0, hn: 150, lobsters: 60, max_age_h: 36, per_tick: 10}
 
@@ -137,7 +154,10 @@ publish:
 # anchors put strong analysis at 4-5), so with the spec's Reads minimum of 5, Reads (1.2's Blogs tab) is nearly
 # empty; that is the lead's call, so the spec value stands until changed here.
 # Reads at 4: with the spec's 5 the Blogs tab was empty in the shadow run (essays are rated 4).
-tabs: {reads: {min_importance: 4}}
+# Startups and India at 4: an ordinary round is rated 4 ("a small round"), and with the spec's 5 the second VPS
+# test run's Startups tab had 10 cards (4 under a day old) against the live feed's 29, while 11 written startup
+# events of the last three days sat at 4. In their own tab they rank below the bigger rounds; Top still needs a 6.
+tabs: {reads: {min_importance: 4}, startups: {min_importance: 4}, india: {min_importance: 4}}
 images:
   # Source pictures downloaded per tick (best-ranked events first); the rest get theirs on later ticks.
   max_downloads_per_tick: 60

@@ -115,10 +115,17 @@ def main():
             out.append(f"x{cov:.2f} {card_line(c, now)}")
             out.append(f"       publishers: {', '.join(c.data['publishers'][:8])}")
 
-        out.append("\n== Fast lane (stories first seen after the first publish) ==")
+        out.append("\n== Fast lane (stories published while the worker was polling) ==")
         rows = db.q("SELECT s.event_id, s.published_at, s.first_at, s.first_seen_at, e.headline FROM shipped s"
                     " LEFT JOIN events e ON e.id = s.event_id WHERE s.first_seen_at > ?"
                     " AND s.event_id NOT IN (SELECT twin_id FROM twins) ORDER BY s.first_at", first_pub)
+        rows = [r for r in rows if health.was_polling(db, from_iso(r["published_at"]))]
+        live = health.freshness(db, now - timedelta(hours=24))["live"]
+        out.append(f"last 24 h: {live['events']} stories, publisher -> edition {live['publisherToAppMin']}, of which"
+                   f" publisher -> first seen (feed delay + poll interval) {live['feedLagMin']}")
+        for sid, v in list(live["bySource"].items())[:25]:
+            out.append(f"  {sid:20} {v['events']:3} stories  feed lag p50 {v['feedLagMin']} min  "
+                       f"publisher -> edition p50 {v['publisherToAppMin']} min")
         lag_pub = [(from_iso(r["first_at"]) - from_iso(r["published_at"])).total_seconds() / 60 for r in rows]
         lag_seen = [(from_iso(r["first_at"]) - from_iso(r["first_seen_at"])).total_seconds() / 60 for r in rows]
         if rows:

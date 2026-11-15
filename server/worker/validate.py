@@ -297,9 +297,15 @@ def select(out, attribution=None, hedge_source=None):
     # The push alert never costs a card its place. A title over the limit (the model counts badly: 41 characters
     # failed two cards) gives way to the short headline, which obeys the same rules; a body over the limit to the
     # short first or second sentence. With no fitting title the edition shows the publisher's name.
-    if not 0 < len(getattr(out, "notif_title", "") or "") <= NOTIF_TITLE_MAX:
+    # A title that is only a name ("Gary Marcus", "Nvidia") says who, not what happened: it gives way the same way.
+    names = [*(out.entities.people or []), *(out.entities.orgs or [])] if getattr(out, "entities", None) else []
+    if attribution is not None:
+        names += [attribution.full, attribution.name]
+    title = (getattr(out, "notif_title", "") or "").strip()
+    if not 0 < len(title) <= NOTIF_TITLE_MAX or name_only(title, names):
         short = (out.headline_short or "").strip()
-        out.notif_title = short if 0 < len(short) <= NOTIF_TITLE_MAX and not PREFIX.match(short) else ""
+        out.notif_title = short if (0 < len(short) <= NOTIF_TITLE_MAX and not PREFIX.match(short)
+                                    and not name_only(short, names)) else ""
     if len(getattr(out, "notif_line", "") or "") > NOTIF_MAX:
         out.notif_line = next((s for s in (getattr(out, "s1_alt", ""), getattr(out, "s2_alt", ""))
                                if 0 < len(s) <= NOTIF_MAX), out.notif_line)
@@ -540,6 +546,37 @@ def _same_entity(word, entity):
         len(word) >= 4 and entity.startswith(word))
 
 
+def name_only(title, names=()):
+    """True when an alert title is a single word or exactly one of `names` (a person, a company, an outlet)."""
+    norm = lambda x: " ".join(re.sub(r"[^\w\s]", " ", (x or "").lower()).split())  # noqa: E731
+    t = norm(title)
+    return len(t.split()) < 2 or t in {norm(n) for n in names if n}
+
+
+# A brief (llm.brief_event) is a short card written from the few lines available on a paywalled scoop: S1, and S2
+# when the lines hold a second fact. Its lengths are its own; every other check is the full card's.
+BRIEF_S1 = (8, 28)
+BRIEF_S2 = (6, 26)
+# How a card may name an outlet whose listed name is longer.
+OUTLET_ALIASES = {"financial times": ("ft",), "wall street journal": ("wsj", "journal"),
+                  "new york times": ("nyt", "times"), "washington post": ("post", "wapo"),
+                  "associated press": ("ap",), "the information": ("information",)}
+
+
+def names_outlet(text, outlets):
+    """True when `text` says whose reporting it is: one of `outlets` (or its usual short name), or a "Report:" /
+    "Sources:" label or "sources say"."""
+    low = " " + re.sub(r"[^\w\s:]", " ", (text or "").lower()) + " "
+    if re.search(r"\b(report|reports|reported|reportedly|sources?|according to)\b", low):
+        return True
+    for o in outlets:
+        o = re.sub(r"\s*\(.*?\)", "", (o or "").lower()).strip()
+        for name in (o, *OUTLET_ALIASES.get(o, ())):
+            if name and re.search(rf"\b{re.escape(name)}\b", low):
+                return True
+    return False
+
+
 def headline_problems(headline):
     out = []
     h = (headline or "").strip()
@@ -581,17 +618,42 @@ def summary_problems(full, source_text):
     return out
 
 
-def check(out, source_text, title, source_name, attribution=None, author=None, lead=None):
+def check(out, source_text, title, source_name, attribution=None, author=None, lead=None, brief=False,
+          outlets=(), short_card=False):
     """Validates one LLM output (llm.WriteOutput) against the item's own text. Returns a Verdict.
 
     Grounding uses the whole text; the hedge rule looks at the title and the opening of `lead` (see
-    HEDGE_SCOPE_WORDS)."""
+    HEDGE_SCOPE_WORDS). `brief` checks a brief's own lengths (BRIEF_S1, BRIEF_S2) and that it names whose
+    reporting it is (`outlets`). `short_card` is a card from a short text (llm.SHORT_TEXT_WORDS): its summary is
+    S1 + S2 only, so the third sentence is neither required nor shipped."""
     v = Verdict(ok=True)
     for code, msg in headline_problems(out.headline):
         v.fail(code, msg)
-    full, short, problems = trim(out.s1, out.s2, out.s3)
-    for code, msg in problems:
-        v.fail(code, msg)
+    if brief:
+        out.s3 = ""
+        full = short = join(out.s1, out.s2)
+        n1, n2 = word_count(out.s1), word_count(out.s2)
+        if not BRIEF_S1[0] <= n1 <= BRIEF_S1[1]:
+            v.fail("too_long" if n1 > BRIEF_S1[1] else "too_short",
+                   f"S1 was {n1} words; make it {BRIEF_S1[0]} to {BRIEF_S1[1]}.")
+        if n2 and not BRIEF_S2[0] <= n2 <= BRIEF_S2[1]:
+            v.fail("too_long" if n2 > BRIEF_S2[1] else "too_short",
+                   f"S2 was {n2} words; make it {BRIEF_S2[0]} to {BRIEF_S2[1]}, or leave it empty.")
+        if not names_outlet(f"{out.headline} {out.s1}", outlets):
+            v.fail("sourcing_dropped", "Say whose reporting this is in the headline or S1: name the outlet "
+                                       f"({', '.join(outlets[:3]) or 'the outlet'}) or start with 'Report:'.")
+    elif short_card:
+        out.s3 = ""
+        full, short, problems = trim(out.s1, out.s2, "")
+        # Only the S1+S2 range applies: there is no third sentence to make up the full length.
+        problems = [p for p in problems if p[1].startswith("S1+S2")]
+        full = short
+        for code, msg in problems:
+            v.fail(code, msg)
+    else:
+        full, short, problems = trim(out.s1, out.s2, out.s3)
+        for code, msg in problems:
+            v.fail(code, msg)
     v.full, v.short = full, short
     for code, msg in summary_problems(join(out.s1, out.s2, out.s3), source_text):
         v.fail(code, msg)
@@ -615,6 +677,11 @@ def check(out, source_text, title, source_name, attribution=None, author=None, l
                *attribution_mod.LABELS]
     if attribution is not None:
         allowed.append(attribution.name)
+    for o in outlets:
+        # A brief names whose reporting it is, by the outlet's name or its usual short form ("FT", "WSJ").
+        o = re.sub(r"\s*\(.*?\)", "", o or "").strip()
+        allowed += re.findall(r"[\w']+", o) + [a.upper() if len(a) <= 4 else a.capitalize()
+                                               for a in OUTLET_ALIASES.get(o.lower(), ())]
     ok, bad = grounded(f"{full} {notif}", source, allowed, headline=f"{out.headline or ''}. {notif_title}".strip(". "))
     if not ok:
         v.fail("ungrounded", f"'{bad}' is not in the source text; use only facts from the text.")
@@ -643,7 +710,7 @@ def check(out, source_text, title, source_name, attribution=None, author=None, l
                                    f"\"{source_name or 'the outlet'} reports\").")
     if attribution is not None and not attribution_mod.has_prefix(out.headline, attribution):
         v.fail("attribution", attribution.feedback())
-    elif attribution is None and out.type in LABELLED_TYPES and not PREFIX.match(
+    elif attribution is None and not brief and out.type in LABELLED_TYPES and not PREFIX.match(
             out.headline or ""):
         v.fail("attribution", f"This is {out.type}; start the headline with the author's surname or "
                               f"'{out.type.capitalize()}:'.")
