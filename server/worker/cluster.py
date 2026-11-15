@@ -43,13 +43,14 @@ JOIN_ONLY_IF_PICKED = {frozenset(("launch", "funding"))}
 FOLLOWUP_AFTER_H = 24
 FOLLOWUP_CAP = 6
 # A planned event that happened: the event's headline is about what is coming ("set to become billionaires in
-# upcoming IPO") and a new hard-news member reports it done ("Anthropic's IPO lands"). The model left
-# material_update false on that CNBC piece, so the card kept saying "upcoming" a day after the listing.
+# upcoming IPO") and a new hard-news member reports it done ("Anthropic's IPO prices", "Acme ships X"). Ambiguous
+# verbs are left out: CNBC's "Anthropic's IPO lands as the AI trade looks for a bright spot" meant the IPO week had
+# arrived (it lists on Nov 19), and the rewrite it triggered rightly kept "upcoming".
 PROSPECTIVE = re.compile(r"\b(set to|plans? to|planning|upcoming|expected to|expects? to|targets?|targeting|"
                          r"seeks?|seeking|eyes|eyeing|prepares?|preparing|considers?|considering|in talks|"
                          r"weighs?|weighing|could|may|will|aims? to|ahead of|files? for|filed for|nears?|nearing)\b",
                          re.I)
-REALIZED = re.compile(r"\b(lands|landed|debuts?|debuted|prices|priced|lists|listed|goes public|went public|"
+REALIZED = re.compile(r"\b(debuts?|debuted|prices|priced|lists|listed|goes public|went public|"
                       r"opens|opened|soars?|soared|jumps?|jumped|surges?|surged|closes|closed|completes?|completed|"
                       r"finali[sz]es|finali[sz]ed|launches|launched|ships|shipped|releases|released|resigns|resigned|"
                       r"steps down|stepped down|approves?|approved|passes|passed|signs|signed|wins|won|rules|ruled|"

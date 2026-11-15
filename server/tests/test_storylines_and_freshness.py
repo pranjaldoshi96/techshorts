@@ -145,7 +145,10 @@ def test_published_at_carries_a_material_update():
 
 def test_a_planned_event_that_happened_is_a_material_update():
     assert cluster.realizes("Anthropic co-founders set to become billionaires in upcoming IPO",
-                            "Anthropic's IPO lands as the embattled AI trade looks for a much-needed bright spot")
+                            "Anthropic shares debut on Nasdaq, valuing the AI lab at $1.4T")
+    # "Lands" here meant the IPO week had arrived; ambiguous verbs don't count.
+    assert not cluster.realizes("Anthropic co-founders set to become billionaires in upcoming IPO",
+                                "Anthropic's IPO lands as the embattled AI trade looks for a much-needed bright spot")
     assert not cluster.realizes("Nvidia CEO Jensen Huang resigns amid scandals", "Nvidia shares fall after exit")
     assert not cluster.realizes("Acme plans to launch X", "Acme could launch X next week")
 
@@ -153,7 +156,7 @@ def test_a_planned_event_that_happened_is_a_material_update():
     first = tc._item("https://g/1", [1, 0, 0], source_id="guardian", people=["Amodei"],
                      pub=NOW - timedelta(hours=20))
     landed = tc._item("https://t/2", [1, 0, 0], source_id="techcrunch", people=["Amodei"])
-    landed.headline = "Anthropic's IPO lands with a $900B valuation"
+    landed.headline = "Anthropic's IPO prices at $78, valuing it at $900B"
     tc._db_items(db, [first, landed])
     store = tc._store_with(db, [first])
     e = store.events[cluster.event_id(first.url)]
@@ -167,7 +170,7 @@ def test_a_planned_event_that_happened_is_a_material_update():
     first = tc._item("https://g/1", [1, 0, 0], source_id="guardian", people=["Amodei"],
                      pub=NOW - timedelta(hours=20))
     landed = tc._item("https://t/2", [1, 0, 0], source_id="techcrunch", people=["Amodei"])
-    landed.headline = "Anthropic's IPO lands with a $900B valuation"
+    landed.headline = "Anthropic's IPO prices at $78, valuing it at $900B"
     tc._db_items(db, [first, landed])
     store = tc._store_with(db, [first])
     e = store.events[cluster.event_id(first.url)]
