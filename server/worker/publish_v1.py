@@ -9,6 +9,10 @@ One article per event, in the exact shape Edition.swift and Article.swift decode
   - topRank is the 0-based Top rank (1.2's own convention), title/headline the event headline, excerpt/content/
     summary the full summary, source the lead's v1_name, alsoCoveredBy the other publishers' v1 names,
     image the 720 px std JPEG.
+  - spice (1-10) and notification {title, body} ride along on every written card for the next app release's push
+    alerts: the title is at most 40 characters, the body a hook of at most 110, both validated and fact-checked
+    with the card. notifications.json next to the edition lists the cards ranked for pushing (spice x importance
+    x traction).
   - Degraded cards (no validated AI text) carry the publisher title and a <= 55-word excerpt, no headline or
     summary, and aiText: false. 1.2 ignores unknown keys, so aiText, eventId and the edition's degraded flag
     ride along for health checks and R2.
@@ -57,7 +61,7 @@ def _words(s):
 
 MEMBER_SQL = """
 SELECT i.url_canonical, i.url, i.source_id, i.title, i.feed_text, i.image, i.og_image, i.published_at,
-       i.first_seen_at, w.status, w.text, w.entities
+       i.first_seen_at, i.extra, w.status, w.text, w.entities
 FROM event_members em JOIN items i ON i.url_canonical = em.url_canonical
 LEFT JOIN writes w ON w.url_canonical = em.url_canonical
 WHERE em.event_id = ?
@@ -83,6 +87,15 @@ class Ctx:
     def v1_name(self, sid):
         s = self.src(sid)
         return s.v1_name if s else sid
+
+    def pub(self, m):
+        """The publisher name a member shows: its source's, or the host of an article imported from a signal's
+        link under the catch-all source (items.extra.publisher)."""
+        try:
+            name = json.loads(m.get("extra") or "{}").get("publisher")
+        except (TypeError, ValueError):
+            name = None
+        return name or self.v1_name(m["source_id"])
 
     def authority(self, sid):
         s = self.src(sid)
@@ -122,7 +135,7 @@ def event_candidate(ctx, ev):
         news = [m for m in news if not ctx.editorial.blocked(ctx.src(m["source_id"]), m["url"])]
     publishers = []
     for m in sorted(news, key=lambda m: (-ctx.authority(m["source_id"]), m["published_at"])):
-        name = ctx.v1_name(m["source_id"])
+        name = ctx.pub(m)
         if name not in publishers:
             publishers.append(name)
     hn = json.loads(ev["hn"] or "null") or {}
@@ -133,7 +146,7 @@ def event_candidate(ctx, ev):
     lead_tier1 = ctx.tier1(lead["source_id"])
     if not ai_text and not (len(publishers) >= 2 or lead_tier1):
         return None, "no_text"      # held; publishes once its text validates or coverage grows
-    if self_promo(ctx.v1_name(lead["source_id"]), lead["title"]):
+    if self_promo(ctx.pub(lead), lead["title"]):
         return None, "self_promo"
     importance = ev["importance"] or 1
     ev_type, headline = column_type(ev["type"], lead["url"], headline)
@@ -147,16 +160,29 @@ def event_candidate(ctx, ev):
         n_publishers=max(1, len(publishers)), on_techmeme=bool(ev["on_techmeme"]), hn_points=hn.get("points") or 0,
         authority=max([ctx.authority(m["source_id"]) for m in news] or [0.8]),
         published_at=from_iso(ev["published_at"]), material_at=from_iso(ev["last_material_update_at"]),
-        lead_source=lead["source_id"], lead_publisher=ctx.v1_name(lead["source_id"]),
+        lead_source=lead["source_id"], lead_publisher=ctx.pub(lead),
         lead_reads=bool(lead_src and lead_src.reads), lead_tier1=lead_tier1, ai_text=ai_text,
         classified=ev["type"] is not None, boost=ctx.editorial.boost.get(ev["id"], 1.0),
         pin=frozenset(ctx.editorial.pins.get(ev["id"], ())), title=headline or lead["title"] or "",
+        spice=_col(ev, "spice") or rank.SPICE_NEUTRAL,
+        lobsters_points=(json.loads(_col(ev, "social") or "null") or {}).get("lobsters") or 0,
         keys=frozenset().union(*(entity_keys(json.loads(m["entities"] or "{}")) for m in members)))
     c.data = {"lead": lead, "members": members, "publishers": publishers, "headline": headline, "summary": summary,
               "hn": hn, "parent_id": ev["parent_id"], "title_words": _words(lead["title"]),
               "first_seen_at": min(m["first_seen_at"] for m in members),
-              "images": image_sources(ctx, lead, members), "orgs": primary_orgs(members)}
+              "images": image_sources(ctx, lead, members), "orgs": primary_orgs(members),
+              # An owner's override replaces the card's text, so the alert written for the old text is dropped.
+              "notif_title": None if over else _col(ev, "notif_title"),
+              "notif_line": None if over else ev["notif_line"]}
     return c, None
+
+
+def _col(row, name):
+    """A column that an older state.db row or a test's hand-built row may not have."""
+    try:
+        return row[name]
+    except (KeyError, IndexError):
+        return None
 
 
 def column_type(ev_type, url, headline):
@@ -343,7 +369,7 @@ def headline_vectors(db, embedder, cands, now, limit=60):
     return len(todo)
 
 
-def suppress_duplicates(cands, dedup):
+def suppress_duplicates(cands, dedup, ruled_apart=None):
     """One card per event across the whole edition: when two events' headlines are one story by the calibrated
     headline rule (rank.Dedup; a clustering miss, e.g. a single-source ET Tech report of the Ring drone launch that
     four other outlets ran as one event), only the better-covered one stays, in every tab. Without this the weaker
@@ -356,11 +382,15 @@ def suppress_duplicates(cands, dedup):
     "Microsoft Outlook hit by new outage" = 0.54), so distinct stories vanished."""
     if not isinstance(dedup, rank.Dedup):
         dedup = rank.Dedup(dedup)
+    # `ruled_apart(a, b)`: the clustering judge has ruled the two events different developments (cluster.
+    # merge_twins asks it before merging a pair this guard reports); such a pair is two cards.
+    ruled_apart = ruled_apart or (lambda a, b: False)
     order = sorted(cands, key=lambda c: (-c.n_publishers, -c.importance, c.published_at, c.id))
     kept, dropped = [], []
     for c in order:
         twin = next((k for k in kept if dedup.duplicate(c, k)
-                     and c.data.get("parent_id") != k.id and k.data.get("parent_id") != c.id), None)
+                     and c.data.get("parent_id") != k.id and k.data.get("parent_id") != c.id
+                     and not ruled_apart(c.id, k.id)), None)
         if twin is None:
             kept.append(c)
         else:
@@ -468,7 +498,51 @@ def article(c, category, top_rank, image_url):
         a["headline"], a["summary"] = c.data["headline"], c.data["summary"]
     a["aiText"] = c.ai_text
     a["eventId"] = c.id
+    if c.classified:
+        a["spice"] = int(c.spice)
+    note = notification(c)
+    if note:
+        a["notification"] = note
     return a
+
+
+NOTIF_TITLE_MAX, NOTIF_BODY_MAX = 40, 110
+
+
+def notification(c):
+    """{title, body} for a push alert, or None. Only for a card with validated text: the hook went through the
+    same grounding, tense and fact checks as the headline. A missing or over-long title falls back to the
+    publisher's name, which is always true."""
+    body = (c.data.get("notif_line") or "").strip()
+    if not c.ai_text or not body or len(body) > NOTIF_BODY_MAX:
+        return None
+    title = (c.data.get("notif_title") or "").strip()
+    if not title or len(title) > NOTIF_TITLE_MAX:
+        title = c.lead_publisher or "Techgist"
+    return {"title": title, "body": body}
+
+
+NOTIFY_MAX_AGE_H = 12
+NOTIFY_LIST = 20
+
+
+def notification_candidates(tabs, now):
+    """The edition's cards ranked for push alerts: spice x importance x traction (rank.notification_score), fresh
+    cards only. The next app release decides how many to send; this is the order to send them in."""
+    seen, out = set(), []
+    for ranked in tabs.values():
+        for c, _ in ranked:
+            note = notification(c)
+            if c.id in seen or note is None or c.age_eff(now) > NOTIFY_MAX_AGE_H:
+                continue
+            seen.add(c.id)
+            out.append({"eventId": c.id, "score": round(rank.notification_score(c), 4), "spice": int(c.spice),
+                        "importance": int(c.importance), "publishers": int(c.n_publishers),
+                        "onTechmeme": bool(c.on_techmeme), "hnPoints": int(c.hn_points or 0),
+                        "ageH": round(c.age_eff(now), 1), "title": note["title"], "body": note["body"],
+                        "headline": c.data.get("headline"), "url": clean_url(c.data["lead"]["url_canonical"])})
+    out.sort(key=lambda n: (-n["score"], n["eventId"]))
+    return out[:NOTIFY_LIST]
 
 
 def build(ctx, embedder=None, out_dir=None, image_store=None):
@@ -483,7 +557,9 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
     live.sort(key=lambda c: -rank.cand_score(c, tab_specs["top"], now, degraded))
     headline_vectors(ctx.db, embedder, live, now)
     dedup = rank.Dedup.from_cfg(ctx.cfg)
-    live, twins = suppress_duplicates(live, dedup)
+    apart = {(r["a"][5:], r["b"]) for r in ctx.db.q(
+        "SELECT a, b FROM judgements WHERE a LIKE 'pair:%' AND verdict != 'same'")}
+    live, twins = suppress_duplicates(live, dedup, lambda a, b: tuple(sorted((a, b))) in apart)
     dcfg = ctx.cfg.get("dedup") or {}
     t_story = dcfg.get("t_storyline", ctx.cfg["cluster"]["t_join"])
     storylines(live, dedup, t_story, dcfg.get("t_storyline_org", t_story))
@@ -531,7 +607,13 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
             image_url = f"{base}img/{name}_std.jpg"
         articles.append(article(c, cat, top_rank.get(eid), image_url))
     edition = {"publishedAt": iso(now), "articles": articles, "degraded": ctx.outage or False}
+    spices = [c.spice for c in by_id.values() if c.classified]
     report = {
+        "notifications": notification_candidates(tabs, now),
+        "spice": {"cards": len(spices), "median": statistics.median(spices) if spices else None,
+                  "atLeast7": sum(v >= rank.SPICY for v in spices),
+                  "histogram": {str(i): sum(v == i for v in spices) for i in range(1, 11)},
+                  "topMedian": statistics.median([c.spice for c, _ in tabs["top"]]) if tabs["top"] else None},
         "degraded": ctx.outage, "candidates": len(cands), "held": held, "leftOut": left_out,
         "duplicatesSuppressed": len(twins), "twins": twins,
         "degradedCards": sum(not a["aiText"] for a in articles), "articles": len(articles),
@@ -584,6 +666,12 @@ def write(ctx, edition, report, used_images, out_dir, check=True, tabs=None):
         ctx.db.conn.execute(
             "INSERT INTO shipped VALUES (?,?,?,?,?) ON CONFLICT(event_id) DO UPDATE SET last_at = excluded.last_at",
             (a["eventId"], a["publishedAt"], iso(ctx.now), iso(ctx.now), _first_seen(tabs, a["eventId"])))
+    # The cards ranked for push alerts, next to the edition (the next app release's sender reads it).
+    notes = final[:-len("edition.json")] + "notifications.json"
+    with open(notes + ".tmp", "w") as f:
+        json.dump({"publishedAt": edition["publishedAt"], "candidates": report.get("notifications") or []}, f,
+                  separators=(",", ":"), ensure_ascii=False)
+    os.replace(notes + ".tmp", notes)
     for twin, primary in report.get("twins") or ():
         ctx.db.conn.execute("INSERT OR IGNORE INTO twins VALUES (?,?,?,?)", (twin, primary, None, iso(ctx.now)))
     images_mod.prune(out_dir, used_images)
@@ -615,8 +703,44 @@ def publish(db, cfg, srcs, now, out_dir, embedder=None, outage=None, check=True,
         return report
     ok, problem = write(ctx, edition, report, used, out_dir, check, tabs)
     report["published"], report["problem"] = ok, problem
+    if ok:
+        report["imageUrls"] = image_url_check(db, cfg, edition, now, session)
     db.commit()
     return report
+
+
+IMAGE_CHECK_EVERY = timedelta(minutes=30)
+
+
+def image_url_check(db, cfg, edition, now, session=None, sample=3):
+    """Do the edition's image URLs resolve? The files are written under out_dir/img and the URLs point at
+    publish.base_url, so they resolve only once out_dir is served there. In a test run with no git_remote nothing
+    is served (the VPS test edition's images all returned 404): that is reported as served: false rather than
+    fetched. With a remote, a few URLs are fetched every 30 min and a failure alerts."""
+    pub = cfg.get("publish") or {}
+    urls = [a["image"] for a in edition["articles"] if a.get("image")]
+    if not pub.get("git_remote"):
+        return {"served": False, "why": "publish.git_remote is null: the edition and img/ exist only in out_dir",
+                "urls": len(urls)}
+    last = from_iso(db.get_meta("image_check_at"))
+    if last and now - last < IMAGE_CHECK_EVERY:
+        return json.loads(db.get_meta("image_check") or "null")
+    import requests
+    bad = []
+    for u in urls[:sample]:
+        try:
+            r = (session or requests).head(u, timeout=10, allow_redirects=True)
+            if r.status_code != 200:
+                bad.append(f"{u}: HTTP {r.status_code}")
+        except requests.RequestException as e:
+            bad.append(f"{u}: {type(e).__name__}")
+    out = {"served": True, "checked": min(sample, len(urls)), "failed": bad}
+    db.set_meta("image_check_at", iso(now))
+    db.set_meta("image_check", json.dumps(out))
+    if bad:
+        from . import health
+        health.notify(db, "image_urls", f"edition image URLs do not resolve: {bad[0]}")
+    return out
 
 
 def _resolve(db, eid):

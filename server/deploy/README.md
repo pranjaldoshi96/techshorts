@@ -7,7 +7,7 @@
 | Code | `/opt/techgist` (a copy of `server/`, owned by root), venv in `/opt/techgist/venv`, deployed revision in `/opt/techgist/REVISION` |
 | State | `/var/lib/techgist` (`TECHGIST_STATE`): `state.db`, `health.json`, `editorial.yaml`, `bin/v1decode` |
 | Edition | `/var/lib/techgist/edition/` (`edition.json`, `health.json`, `img/`). Not served and not pushed: `publish.git_remote` is null and `deploy.sh` refuses to deploy otherwise. |
-| Keys | `/etc/techgist/` (`root:techgist`, directory 750, files 640). The worker reads `nvidia_key` through `NVIDIA_API_KEY_FILE`; keys are never in the unit, the environment or the journal. Optional `/etc/techgist/env` with `NTFY_TOPIC=...`. |
+| Keys | `/etc/techgist/` (`root:techgist`, directory 750, files 640). The worker reads `hub_key` (GPT and Gemini on the inference hub: card writing, fact-check, clustering judge, screening) through `HUB_API_KEY_FILE` and `nvidia_key` (embeddings and the backup chat model) through `NVIDIA_API_KEY_FILE`; keys are never in the unit, the environment or the journal. Optional `/etc/techgist/env` with `NTFY_TOPIC=...`. |
 | Firewall | ufw: OpenSSH, 80, 443 |
 | 1.2 decoder | `/var/lib/techgist/bin/v1decode`, built by `setup_vps.sh` with the Swift 6.2 toolchain in `/opt/swift` (static stdlib; no Docker on this box). Every publish runs it. |
 

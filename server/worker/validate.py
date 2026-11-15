@@ -12,6 +12,7 @@ FULL_MIN, FULL_MAX, FULL_TARGET = 45, 62, 52
 SHORT_MIN, SHORT_MAX, SHORT_TARGET = 28, 42, 36
 HEADLINE_MAX = 72
 NOTIF_MAX = 110
+NOTIF_TITLE_MAX = 40
 
 BANNED = re.compile(r"\b(revolutioni[sz]e\w*|game-changer\w*|groundbreaking|delve\w*|landscape|seamless\w*|"
                     r"cutting-edge)\b", re.I)
@@ -55,6 +56,115 @@ TITLE_CLAIM = re.compile(r"\b(says|said|claims|claimed)\b", re.I)
 S1_HEADLINE_MAX = 0.6
 SENTENCE_JACCARD_MAX = 0.5
 REPORT_PREFIX = "Report: "
+
+
+# Tense and certainty (the owner's rule: "will issue" must never become "issues"). A source title that describes a
+# planned, expected or proposed action binds the headline and the push alert: they must keep a future or
+# prospective form. Two shapes in the title count: a marker word ("will", "plans to", "set to", "expected"), and
+# headline-ese "X to VERB" ("Sebi to issue AI usage guidelines"), where the word after "to" must be a verb from
+# FUTURE_VERBS so "Apple brings Siri to glasses" or "A guide to Rust" don't read as plans.
+FUTURE_MARK = re.compile(
+    r"\b(will|won't|shall|to be|set to|plans? to|plans|planned|planning|poised to|expected|expects?|likely to|slated|"
+    r"scheduled|due to (?:launch|ship|list|open|start|begin|arrive|debut)|about to|aims? to|aiming to|seeks? to|"
+    r"seeking to|looks? to|looking to|prepares? to|preparing|readies|intends? to|wants? to|hopes? to|hoping to|"
+    r"could|may|might|would|soon|upcoming|coming|next (?:week|month|quarter|year)|in talks|considers?|"
+    r"considering|weighs?|weighing|mulls?|mulling|eyes|eyeing|nears?|nearing|proposes?|proposed|proposal|draft|"
+    r"threatens? to|vows? to|pledges? to|promises? to|targets?|targeting|in the works|working on|on track)\b", re.I)
+FUTURE_VERBS = set("""issue launch release unveil announce acquire buy sell raise invest cut lay hire fire open close
+shut build bring add ban block sue pay settle appeal testify step resign join leave replace name appoint roll ship
+debut list file go become get receive offer start begin stop end expand enter exit merge spin split make take give
+allow require face hold host meet visit sign back fund test pilot introduce drop kill retire phase move shift double
+triple increase reduce slash hike charge price publish share show reveal discuss review probe investigate vote
+decide rule hear fine tax regulate restrict limit lift ease approve reject challenge fight defend seek set use
+deploy adopt train power supply provide deliver manufacture produce develop design create turn convert integrate
+support work partner team compete lead head run oversee speak address attend return restore reinstate keep remain
+stay continue delay postpone cancel scrap suspend halt pause resume restart pull withdraw recall refund compensate
+spend borrow repay float delist rename rebrand relocate tighten loosen scale grow shrink wind testify unveil
+overhaul revamp tackle curb crack clamp mandate impose levy scrutinise scrutinize examine audit notify inform
+detail outline brief renegotiate challenge exit""".split())
+# "X to VERB" only counts at the start of the title (or of a segment after ":" or ";"), with a subject made of
+# names: "Investors urge Nvidia board to keep doors open" is an infinitive after a finite verb, not a plan.
+FUTURE_TO = re.compile(r"^((?:[A-Z0-9][\w&.'’-]*,?\s+|(?:and|of|the|&)\s+){1,5})to\s+([a-z]{2,})\b")
+NOT_SUBJECT = {"how", "why", "what", "when", "where", "who", "ways", "way", "time", "guide", "introduction",
+               "intro", "welcome", "road", "path", "response", "reaction", "back", "return", "thanks", "due", "up",
+               "here's", "need", "reasons", "reason", "things", "tips", "steps", "want", "ready", "learn"}
+# Speculation and causation the writer adds on its own ("The founder's personal spending may have contributed to
+# the company's payroll crisis", from a CNBC report that drew no such link): each of these phrasings must be in the
+# source text, or the sentence is the writer's inference.
+SPECULATION = re.compile(r"\b(may have|might have|could have|must have|appears to have|seems to have|"
+                         r"contributed to|suggests? that|suggesting that|raises? (?:questions|concerns|doubts)|"
+                         r"raising (?:questions|concerns|doubts)|signals? that|signalling that|signaling that|"
+                         r"paving the way|could lead to|may lead to|likely to lead)\b", re.I)
+# Scale words that must be the source's own ("the record fine" from BBC's "among the largest").
+SUPERLATIVE = re.compile(r"\b(record|record-breaking|largest|biggest|highest|lowest|worst|fastest|unprecedented|"
+                         r"historic|first-ever|all-time|never before)\b", re.I)
+# Unnamed sourcing or another outlet's reporting in the opening of the text: the card must say so.
+SOURCED = re.compile(
+    r"\b(?:people|persons?|sources?|officials?|executives?|employees|insiders?)(?: who (?:are|is|were))? "
+    r"(?:familiar with|with (?:direct )?knowledge of|close to|briefed on)\b|"
+    r"\b(?:sources|insiders)(?: have)? (?:said|say|told|claim)\b|"
+    r"\baccording to (?:\w+ ){0,3}?(?:sources|people|insiders|a person|a report|reports)\b|"
+    r"\b(?:unnamed|anonymous) (?:sources?|officials?|employees?)\b|\bcondition of anonymity\b|"
+    r"\b(?:The Information|Bloomberg|Reuters|The Wall Street Journal|WSJ|The Financial Times|The New York Times|"
+    r"CNBC|Axios|Business Insider|The Verge|TechCrunch|Semafor|Politico|The Washington Post)"
+    r"(?: News)?(?: first)? report(?:ed|s)\b", re.I)
+SOURCING_KEPT = re.compile(r"\b(sources?|insiders?|people familiar|reportedly|reports?|reported|according to|"
+                           r"says|said|alleged|allegedly|allegations?|claims?|claimed|accused|accuses|leaked|"
+                           r"leak)\b", re.I)
+SOURCED_SCOPE_WORDS = 120
+# Only third-party reporting gets the code-added "Report:" label; "claims", "alleged" and "accused" are someone's
+# own statement, which the headline must attribute in words (the retry feedback asks for that).
+REPORT_HEDGES = ("reportedly", "according to")
+
+
+def future_marker(text):
+    """The first sign that `text` describes something planned or expected, or None."""
+    m = FUTURE_MARK.search(text or "")
+    if m:
+        return m.group(0)
+    for segment in re.split(r"[:;|]\s+|\s[–—-]\s", text or ""):
+        m = FUTURE_TO.match(segment.strip())
+        if m and m.group(2) in FUTURE_VERBS and not (
+                {w.strip(",").lower() for w in m.group(1).split()} & NOT_SUBJECT):
+            return f"to {m.group(2)}"
+    return None
+
+
+def tense_problem(line, title):
+    """The title's future marker when the source title describes a planned action and `line` states it with no
+    future or prospective form at all; None otherwise."""
+    mark = future_marker(title)
+    if not mark or not line or future_marker(line):
+        return None
+    return mark
+
+
+def invented(pattern, output, source):
+    """Phrases matching `pattern` in `output` that the source doesn't contain."""
+    hay = (source or "").lower().replace("’", "'")
+    out = []
+    for m in pattern.finditer(output or ""):
+        phrase = m.group(0).lower()
+        stem = re.sub(r"(s|ed|ing)$", "", phrase.split()[0]) if " " in phrase else phrase
+        probe = phrase if " " not in phrase else phrase.replace(phrase.split()[0], stem, 1)
+        if phrase not in hay and probe not in hay and phrase not in out:
+            out.append(m.group(0))
+    return out
+
+
+def sourcing_dropped(headline, s1, text, source_name=""):
+    """The source's unnamed-sourcing phrase when it sits in the opening of the text and neither the headline nor
+    S1 attributes the story (to sources, a report, a named speaker or the outlet); None otherwise."""
+    opening = " ".join((text or "").split()[:SOURCED_SCOPE_WORDS])
+    m = SOURCED.search(opening)
+    if not m:
+        return None
+    shown = f"{headline} {s1}"
+    if SOURCING_KEPT.search(shown) or PREFIX.match(headline or ""):
+        return None
+    if source_name and re.search(re.escape(source_name.split()[0]), shown, re.I):
+        return None
+    return m.group(0)
 
 
 def word_count(s):
@@ -161,10 +271,12 @@ def select(out, attribution=None, hedge_source=None):
         hedged = [h for h in fitting if not hedge_problem(h, hedge_source)]
         if hedged:
             fitting = hedged
-        else:
+        elif all((hedge_problem(h, hedge_source) or ("",))[0] in REPORT_HEDGES for h in fitting):
             labelled = [REPORT_PREFIX + h for h in fitting if not PREFIX.match(h)]
             labelled = [h for h in labelled if not headline_problems(h)]
             fitting = labelled + fitting
+        # Otherwise the hedge is someone's own claim or an accusation: "Report:" would mislabel it, so the first
+        # headline goes to the hedge gate and its feedback asks the model to attribute the claim in words.
     out.headline = fitting[0] if fitting else candidates[0] if candidates else out.headline
     # Sentences after the headline, so the repeat check sees the headline the card will show.
     best = None
@@ -357,6 +469,13 @@ def _content(s):
             if len(w) >= 3 and w not in FUNCTION_WORDS}
 
 
+def _opening(s, n=4):
+    """The first `n` words, lowercased and without a label prefix ("Report: "), or None when there are fewer."""
+    s = PREFIX.sub("", s or "", count=1)
+    words = re.findall(r"[a-z0-9$%']+", s.lower().replace("’", "'"))
+    return tuple(words[:n]) if len(words) >= n else None
+
+
 def repeat_problems(headline, s1, s2, s3=""):
     """s1 restating the headline, or two sentences saying the same thing. [(code, feedback)]."""
     out = []
@@ -364,6 +483,9 @@ def repeat_problems(headline, s1, s2, s3=""):
     if c1 and ch and len(c1 & ch) / len(c1) >= S1_HEADLINE_MAX:
         out.append(("repeats_headline", "S1 repeats the headline; the reader has just read it. Open S1 with what "
                                         "the headline lacks: the key number, who, when or how."))
+    elif _opening(s1) and _opening(s1) == _opening(headline):
+        out.append(("repeats_headline", "S1 opens with the headline's own words; the reader has just read them. "
+                                        "Start S1 with a different fact: the key number, who else, when or how."))
     sents = [("S1", c1), ("S2", _content(s2))] + ([("S3", _content(s3))] if s3 else [])
     for i, (na, a) in enumerate(sents):
         for nb, b in sents[i + 1:]:
@@ -456,13 +578,19 @@ def check(out, source_text, title, source_name, attribution=None, author=None, l
                            f"{NOTIF_MAX} characters. Rewrite it in at most 12 words.")
     elif notif.rstrip(".").lower() == (out.headline or "").lower():
         v.fail("notif", "notif_line must add new information, not repeat the headline.")
+    elif "?" in notif:
+        v.fail("notif", "notif_line must state the fact, not ask a question.")
+    notif_title = (getattr(out, "notif_title", "") or "").strip()
+    if len(notif_title) > NOTIF_TITLE_MAX:
+        v.fail("too_long", f"notif_title was {len(notif_title)} characters; the limit is {NOTIF_TITLE_MAX}. "
+                           f"Use at most 5 words.")
 
     source = f"{title}\n{source_text}"
     allowed = [*re.findall(r"[\w']+", source_name or ""), *re.findall(r"[\w']+", author or ""),
                *attribution_mod.LABELS]
     if attribution is not None:
         allowed.append(attribution.name)
-    ok, bad = grounded(f"{full} {notif}", source, allowed, headline=out.headline or "")
+    ok, bad = grounded(f"{full} {notif}", source, allowed, headline=f"{out.headline or ''}. {notif_title}".strip(". "))
     if not ok:
         v.fail("ungrounded", f"'{bad}' is not in the source text; use only facts from the text.")
     for code, msg in repeat_problems(out.headline, out.s1, out.s2, out.s3):
@@ -472,6 +600,24 @@ def check(out, source_text, title, source_name, attribution=None, author=None, l
         v.fail("hedge_dropped", f"Headline drops '{dropped[0]}'; keep the hedge. The source says: "
                                 f"\"...{dropped[1]}...\". Keep that word or attribute the claim "
                                 f"(\"..., report says\").")
+    for name, line in (("Headline", out.headline), ("notif_line", notif), ("notif_title", notif_title)):
+        mark = tense_problem(line, title)
+        if mark:
+            v.fail("tense_drift", f"{name} states as done what the source says is still to come (the source title "
+                                  f"says '{mark}': \"{title}\"). Keep the future form: 'to ...', 'will ...', "
+                                  f"'plans to ...'.")
+            break
+    shown = f"{out.headline or ''} {full} {notif} {notif_title}"
+    for phrase in invented(SPECULATION, shown, source):
+        v.fail("speculation", f"'{phrase}' is your inference, not in the source text; state only what the text "
+                              f"states, or drop the sentence's claim.")
+    for phrase in invented(SUPERLATIVE, shown, source):
+        v.fail("superlative", f"'{phrase}' is not in the source text; use the source's own wording for scale.")
+    unsourced = sourcing_dropped(out.headline, f"{out.s1} {notif}", lead or source_text, source_name)
+    if unsourced:
+        v.fail("sourcing_dropped", f"The source attributes this to unnamed sources or a report "
+                                   f"(\"{unsourced}\"); say so in the headline or S1 (\"sources say\", "
+                                   f"\"{source_name or 'the outlet'} reports\").")
     if attribution is not None and not attribution_mod.has_prefix(out.headline, attribution):
         v.fail("attribution", attribution.feedback())
     elif attribution is None and out.type in LABELLED_TYPES and not PREFIX.match(

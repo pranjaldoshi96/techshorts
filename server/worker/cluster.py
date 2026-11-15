@@ -4,9 +4,18 @@ Runs once per tick after the parallel LLM stage. Items are assigned one at a tim
 event created earlier in the same pass is a candidate for the next item, so the result doesn't depend on how the
 LLM threads happened to finish.
 
-A join needs all of: cosine to the event's anchor >= T_join; a shared non-org entity (person, product or amount),
-or the LLM picked the event and cosine >= T_join + 0.03; compatible types; and an event younger than 48 h that
-was updated in the last 24 h. The anchor is the first hard-news member (earliest by publisher time), never a
+A join needs all of: cosine to the event's anchor >= T_join; compatible types; an event younger than 48 h that
+was updated in the last 24 h; and the judge's ruling that the item reports the same specific development as the
+event (llm.judge_events, one small call per item that has candidates, cached in `judgements`). A ruling of
+"followup" starts a new event with the candidate as its parent, so each development of a running story is its own
+card and the tabs' storyline cap groups them. Above T_same the texts are the same report and no ruling is asked.
+
+Why a judge: cosine plus a shared person cannot tell developments of one saga apart, because every report of the
+saga recaps it and names the same people. In the 2026-11-15 VPS test run one event took 13 members at cosine
+0.48-0.70 (an investors' letter, a petition, "Where was the security team?", two reports of a company's statement,
+three features and a mobility newsletter), shipped under a 33-hour-old headline with "7 publishers", and hid that
+day's developments. Without a judge (tests, or no LLM at all) the old rule applies: a shared non-org entity
+(person, product or amount), or the writer's own pick and cosine >= T_join + 0.03. The anchor is the first hard-news member (earliest by publisher time), never a
 centroid, so an event can't drift one near-duplicate at a time from "Anthropic files for IPO" to "Anthropic's
 models", and the thresholds measured on item pairs by tools/label_pairs.py still mean what they meant there.
 
@@ -83,6 +92,10 @@ class Settings:
     max_candidates: int = 5
     candidate_days: int = 7
     rewrite_cap_h: float = 2
+    # At or above this cosine two texts are the same report (syndication, a feed listing a story twice).
+    t_same: float = 0.9
+    # Judge rulings for signals per pass; the rest wait a tick.
+    signal_judgements: int = 12
 
     @classmethod
     def from_cfg(cls, cfg):
@@ -149,6 +162,9 @@ class Item:
     s1: str = None
     entailed: object = None
     text: str = None
+    spice: int = None
+    notif_title: str = None
+    publisher: str = None       # items.extra.publisher: the outlet of an item imported from a signal's link
     keys: set = field(default_factory=set)
 
     @property
@@ -167,7 +183,8 @@ class Item:
 ITEM_SQL = """
 SELECT i.url_canonical, i.source_id, i.title, i.published_at, w.status, w.type, w.is_news, w.relevance,
        w.importance, w.breaking, w.sensitive, w.region, w.topics, w.entities, w.event, w.material_update,
-       w.text_words, w.headline, w.summary, w.summary_short, w.notif_line, w.s1, w.entailed, w.text, e.vec
+       w.text_words, w.headline, w.summary, w.summary_short, w.notif_line, w.s1, w.entailed, w.text, e.vec,
+       w.spice, w.notif_title, i.extra
 FROM items i JOIN writes w ON w.url_canonical = i.url_canonical
 JOIN embeddings e ON e.url_canonical = i.url_canonical AND e.kind = 'passage'
 """
@@ -183,7 +200,8 @@ def _item(r):
               material_update=bool(r["material_update"]), text_words=r["text_words"] or 0,
               vec=embed_mod.from_blob(r["vec"]), headline=r["headline"], summary=r["summary"],
               summary_short=r["summary_short"], notif_line=r["notif_line"], s1=r["s1"],
-              entailed=r["entailed"], text=r["text"])
+              entailed=r["entailed"], text=r["text"], spice=r["spice"], notif_title=r["notif_title"],
+              publisher=json.loads(r["extra"] or "{}").get("publisher"))
     it.keys = entity_keys(ents)
     return it
 
@@ -218,8 +236,11 @@ class Event:
 class Store:
     """Live events plus their members, loaded once per pass and written back as they change."""
 
-    def __init__(self, db, srcs, settings, now):
+    def __init__(self, db, srcs, settings, now, judge=None):
         self.db, self.srcs, self.s, self.now = db, srcs, settings, now
+        # judge(title, text, [(event id, headline, first report's title)]) -> {event id: relation}; None = no judge.
+        self.judge = judge
+        self.judge_calls = 0
         self.by_id = srcs.by_id()
         self.events = {}
         since = iso(now - timedelta(days=settings.candidate_days))
@@ -243,9 +264,50 @@ class Store:
         out.sort(key=lambda x: (-x[0], x[1].id))
         return out
 
-    def publisher(self, source_id):
+    def publisher(self, source_id, item=None):
+        if item is not None and getattr(item, "publisher", None):
+            return item.publisher
         src = self.by_id.get(source_id)
         return src.v1_name if src else source_id
+
+    # The judge's rulings, cached so a pair is asked about once.
+
+    def ruling(self, a, b):
+        row = self.db.one("SELECT verdict FROM judgements WHERE a = ? AND b = ?", a, b)
+        return row["verdict"] if row else None
+
+    def rule(self, a, b, verdict):
+        self.db.conn.execute("INSERT OR REPLACE INTO judgements VALUES (?,?,?,?)", (a, b, verdict, iso(self.now)))
+
+    def relations(self, key, title, text, events):
+        """{event id: relation} for `events` (Event objects), asking the judge only about the ones not yet ruled
+        on. Raises LLMError when the judge can't be reached."""
+        out = {ev.id: self.ruling(key, ev.id) for ev in events}
+        ask = [ev for ev in events if out[ev.id] is None]
+        if ask:
+            self.judge_calls += 1
+            got = self.judge(title, text, [(ev.id, ev.row.get("headline"), ev.anchor.title if ev.anchor else "")
+                                           for ev in ask])
+            for ev in ask:
+                out[ev.id] = got.get(ev.id, "different")
+                self.rule(key, ev.id, out[ev.id])
+        return out
+
+    def same_event(self, a, b):
+        """The judge's ruling on two events (cached under the sorted pair), or None without a judge."""
+        if self.judge is None:
+            return None
+        x, y = sorted((a, b), key=lambda e: e.id)
+        key = "pair:" + x.id
+        got = self.ruling(key, y.id)
+        if got is None:
+            new, old = sorted((a, b), key=lambda e: (e.row["published_at"], e.id), reverse=True)
+            src = new.anchor
+            self.judge_calls += 1
+            got = self.judge(src.title, src.text, [(old.id, old.row.get("headline"),
+                                                    old.anchor.title if old.anchor else "")]).get(old.id, "different")
+            self.rule(key, y.id, got)
+        return got
 
     def authority(self, source_id):
         src = self.by_id.get(source_id)
@@ -264,14 +326,15 @@ def parse_pick(pick):
     return None, None
 
 
-def joinable(item, ev, cos, picked, now, s):
-    """None when `item` may join `ev`, else the first failing rule."""
+def joinable(item, ev, cos, picked, now, s, judged=False):
+    """None when `item` may join `ev`, else the first failing rule. `judged` leaves out the entity rule and the
+    launch/funding pick rule: the judge's ruling on the pair replaces both."""
     if cos < s.t_join:
         return "low_cosine"
-    if not (item.keys & ev.keys) and not (picked and cos >= s.t_join + s.pick_margin):
+    if not judged and not (item.keys & ev.keys) and not (picked and cos >= s.t_join + s.pick_margin):
         return "no_entity"
     pair = frozenset((item.type, ev.ev_type()))
-    if pair in NEVER_JOIN or (pair in JOIN_ONLY_IF_PICKED and not picked):
+    if pair in NEVER_JOIN or (pair in JOIN_ONLY_IF_PICKED and not picked and not judged):
         return "type"
     ev_pub = from_iso(ev.row["published_at"])
     # An item published long before the event began is old background, not coverage of it.
@@ -284,12 +347,15 @@ def joinable(item, ev, cos, picked, now, s):
 
 
 def assign(store, item):
-    """Puts one item into an event. Returns (event_id, how), or (None, reason) for a thin item with no event."""
+    """Puts one item into an event. Returns (event_id, how), or (None, reason) for a thin item with no event or
+    an item whose ruling could not be had this pass (it stays pending and is tried again next tick)."""
     s, now = store.s, store.now
     kind, picked = parse_pick(item.pick)
     if picked:
         picked = store.resolve(picked)
     ranked = store.ranked(item.vec)
+    if store.judge is not None:
+        return assign_judged(store, item, ranked, picked)
 
     if kind == "followup" and picked in store.events:
         # A second outlet's "Huang resigns" joins the follow-up the first one started, not a third event.
@@ -316,6 +382,44 @@ def assign(store, item):
     return create(store, item)
 
 
+def assign_judged(store, item, ranked, picked):
+    """Assignment with the judge (see the module docstring): the nearest events that pass the structural rules
+    are put to the judge in one call; "same" joins, "followup" starts a child event, anything else a new one."""
+    s, now = store.s, store.now
+    cands, too_old = [], None
+    for cos, ev in ranked:
+        if cos < s.t_join:
+            break
+        why = joinable(item, ev, cos, ev.id == picked, now, s, judged=True)
+        if why is None:
+            if cos >= s.t_same:
+                return join(store, ev, item, cos, "same_text")
+            if len(cands) < s.max_candidates:
+                cands.append((cos, ev))
+        elif why == "event_too_old" and too_old is None and ((item.keys & ev.keys) or ev.id == picked):
+            too_old = ev
+    rel = {}
+    if cands:
+        try:
+            rel = store.relations(item.url, item.title, item.text or item.headline or "", [ev for _, ev in cands])
+        except LLMError as e:
+            log.info("cluster judge unavailable for %s: %s", item.url, e)
+            return None, "judge_failed"
+    for cos, ev in cands:
+        if rel.get(ev.id) == "same":
+            return join(store, ev, item, cos, "judge")
+    if item.thin:
+        # A thin item is classification only: it can back an event up, never start one.
+        return None, "thin_unmatched"
+    for cos, ev in cands:
+        if rel.get(ev.id) == "followup":
+            # The parent is the story's first event, so every development of a saga hangs off one root.
+            return create(store, item, parent_id=ev.row.get("parent_id") or ev.id, how="followup_judge")
+    if too_old is not None and item.material_update and item.importance >= 8:
+        return create(store, item, parent_id=too_old.id, how="followup_material")
+    return create(store, item)
+
+
 def create(store, item, parent_id=None, how="new"):
     eid = event_id(item.url)
     now = iso(store.now)
@@ -323,7 +427,7 @@ def create(store, item, parent_id=None, how="new"):
            "created_at": now, "updated_at": now, "published_at": iso(item.published_at),
            "last_material_update_at": None, "headline_history": "[]", "on_techmeme": 0,
            # The rewrite trigger counts publishers that joined after this one (spec 2.9).
-           "rewrite_publishers": json.dumps([store.publisher(item.source_id)])}
+           "rewrite_publishers": json.dumps([store.publisher(item.source_id, item)])}
     cols = ", ".join(row)
     store.db.conn.execute(f"INSERT OR REPLACE INTO events ({cols}) VALUES ({', '.join('?' * len(row))})",
                           tuple(row.values()))
@@ -403,6 +507,14 @@ def merge_pass(store):
                     continue
                 if frozenset((a.ev_type(), b.ev_type())) in NEVER_JOIN:
                     continue
+                if a.row.get("parent_id") == b.id or b.row.get("parent_id") == a.id:
+                    continue        # a development and the story it follows are two cards on purpose
+                if cos < s.t_same:
+                    try:
+                        if store.same_event(a, b) not in (None, "same"):
+                            continue
+                    except LLMError:
+                        continue    # no ruling this pass; the pair is looked at again next tick
                 if best is None or cos > best[0]:
                     best = (cos, a, b)
         if best is None:
@@ -427,6 +539,15 @@ def merge_twins(store):
         if src is None or dst is None or src is dst:
             continue
         if src.row.get("parent_id") == dst.id or dst.row.get("parent_id") == src.id:
+            continue
+        # The edition's duplicate guard compares headlines; two developments of one saga can read alike ("Megaspeed
+        # says Alice Huang left" / "Firm linked to Huang's ex-lover brokered $12B in chip orders"). The judge rules
+        # before anything is merged, and the guard then leaves a pair ruled different alone (publish_v1).
+        try:
+            if store.same_event(src, dst) not in (None, "same"):
+                store.db.conn.execute("DELETE FROM twins WHERE twin_id = ?", (r["twin_id"],))
+                continue
+        except LLMError:
             continue
         updates = [m.published_at for m in src.members if m.material_update and m.hard]
         merge(store, src, dst)
@@ -489,8 +610,12 @@ def refresh(store, ev, tier1_ok):
             _set_material(ev, m.published_at)
             ev.dirty.add("material_update")
     _set_anchor(ev)
-    row["published_at"] = iso(min(m.published_at for m in members))
-    publishers = sorted({store.publisher(m.source_id) for m in members})
+    # The event's clock is its first hard-news report. A profile or explainer that joined does not move it back:
+    # "Meet the seven co-founders of Anthropic", published the day before, made the IPO-week card read 29 h old
+    # when its report was 5 h old.
+    clock = [m for m in members if m.hard and not m.thin] or members
+    row["published_at"] = iso(min(m.published_at for m in clock))
+    publishers = sorted({store.publisher(m.source_id, m) for m in members})
     row["publishers"], row["n_publishers"] = json.dumps(publishers), len(publishers)
 
     lead = choose_lead(store, ev)
@@ -511,7 +636,8 @@ def refresh(store, ev, tier1_ok):
                    is_news=int(lead.is_news))
         if row.get("text_from") != "rewrite" or prev_lead != lead.url:
             _set_text(row, lead.headline, lead.summary, lead.summary_short, lead.notif_line, lead.s1,
-                      lead.entailed, lead.url, store.now)
+                      lead.entailed, lead.url, store.now, lead.notif_title)
+            row["rewrite_spice"] = None
     row["sensitive"] = int(any(m.sensitive for m in members))
     row["breaking_members"] = sum(m.breaking for m in members)
     _apply_signals(store, ev)
@@ -527,14 +653,26 @@ def refresh(store, ev, tier1_ok):
         if (start is not None and not (m.material_update and m.hard)
                 and m.published_at - start > timedelta(hours=FOLLOWUP_AFTER_H)):
             imp = min(imp, FOLLOWUP_CAP)
-        imembers.append(importance_mod.Member(m.url, m.source_id, store.publisher(m.source_id), t1, m.type,
+        imembers.append(importance_mod.Member(m.url, m.source_id, store.publisher(m.source_id, m), t1, m.type,
                                               imp, m.topics, m.entities.get("amounts") or []))
     hn = json.loads(row.get("hn") or "null") or {}
     res = importance_mod.compute(imembers, row.get("type"), json.loads(row.get("topics") or "[]"),
                                  bool(row.get("on_techmeme")), hn.get("points") or 0, row.get("rewrite_importance"))
     row.update(importance_raw=res.raw, importance=res.value, clamps=json.dumps(res.clamps))
+    row["spice"] = event_spice(row, members, lead)
     ev.dirty.clear()
     save(store.db, row)
+
+
+def event_spice(row, members, lead):
+    """The event's spice: the rewrite call's score when the card is a rewrite, else the lead's (the card shows
+    the lead's angle), else the median of the scored hard-news members. None when nothing was scored."""
+    if row.get("text_from") == "rewrite" and row.get("rewrite_spice"):
+        return int(row["rewrite_spice"])
+    if lead is not None and lead.spice:
+        return int(lead.spice)
+    scored = sorted(m.spice for m in members if m.spice and m.hard) or sorted(m.spice for m in members if m.spice)
+    return scored[len(scored) // 2] if scored else None
 
 
 def story_start(row):
@@ -549,13 +687,13 @@ def _queue_rewrite(row, reason):
     row["rewrite_reason"] = ",".join(sorted(reasons))
 
 
-def _set_text(row, headline, summary, short, notif, s1, entailed, source, now):
+def _set_text(row, headline, summary, short, notif, s1, entailed, source, now, notif_title=None):
     if headline and headline != row.get("headline"):
         hist = json.loads(row.get("headline_history") or "[]")
         hist.append({"at": iso(now), "headline": headline, "from": source})
         row["headline_history"] = json.dumps(hist[-20:])
     row.update(headline=headline, summary=summary, summary_short=short, notif_line=notif, s1=s1,
-               entailed=entailed, text_from=source)
+               entailed=entailed, text_from=source, notif_title=notif_title)
 
 
 def save(db, row):
@@ -576,29 +714,78 @@ def signal_items(db, srcs, now, hours=48):
                 f" AND i.published_at >= ?", *signal_ids, iso(now - timedelta(hours=hours)))
 
 
+def _points(extra):
+    """Points and comments of a signal sighting, from the signal item's own extra or, for an article imported
+    from a signal's link (fetch.promote_signals), the copy kept under its source id."""
+    return {k: extra.get(k) for k in ("points", "comments", "hn_url") if extra.get(k) is not None}
+
+
 def attach_signals(store):
-    """Exact URL first (a sighting of a member URL, or Techmeme's linked article), then the title's cosine to the
-    anchors >= T_signal. Each signal attaches to one event."""
+    """Exact URL first (a sighting of a member URL, or Techmeme's linked article). Otherwise the title's cosine to
+    the anchors >= T_signal picks the nearest event, and the judge must rule that the signal is about that event's
+    development: on cosine alone, Techmeme's "Bessent urges Nvidia to hire an outside CEO" attached to the
+    investors'-letter card and to the "Asian governments react" card, and each got Techmeme's boost. Without a
+    judge a cosine match needs a shared non-org entity word in the title.
+
+    Each signal attaches to one event: a match to a new event moves the row."""
     db, now = store.db, store.now
     member_of = {r["url_canonical"]: r["event_id"] for r in db.q("SELECT url_canonical, event_id FROM event_members")}
     signal_ids = {s.id for s in store.srcs.sources if s.is_signal}
+    attached = {(r["url_canonical"], r["source_id"]): (r["event_id"], r["how"])
+                for r in db.q("SELECT event_id, url_canonical, source_id, how FROM event_signals")}
     n = 0
+    budget = store.s.signal_judgements
+
+    def attach(eid, url, source_id, how, extra):
+        nonlocal n
+        eid = store.resolve(eid)
+        have = attached.get((url, source_id))
+        if have and have[0] != eid:
+            db.conn.execute("DELETE FROM event_signals WHERE url_canonical = ? AND source_id = ?", (url, source_id))
+        n += _attach(db, eid, url, source_id, how, extra, now)
+        attached[(url, source_id)] = (eid, how)
+
     # Sightings: a signal source listed a member's own URL.
-    for r in db.q("SELECT * FROM sightings"):
+    for r in db.q("SELECT s.*, i.extra FROM sightings s JOIN items i ON i.url_canonical = s.url_canonical"):
         if r["source_id"] in signal_ids and r["url_canonical"] in member_of:
-            n += _attach(db, member_of[r["url_canonical"]], r["url_canonical"], r["source_id"], "url", {}, now)
+            extra = (json.loads(r["extra"] or "{}").get("signals") or {}).get(r["source_id"]) or {}
+            attach(member_of[r["url_canonical"]], r["url_canonical"], r["source_id"], "url", _points(extra))
     for r in signal_items(db, store.srcs, now):
         extra = json.loads(r["extra"] or "{}")
+        key = (r["url_canonical"], r["source_id"])
         linked = extra.get("linked_url") or r["url_canonical"]
         eid = member_of.get(linked) or member_of.get(r["url_canonical"])
-        how = "url"
-        if eid is None and r["vec"] is not None:
-            vec = embed_mod.from_blob(r["vec"])
-            ranked = store.ranked(vec)
-            if ranked and ranked[0][0] >= store.s.t_signal:
-                eid, how = ranked[0][1].id, "cosine"
         if eid is not None:
-            n += _attach(db, store.resolve(eid), r["url_canonical"], r["source_id"], how, extra, now)
+            attach(eid, r["url_canonical"], r["source_id"], "url", extra)
+            continue
+        if key in attached:
+            # Already matched by title: keep the event, refresh the points.
+            if attached[key][0] in store.events:
+                attach(attached[key][0], r["url_canonical"], r["source_id"], attached[key][1], extra)
+            continue
+        if r["vec"] is None:
+            continue
+        ranked = store.ranked(embed_mod.from_blob(r["vec"]))
+        if not ranked or ranked[0][0] < store.s.t_signal:
+            continue
+        cos, ev = ranked[0]
+        if store.judge is None:
+            words = {w for w in re.findall(r"[a-z0-9]+", r["title"].lower()) if len(w) >= 4}
+            names = {part for k in ev.keys if k[0] in ("p", "x") for part in str(k[1]).split()}
+            if words & names:
+                attach(ev.id, r["url_canonical"], r["source_id"], "cosine", extra)
+            continue
+        verdict = store.ruling(r["url_canonical"], ev.id)
+        if verdict is None:
+            if budget <= 0:
+                continue
+            budget -= 1
+            try:
+                verdict = store.relations(r["url_canonical"], r["title"], r["feed_text"] or "", [ev])[ev.id]
+            except LLMError:
+                break
+        if verdict == "same":
+            attach(ev.id, r["url_canonical"], r["source_id"], "judge", extra)
     return n
 
 
@@ -608,7 +795,7 @@ def _attach(db, eid, url, source_id, how, extra, now):
         (eid, url, source_id, how, extra.get("points"), extra.get("comments"), extra.get("hn_url"), iso(now)))
     if cur.rowcount:
         return 1
-    if extra.get("points") is not None:     # HN points grow; keep the latest
+    if extra.get("points") is not None:     # points grow; keep the latest
         db.conn.execute("UPDATE event_signals SET points = ?, comments = ? WHERE event_id = ? AND url_canonical = ?"
                         " AND source_id = ?", (extra.get("points"), extra.get("comments"), eid, url, source_id))
     return 0
@@ -616,11 +803,20 @@ def _attach(db, eid, url, source_id, how, extra, now):
 
 def _apply_signals(store, ev):
     rows = store.db.q("SELECT * FROM event_signals WHERE event_id = ?", ev.id)
-    ev.row["on_techmeme"] = int(any(r["source_id"] == "techmeme" for r in rows))
+    kinds = {r["source_id"]: (store.by_id[r["source_id"]].kind if r["source_id"] in store.by_id else None)
+             for r in rows}
+    ev.row["on_techmeme"] = int(any(kinds[r["source_id"]] == "techmeme" or r["source_id"] == "techmeme"
+                                    for r in rows))
     hn = [r for r in rows if r["source_id"].startswith("hn")]
     best = max(hn, key=lambda r: r["points"] or 0, default=None)
     ev.row["hn"] = json.dumps({"points": best["points"] or 0, "comments": best["comments"] or 0,
                                "url": best["hn_url"] or best["url_canonical"]}) if best else None
+    # Other places a story is being shared (Lobsters today), each with its own capped multiplier in rank.coverage.
+    social = {}
+    for r in rows:
+        if kinds[r["source_id"]] == "lobsters" and (r["points"] or 0) > social.get("lobsters", 0):
+            social["lobsters"] = r["points"]
+    ev.row["social"] = json.dumps(social) if social else None
 
 
 # Embedding and LLM candidates
@@ -697,9 +893,10 @@ def embed_signals(db, embedder, srcs, now, limit=50):
 
 # The stage
 
-def run(db, cfg, srcs, now, embedder=None, rewriter=None):
+def run(db, cfg, srcs, now, embedder=None, rewriter=None, judge=None):
     """One clustering pass: assign pending items serially, attach signals, merge, then refresh changed events.
-    `rewriter(store, ev)` is the event rewrite call (llm.rewrite_event), skipped when None."""
+    `rewriter(store, ev)` is the event rewrite call (llm.rewrite_event), skipped when None. `judge(title, text,
+    events)` is the same-development ruling (llm.judge_events); without it the entity rule decides."""
     s = Settings.from_cfg(cfg)
     stats = Counter()
     if embedder is not None:
@@ -709,7 +906,7 @@ def run(db, cfg, srcs, now, embedder=None, rewriter=None):
         except LLMError as e:
             log.warning("embedding failed: %s", e)
             stats["embed_failed"] += 1
-    store = Store(db, srcs, s, now)
+    store = Store(db, srcs, s, now, judge)
     for item in pending_items(db, now):
         eid, how = assign(store, item)
         stats[how] += 1
@@ -731,6 +928,8 @@ def run(db, cfg, srcs, now, embedder=None, rewriter=None):
                 break
             stats["rewritten" if done else "rewrite_failed"] += 1
             refresh(store, ev, tier1_ok)
+    stats["judge_calls"] = store.judge_calls
+    db.conn.execute("DELETE FROM judgements WHERE at < ?", (iso(now - timedelta(days=s.candidate_days)),))
     db.conn.execute("DELETE FROM event_alias WHERE at < ?", (iso(now - timedelta(days=s.alias_days)),))
     db.conn.execute("DELETE FROM twins WHERE at < ?", (iso(now - timedelta(days=s.alias_days)),))
     db.commit()

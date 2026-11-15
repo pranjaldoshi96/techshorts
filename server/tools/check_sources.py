@@ -35,7 +35,8 @@ def check_one(source, cfg):
 
 def run(cfg, srcs, db):
     with cf.ThreadPoolExecutor(cfg["fetch"]["parallel"]) as pool:
-        results = list(pool.map(lambda s: check_one(s, cfg), srcs.sources))
+        # Publishers listed only for linked articles (no feed URL) have nothing to check.
+        results = list(pool.map(lambda s: check_one(s, cfg), [s for s in srcs.sources if s.polled]))
     now = iso(utcnow())
     for r in results:
         db.update_source(r["id"], check_ok=int(r["ok"]), check_at=now, check_detail=r["detail"])

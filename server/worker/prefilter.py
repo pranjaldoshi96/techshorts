@@ -28,6 +28,10 @@ TITLE_RULES = [
         r"\bthis week\s*:", r"\btop \d+ (stories|news|headlines|reads)\b", r"\b(roundup|round-up|recap|digest)\b",
         r"\bweek in review\b", r"\bnewsletter\b", r"^here's the latest\b", r"\bfunding and acquisitions\b.*\bweek\b",
         r"\bweekly (funding|report|wrap)\b", r"\bquiz\b", r"\blive updates?\b",
+        # Digest issues tagged in the title: "[AINews] The No AI Slop Manifesto" lists a dozen unrelated items, and
+        # its card joined two of them ("No AI Slop manifesto declares llama.cpp 1.0 stable").
+        r"^\[ainews\]", r"^import ai \d+", r"\bweekly dose\b", r"\bthis week in\b", r"\bweek in \w+:",
+        r"^tldr\b", r"\blinks for \w+", r"\bmorning (brief|briefing|report)\b", r"\bdaily (brief|briefing|wrap)\b",
     ])),
 
     # Ported from the 1.2 app's ContentFilter (FeedService.swift), which the live edition still uses.

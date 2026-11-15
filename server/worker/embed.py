@@ -145,4 +145,5 @@ def make(cfg, key):
     e = cfg.get("embed") or {}
     if not e.get("model") or not key:
         return None
-    return Embedder(cfg["llm"]["base_url"], key, e["model"], e.get("dims"), timeout=e.get("timeout_s", 15))
+    return Embedder(e.get("base_url") or cfg["llm"]["base_url"], key, e["model"], e.get("dims"),
+                    timeout=e.get("timeout_s", 15))

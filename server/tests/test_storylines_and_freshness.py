@@ -253,11 +253,12 @@ class _Out:
         self.__dict__.update(kw)
 
 
-def test_ai_subject_gets_the_ai_topic_and_relevance_2():
+def test_ai_subject_gets_the_ai_topic_and_relevance_stays_the_models():
     out = _Out(type="news", topics=["science"], relevance=1, headline="Exam top scorer admits cheating")
     attribution.apply(out, None, "https://www.theguardian.com/world/2026/x",
                       "South Korea exam top scorer admits using generative AI to cheat")
-    assert out.topics == ["science", "ai"] and out.relevance == 2
+    # The topic is added; relevance is the model's call (forcing 2 shipped anything with "AI" in its title).
+    assert out.topics == ["science", "ai"] and out.relevance == 1
     out = _Out(type="news", topics=["science"], relevance=1, headline="Giant fungus found in China")
     attribution.apply(out, None, "https://x/y", "Giant fungus discovered in China grows up to 20 inches tall")
     assert out.topics == ["science"] and out.relevance == 1
@@ -266,7 +267,7 @@ def test_ai_subject_gets_the_ai_topic_and_relevance_2():
 
 
 def test_prompt_names_realized_plans_as_material_updates():
-    assert "has now happened" in llm.PROMPT and "cheating with AI" in llm.PROMPT
+    assert "has now happened" in llm.PROMPT and "AI is the subject or the means" in llm.PROMPT
 
 
 def test_select_checks_repetition_against_the_headline_it_picks():

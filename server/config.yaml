@@ -22,24 +22,54 @@ fetch:
 # check_sources runs at worker start and then every check_every_hours (the "nightly" check).
 check_every_hours: 24
 
-# Any OpenAI-compatible endpoint can be swapped in here without code changes (section 2.1). Models checked against
-# the NVIDIA key on 2026-11-11: many listed models return 404/410, so test before changing one.
+# Chat models. Each provider is an OpenAI-compatible endpoint with its own key, read from the environment variable
+# named by key_env or from the file named by <key_env>_FILE (the VPS unit points those at /etc/techgist; a key is
+# never in this file, the unit or the journal). A model is "provider:model id".
+#   hub     the inference hub: GPT and Gemini, which the owner prefers for what readers see. They are reasoning
+#           models: reasoning_effort low keeps a card to a few seconds, and reasoning counts against max_tokens.
+#   nvidia  the public NVIDIA endpoint: embeddings (see `embed`), and the backup chat model. Only the two Nemotron
+#           models answer reliably there, and only with enable_thinking false.
+# Roles, each tested from the VPS on 2026-11-15 (tools/eval_cards.py on the test run's known-bad cards):
+#   model         writes cards and event rewrites: headline, summary, push alert, importance and spice.
+#   judge_model   fact-checks every card line against the source and rules whether two reports are one development.
+#                 A different model family from the writer, so the check does not share the writer's blind spots.
+#   triage_model  screens a tick's new titles in one call before any of them costs a full write.
+#   backup_model  gets the same call once when the primary's endpoint fails (timeout, 5xx, 429s, bad key).
 llm:
-  base_url: https://integrate.api.nvidia.com/v1
-  model: nvidia/nemotron-3.5-lightning-30b-a3b
-  # Third rung of the retry ladder (section 2.8): a larger model gets one try after a failed feedback retry.
-  # Off: on 2026-11-11 nemotron-3-ultra-550b-a55b answered 28 of 132 calls (503s and timeouts) and made ticks slow.
+  base_url: https://integrate.api.nvidia.com/v1      # embeddings and the per-tick key check
+  default_provider: nvidia
+  providers:
+    hub:
+      base_url: https://inference-api.nvidia.com/v1
+      key_env: HUB_API_KEY
+      rate_per_min: 90
+      timeout_s: 60
+      params: {reasoning_effort: low}
+    nvidia:
+      base_url: https://integrate.api.nvidia.com/v1
+      key_env: NVIDIA_API_KEY
+      rate_per_min: 30
+      timeout_s: 30
+      params: {chat_template_kwargs: {enable_thinking: false}}
+  model: hub:openai/openai/gpt-6.1-sol
+  judge_model: hub:gcp/google/gemini-4-argon
+  triage_model: hub:gcp/google/gemini-3.8-flash
+  # Same-development rulings for clustering (cluster.py). On the test run's Nvidia saga (tools/recluster.py) this
+  # model and the fact-checker's agreed on all but one of 44 rulings, at 1.7 s a call against 4.1 s.
+  cluster_model: hub:gcp/google/gemini-3.8-flash
+  backup_model: nvidia:nvidia/nemotron-3.5-lightning-30b-a3b
+  # Third rung of the retry ladder (section 2.8): another model gets one try after a failed feedback retry. Off.
   fallback_model: null
-  # Chat calls (write + entailment + triage) per rolling 24 h; writing pauses past it.
-  daily_budget: 3000
+  triage: true
+  # Chat calls (screen + write + fact-check + cluster judge) per rolling 24 h; writing pauses past it.
+  daily_budget: 12000
   rate_per_min: 30
-  concurrency: 6
-  # 30 s, not 45: healthy write calls took p50 6.8 s, p95 19.3 s, p99 27.6 s in the 2026-11 shadow run, and every
-  # timeout came from a stalled endpoint (all at ~45 s, in bursts). A timeout is not retried, and two in a row open
-  # a per-tick circuit (llm.Client), so a slow endpoint costs a tick ~30 s instead of up to 460 s.
+  concurrency: 8
+  # A timeout is not retried, and two in a row open a per-tick circuit for that provider (llm.Client), so a slow
+  # endpoint costs a tick one timeout and the backup model takes over.
   timeout_s: 30
-  # Caps one tick's LLM stage at about a minute of the rate limit, so polling isn't starved during a backlog.
-  max_items_per_tick: 18
+  # Caps one tick's LLM stage, so polling isn't starved during a backlog.
+  max_items_per_tick: 24
 embed:
   # The only embedding model that answered for this key on 2026-11-11; nv-embedqa-e5-v5, llama-3.2-nv-embedqa-1b-v2,
   # llama-nemotron-embed-1b-v2, nv-embed-v1 and bge-m3 return 410. It accepts `dimensions` (Matryoshka).
@@ -63,6 +93,14 @@ cluster:
   alias_days: 30
   max_candidates: 5
   rewrite_cap_h: 2
+  # At or above this cosine two texts are the same report; below it (down to t_join) the judge rules whether an
+  # item reports the same development as the event (cluster.py).
+  t_same: 0.9
+
+# Signals that become cards (fetch.promote_signals): Techmeme and Mediagazer picks always; HN and Lobsters links
+# past these points. per_tick caps how many linked articles are imported in one tick.
+signals:
+  promote: {techmeme: 0, hn: 150, lobsters: 60, max_age_h: 36, per_tick: 10}
 
 # The edition's duplicate guard and storyline grouping (publish_v1, rank.Dedup) compare the headline each card shows,
 # embedded as a query. Spec 2.12/8 used T_join for this, but T_join was calibrated for passage vectors plus a shared

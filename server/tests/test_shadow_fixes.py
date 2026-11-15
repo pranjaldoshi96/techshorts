@@ -140,9 +140,21 @@ def test_select_prefers_the_headline_that_keeps_the_hedge():
 
 def test_select_labels_the_headline_when_every_version_drops_the_hedge():
     o = out(HUANG, headline="Jensen Huang admits affair with Chinese spy", headline_alt="", headline_short="")
-    validate.select(o, hedge_source=validate.hedge_scope("Nvidia CEO and the spy", HUANG_SRC))
+    src = HUANG_SRC.replace("a suspected Chinese spy", "a Chinese spy").replace(
+        "admitted to an affair", "reportedly admitted to an affair")
+    validate.select(o, hedge_source=validate.hedge_scope("Nvidia CEO and the spy", src))
     assert o.headline == "Report: Jensen Huang admits affair with Chinese spy"
-    assert validate.check(o, HUANG_SRC, "Nvidia CEO and the spy", "Example News").ok
+    assert validate.check(o, src, "Nvidia CEO and the spy", "Example News").ok
+
+
+def test_report_label_is_only_for_third_party_reporting():
+    # "suspected" is not someone's report: labelling the headline "Report:" would still call her a spy outright
+    # (and "Report:" on Tesla's own announcement was wrong the other way). It goes to the hedge gate instead.
+    o = out(HUANG, headline="Jensen Huang admits affair with Chinese spy", headline_alt="", headline_short="")
+    validate.select(o, hedge_source=validate.hedge_scope("Nvidia CEO and the spy", HUANG_SRC))
+    assert o.headline == "Jensen Huang admits affair with Chinese spy"
+    v = validate.check(o, HUANG_SRC, "Nvidia CEO and the spy", "Example News")
+    assert not v.ok and v.reason == "hedge_dropped"
 
 
 def test_a_claim_in_the_source_title_must_stay_attributed():
@@ -247,7 +259,7 @@ def test_duplicate_guard_needs_a_shared_entity_below_the_alone_threshold():
     assert len(kept) == 2 and not dropped
 
 
-def test_storyline_cap_keeps_two_cards_per_story_per_tab():
+def test_storyline_cap_keeps_three_cards_per_story_per_tab():
     huang = ("p", "huang")
     cs = [cand(f"h{i}", importance=8, n=3, age_h=i, publisher=f"P{i}", vec=unit(60 + i), keys=[huang])
           for i in range(4)]
@@ -255,7 +267,7 @@ def test_storyline_cap_keeps_two_cards_per_story_per_tab():
     publish_v1.storylines(cs, rank.Dedup(0.65, 0.5), 0.45)
     assert len({c.storyline for c in cs[:4]}) == 1
     ids = [c.id for c, _ in rank.assemble(cs, rank.TABS["top"], NOW)]
-    assert ids == ["h0", "h1", "other"]
+    assert rank.STORYLINE_CAP == 3 and ids == ["h0", "h1", "h2", "other"]
     # A follow-up joins its parent's storyline even when the headlines are far apart.
     p, f = cand("p", vec=unit(0)), cand("f", vec=unit(90))
     p.data, f.data = {}, {"parent_id": "p"}

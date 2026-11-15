@@ -99,7 +99,12 @@ def ai_subject(*texts):
 
 def apply(output, attribution, url=None, title=None):
     """Forces the type; the prefix is checked in validate.py so a missing one retries with feedback. A story whose
-    source title or headline is about AI always gets the "ai" topic and at least relevance 2."""
+    source title or headline is about AI gets the "ai" topic, so the AI tab can take it.
+
+    Relevance is left to the model. This used to raise it to 2 whenever the title mentioned AI, which shipped
+    anything with "AI" in its title however off-topic the model judged it (a quiz, a lifestyle piece): the write
+    prompt's relevance scale already says a story where AI is the subject or the means is at least 2, and the model
+    is the one that has read the article."""
     if attribution is not None:
         output.type = "opinion"
     elif output.type in HARD_NEWS and is_column(url):
@@ -108,8 +113,6 @@ def apply(output, attribution, url=None, title=None):
         topics = list(output.topics or [])
         if "ai" not in topics:
             output.topics = topics + ["ai"]
-        if (output.relevance or 0) < 2:
-            output.relevance = 2
     return output
 
 

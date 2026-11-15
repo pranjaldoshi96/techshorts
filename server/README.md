@@ -30,14 +30,42 @@ becomes the safe-mode publisher (spec 6.4), which isn't built yet (see "Not buil
 Each tick:
 
 ```
-fetch (conditional GET) → prefilter → timestamps → article text → embed → LLM triage + write → trim → validate
-→ entailment gate → cluster into events → event importance + clamps → score → tabs → images → v1 edition.json
-→ 1.2-decoder check → publish → health.json
+fetch (conditional GET) → strong signals imported as items → prefilter → timestamps → screening call → article text
+→ embed → LLM write (card, importance, spice, push alert) → trim → validate → fact-check of every card line
+→ cluster into events by development (judge) → event importance + clamps → score → tabs → images
+→ v1 edition.json + notifications.json → 1.2-decoder check → publish → health.json
 ```
 
-- **One card per event.** Reports of the same story cluster into one event (`cluster.py`); its card is the lead
-  article's validated headline and summary, or a rewrite from several members.
-- **Ranking** (`rank.py`, spec 2.11): `score = I × C × A × F` (importance, coverage, authority, freshness). Freshness
+- **Scope and spice** (owner's direction, 2026-11-15): anything with a tech angle that makes a good headline, not
+  only product and funding news. `sources.yaml` lists about 120 feeds (trade and business press, leak- and
+  gossip-driven outlets, security, gaming, crypto, space, EVs, regulators, India, startups, developers). One
+  screening call per tick (`llm.triage_batch`) drops what has no tech angle before it costs a write. The writer
+  scores **spice** 1-10 (how much a tech-curious reader would want to tap and forward the story) next to
+  importance; `rank.py` multiplies the score by it, lets a juicy story into a tab up to two importance points under
+  the tab's minimum, and keeps dry items out of Top.
+- **Push alerts**: every written card carries `notification: {title, body}` (title at most 40 characters, body a
+  hook of at most 110) and `spice` in `edition.json`; `notifications.json` beside it ranks the fresh cards for
+  pushing by spice x importance x traction. The hook passes the same checks as the headline. Sending is the next
+  app release's job.
+- **Punchy and true**: `validate.py` rejects a headline or alert that states as done what the source title says
+  is still to come ("Sebi to issue" must not become "Sebi issues"), an inference or superlative the source doesn't
+  contain ("may have contributed to", "record"), and a card that drops the source's unnamed sourcing. A second
+  model then fact-checks every line of the card (headline, three sentences, alert) against the whole text
+  (`entail.py`). A card that fails is retried with the reason, then held, never shipped.
+- **Models** (`config.yaml` `llm`): cards are written by GPT and fact-checked by Gemini on the inference hub;
+  screening and the clustering judge use the smaller Gemini; the NVIDIA endpoint serves embeddings and the backup
+  chat model, which takes over call by call when the hub fails (`llm.Router`).
+- **Signals**: Techmeme, Mediagazer, Hacker News (Algolia API) and Lobsters. A signal attaches to the event it is
+  about (by URL, or by title when the judge agrees) and adds to its traction; points are refreshed on every
+  poll. A Techmeme pick, or an HN/Lobsters link past a points bar, whose article no source carries is imported and
+  written like any item (`fetch.promote_signals`).
+
+- **One card per development.** Reports of the same development cluster into one event (`cluster.py`); its card
+  is the lead article's validated headline and summary, or a rewrite from several members. A judge call rules
+  whether a new item is the same development as a nearby event, a follow-up of its story (its own card, grouped
+  with the story so a tab shows at most 3 of them) or something else: cosine plus a shared name chained every
+  report of a running saga into one stale card.
+- **Ranking** (`rank.py`, spec 2.11): `score = I × S × C × A × F` (importance, spice, coverage, authority, freshness). Freshness
   decays from the publisher's own timestamp, so an old post re-fetched after downtime never looks new.
 - **Tabs** (spec 2.12): Top, AI, Startups, India, Dev and Reads, each with its own types, minimum importance, window
   and cap; at most 2 cards from one publisher in the first 10 (4 per tab) and 2 per storyline; never padded. A
@@ -80,8 +108,13 @@ python3 tools/check_edition.py ~/.techshorts-r1/edition/edition.json   # the 1.2
 
 `--out` defaults to `publish.out_dir`, else `<state_dir>/edition`. Nothing is pushed to GitHub unless
 `publish.git_remote` is set in `config.yaml`; it is unset until cutover, so a test run can't touch the live branch.
-The NVIDIA key comes from `NVIDIA_API_KEY`, else the last `export NVIDIA_API_KEY=` line in `~/.bashrc`. Without
-a key the worker still publishes, in degraded mode.
+Each provider's key comes from the variable named in `config.yaml` (`HUB_API_KEY`, `NVIDIA_API_KEY`), else the file
+named by `<NAME>_FILE`, else the last `export <NAME>=` line in `~/.bashrc`. Without the hub key the backup model
+writes; with no key at all the worker still publishes, in degraded mode.
+
+Two tools check a prompt, model or clustering change against a real run without touching it:
+`tools/eval_cards.py STATE_DB "title words"` writes cards for chosen items and prints the scores and each check's
+outcome; `tools/recluster.py STATE_DB --grep word` re-clusters a copy and prints the events.
 
 The same worker also runs as a system service on the public VPS (a test run that publishes to a local directory
 only); see [deploy/README.md](deploy/README.md). There the key comes from the file named by `NVIDIA_API_KEY_FILE`.
@@ -112,7 +145,10 @@ to `publish.sh` and is not read by the worker.)
   - **freshness**: publisher→app lag p50/p95 (`event_published_at` → first edition);
   - **pipeline**: per-source status and check results, prefilter drops by rule, LLM calls/latency/429s,
     validation pass rate per item on its first run (and the eventual rate after hold retries), skip reasons;
-  - **content**: events, raw vs clamped importance histogram.
+  - **content**: events, raw vs clamped importance histogram; **spice**: its histogram per item and event, the
+    last edition's median and count at 7+, and the push-alert candidates in rank order;
+  - **freshness.live**: publisher→app lag for stories that arrived while the worker was polling (the overall
+    figure includes backlog after a seed or downtime).
 - **Alerts** (ntfy, at most once per condition per 6 h; logged as `ALERT …` when `NTFY_TOPIC` is unset): no
   publish for 20 min, Top under 12, first-run validation pass rate under 80% over 1 h (at least 10 new items),
   more than 20 LLM 429s an hour or any 401/403, 10+ LLM timeouts/5xx an hour, the 1.2 decoder check failing, a

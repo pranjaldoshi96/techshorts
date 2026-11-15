@@ -41,6 +41,8 @@ def notify(db, condition, message):
 def source_status(db, srcs):
     out = []
     for s in srcs.sources:
+        if not s.polled:
+            continue
         st = db.source_state(s.id)
         out.append({
             "id": s.id, "name": s.name, "tier": sources_mod.effective_tier(s, st["check_ok"]),
@@ -67,6 +69,7 @@ def build(db, srcs, publish=None, now=None):
         "validation": validation_stats(db, now - timedelta(hours=24)),
         "events": event_stats(db, now - timedelta(hours=24)),
         "importance": importance_drift(db, now - timedelta(hours=24)),
+        "spice": spice_stats(db, now - timedelta(hours=24), publish),
         "edition": edition_stats(db, now, publish),
         "freshness": freshness(db, now - timedelta(hours=24)),
     }
@@ -170,6 +173,24 @@ def importance_drift(db, since):
             "itemShareAtLeast8": round(sum(v >= 8 for v in raw) / len(raw), 3) if raw else None}
 
 
+def spice_stats(db, since, publish=None):
+    """Spice (how tap-worthy a story is, the writer's 1-10 score) over 24 h: per written item, per live event, and
+    for the last edition's cards with the push-alert candidates in rank order (spice x importance x traction)."""
+    items = [r["spice"] for r in db.q("SELECT spice FROM writes WHERE written_at >= ? AND status = 'ok'"
+                                      " AND spice IS NOT NULL", iso(since))]
+    events = [r["spice"] for r in db.q("SELECT spice FROM events WHERE status = 'live' AND updated_at >= ?"
+                                       " AND spice IS NOT NULL", iso(since))]
+    hist = lambda vals: {str(i): sum(v == i for v in vals) for i in range(1, 11)}  # noqa: E731
+    out = {"window": "24h", "items": hist(items), "events": hist(events),
+           "itemMedian": median(items) if items else None,
+           "itemShareAtLeast7": round(sum(v >= 7 for v in items) / len(items), 3) if items else None,
+           "itemShareAtMost2": round(sum(v <= 2 for v in items) / len(items), 3) if items else None}
+    if publish:
+        out["edition"] = publish.get("spice")
+        out["notifications"] = (publish.get("notifications") or [])[:10]
+    return out
+
+
 def edition_stats(db, now, publish):
     """The last publish attempt's report (tabs, degraded cards, held events) plus the edition's age."""
     last_ok = db.one("SELECT * FROM publishes WHERE ok = 1 ORDER BY at DESC LIMIT 1")
@@ -184,6 +205,9 @@ def edition_stats(db, now, publish):
     return out
 
 
+LIVE_MIN = 20
+
+
 def freshness(db, since):
     """Publisher-to-app lag (event_published_at -> first edition with the event) and pipeline lag (first seen ->
     first edition), over events first published in the window. A post that was already old when the worker first
@@ -196,9 +220,17 @@ def freshness(db, since):
     seen = sorted((from_iso(r["first_at"]) - from_iso(r["first_seen_at"])).total_seconds() / 60
                   for r in rows if r["first_seen_at"])
     rnd = lambda v: None if v is None else round(v, 1)  # noqa: E731
+    # Stories that arrived while the worker was polling (first seen within LIVE_MIN of the publisher's time):
+    # the only rows that measure how fast a new story reaches the edition. A seed or a catch-up after downtime
+    # ships hours-old posts, which made the overall p50 read 1,431 min on the VPS test run's first day.
+    live = sorted((from_iso(r["first_at"]) - from_iso(r["published_at"])).total_seconds() / 60 for r in rows
+                  if r["first_seen_at"] and (from_iso(r["first_seen_at"]) - from_iso(r["published_at"])
+                                             ).total_seconds() <= LIVE_MIN * 60)
     return {"window": "24h", "events": len(rows),
             "publisherToAppMin": {"p50": rnd(_pct(pub, 0.5)), "p95": rnd(_pct(pub, 0.95))},
-            "firstSeenToAppMin": {"p50": rnd(_pct(seen, 0.5)), "p95": rnd(_pct(seen, 0.95))}}
+            "firstSeenToAppMin": {"p50": rnd(_pct(seen, 0.5)), "p95": rnd(_pct(seen, 0.95))},
+            "live": {"events": len(live), "publisherToAppMin": {"p50": rnd(_pct(live, 0.5)),
+                                                                "p95": rnd(_pct(live, 0.95))}}}
 
 
 def alerts(db, now, started_at=None, top_min=12):

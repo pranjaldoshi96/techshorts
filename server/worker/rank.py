@@ -1,6 +1,11 @@
 """Scoring and tab assembly (spec 2.11 and 2.12). Pure functions over Candidate records; publish_v1.py loads them.
 
-score = I × C × A × F, region-neutral (the app applies the user's region boost in R2). Freshness F decays from
+score = I × S × C × A × F: importance, spice, coverage (traction), authority, freshness. Spice is the owner's
+direction of 2026-11-15 ("all the spicy news ... that can make a really good headline"): how much a tech-curious
+reader would want to tap and forward the story, scored by the writer on the story's own facts. It multiplies the
+score (0.64 at spice 1, 1.0 at 5, 1.45 at 10), opens the tabs to a juicy story one or two importance points under
+a tab's minimum, and keeps dry routine items (spice <= 2) out of Top unless they are major news.
+Region-neutral (the app applies the user's region boost in R2). Freshness F decays from
 event_published_at, the publisher's own clock, so a 5-day-old post re-fetched after downtime never looks new; a
 material update resets the decay to "3 h old" (age_eff), which is how a story that keeps moving stays up.
 """
@@ -13,7 +18,7 @@ from .importance import HARD_NEWS
 TOP_TYPES = HARD_NEWS
 LABELLED = ("analysis", "opinion", "interview")
 # Never a card in any tab, whatever the score (spec 2.12).
-NEVER_TYPES = {"review", "explainer", "customer_story", "podcast", "promo", "deal"}
+NEVER_TYPES = {"review", "explainer", "customer_story", "podcast", "promo", "deal", "roundup"}
 DEGRADED_IMPORTANCE = 6
 YIELD_FLOOR = 0.25      # drop events below 25% of the tab's median score
 DIVERSITY_TOP10 = 2     # lead-publisher cap in ranks 1-10
@@ -22,7 +27,24 @@ TUTORIAL_PER_10 = 1     # Dev: at most one tutorial per 10 cards
 IMAGE_HAMMING = 6       # dHash distance at or under which two images count as the same picture
 # One storyline (a story, its follow-ups and its look-alike angles) takes at most this many cards in a tab, the
 # freshest/highest scored first. The 2026-11 shadow Top had 3 Nvidia/Huang cards and 3 Anthropic-IPO cards.
-STORYLINE_CAP = 2
+# 3 since each development of a saga is now its own card (cluster.py's judge): with 2, a day with five real
+# developments in one story showed two of them.
+STORYLINE_CAP = 3
+# Spice (see the module docstring). An unscored card (written before spice existed, or unwritten) is neutral.
+SPICE_NEUTRAL = 5
+SPICY = 7               # at or above: may enter a tab below its importance minimum
+SPICY_IMPORTANCE_GAP = 2
+SPICY_MAX_H = 36
+DRY = 2                 # at or below: not Top material unless importance >= DRY_TOP_IMPORTANCE
+DRY_TOP_IMPORTANCE = 8
+# Words that mark a publisher title as tech, for the one case with no classification at all (an LLM outage).
+TECH_TITLE = re.compile(
+    r"\b(ai|a\.i\.|openai|anthropic|nvidia|google|apple|microsoft|meta|amazon|tesla|spacex|chatgpt|gemini|claude|"
+    r"intel|amd|samsung|qualcomm|tsmc|oracle|salesforce|ibm|sony|nintendo|huawei|xiaomi|netflix|spotify|uber|"
+    r"airbnb|stripe|tiktok|twitter|xai|deepmind|waymo|palantir|coinbase|binance|stablecoin\w*|blockchain|"
+    r"llm|chip|chips|semiconductor|startup|startups|software|app|apps|iphone|android|cloud|data|cyber\w*|hack\w*|"
+    r"breach|robot\w*|tech|ipo|funding|raises|crypto|bitcoin|satellite|rocket|gpu|model|coding|developer\w*|"
+    r"internet|online|digital|ev|evs|quantum|drone\w*|smartphone\w*|algorithm\w*|outage)\b", re.I)
 # Dev is for developers: a dev_tools story whose main topic is dev tools or whose type is a developer release, or a
 # real security incident. Company news that merely involves a dev-tools company (funding, earnings, M&A) is not.
 DEV_TYPES = ("launch", "release_notes", "tutorial")
@@ -142,6 +164,8 @@ class Candidate:
     keys: frozenset = frozenset()   # non-org entity keys of the members (cluster.entity_keys)
     storyline: str = None           # id shared by the cards of one storyline (publish_v1.storylines)
     title: str = ""                 # the headline the card shows (or the lead's title), for text rules
+    spice: int = SPICE_NEUTRAL      # 1-10, how tap-worthy the story is (the writer's score)
+    lobsters_points: int = 0
     boost: float = 1.0              # editorial boost / bury multiplier
     pin: frozenset = frozenset()    # tabs this event is pinned to the head of
     data: dict = field(default_factory=dict)    # whatever publish_v1 needs later (lead row, text, members)
@@ -156,23 +180,58 @@ class Candidate:
         return max(0.0, a)
 
 
-def coverage(n_publishers, on_techmeme=False, hn_points=0):
+def coverage(n_publishers, on_techmeme=False, hn_points=0, lobsters_points=0):
+    """Traction: how widely the story is covered and shared. Each platform has its own capped multiplier, so no
+    single one decides the order."""
     c = min(2.2, 1 + 0.5 * math.log2(max(1, n_publishers)))
     c *= 1.25 if on_techmeme else 1
     c *= min(1.3, 1 + 0.15 * math.log2(max(1, (hn_points or 0) / 100)))
+    c *= min(1.15, 1 + 0.075 * math.log2(max(1, (lobsters_points or 0) / 25)))
     return c
 
 
-def score(importance, n_publishers, on_techmeme, hn_points, authority, age_eff_h, tau_h):
+def spice_factor(spice):
+    """0.64 at 1, 1.0 at 5, 1.45 at 10."""
+    return 1 + 0.09 * (min(10, max(1, spice or SPICE_NEUTRAL)) - SPICE_NEUTRAL)
+
+
+def score(importance, n_publishers, on_techmeme, hn_points, authority, age_eff_h, tau_h, spice=SPICE_NEUTRAL,
+          lobsters_points=0):
     i = (importance / 10) ** 1.5
-    return i * coverage(n_publishers, on_techmeme, hn_points) * authority * math.exp(-age_eff_h / tau_h)
+    return (i * spice_factor(spice) * coverage(n_publishers, on_techmeme, hn_points, lobsters_points) * authority
+            * math.exp(-age_eff_h / tau_h))
 
 
 def cand_score(c, tab, now, degraded=False):
     imp = DEGRADED_IMPORTANCE if degraded or not c.classified else c.importance
     if not c.ai_text and not degraded:
         imp = min(imp, UNWRITTEN_IMPORTANCE)
-    return score(imp, c.n_publishers, c.on_techmeme, c.hn_points, c.authority, c.age_eff(now), tab.tau_h) * c.boost
+    spice = SPICE_NEUTRAL if degraded or not c.classified else c.spice
+    return score(imp, c.n_publishers, c.on_techmeme, c.hn_points, c.authority, c.age_eff(now), tab.tau_h, spice,
+                 c.lobsters_points) * c.boost
+
+
+def notification_score(c):
+    """Spice x importance x traction (the owner's ranking for push alerts), each on its own scale: a card needs
+    all three to lead."""
+    return (c.spice / 10) * (c.importance / 10) * coverage(c.n_publishers, c.on_techmeme, c.hn_points,
+                                                           c.lobsters_points)
+
+
+def has_traction(c):
+    return c.n_publishers >= 2 or c.on_techmeme or c.hn_points >= 100 or c.lobsters_points >= 40
+
+
+def spicy_pass(c, tab, now):
+    """A juicy story may sit up to two importance points under a tab's minimum: the owner wants the founder feud
+    and the leaked memo, which the importance scale rightly rates 4-5. Under the minimum by two it also needs
+    traction (a second publisher, Techmeme or HN), so one outlet's gossip item doesn't get there alone."""
+    gap = tab.min_importance - c.importance
+    if not (c.ai_text and c.spice >= SPICY and 0 < gap <= SPICY_IMPORTANCE_GAP and c.age_eff(now) <= SPICY_MAX_H):
+        return False
+    if EXPLAINER_TITLE.match(c.title or ""):
+        return False
+    return gap == 1 or has_traction(c)
 
 
 def window_h(c, tab):
@@ -204,8 +263,12 @@ def eligible(c, tab, now, degraded=False):
     if tab.id == "top" and not c.ai_text and not degraded and tab.id not in c.pin:
         return "no_text"
     if not c.classified:
-        # Degraded mode only: a tier-1 item the LLM never saw. Top is the only tab that needs no topic.
-        return None if tab.id == "top" and c.lead_tier1 else "unclassified"
+        # Degraded mode only: a tier-1 item the LLM never saw. Top is the only tab that needs no topic. Nothing has
+        # judged whether it is tech at all (an outage test put a Verge entertainment interview at Top rank 1), so
+        # it needs a second publisher or a tech word in its title.
+        if tab.id == "top" and c.lead_tier1 and (c.n_publishers >= 2 or TECH_TITLE.search(c.title or "")):
+            return None
+        return "unclassified"
     if never_shipped(c):
         return "never_shipped"
     if not c.is_news and tab.id not in ("reads", "dev"):
@@ -213,8 +276,11 @@ def eligible(c, tab, now, degraded=False):
     # Top takes analysis, opinion and interview pieces only at importance >= 8.
     if c.type not in tab.types and not (tab.id == "top" and c.type in LABELLED and c.importance >= 8):
         return "type"
-    if c.importance < tab.min_importance and not (tab.id == "top" and top_fresh(c, now)):
+    if c.importance < tab.min_importance and not (tab.id == "top" and top_fresh(c, now)) \
+            and not spicy_pass(c, tab, now):
         return "importance"
+    if tab.id == "top" and c.spice <= DRY and c.importance < DRY_TOP_IMPORTANCE:
+        return "dry"
     if c.relevance < tab.min_relevance:
         return "relevance"
     topics = set(c.topics)

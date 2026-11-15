@@ -24,5 +24,7 @@ if [ "${1:-}" = "--setup" ]; then
     echo "setup running on the VPS; follow /var/log/techgist-setup.log, then: systemctl restart techgist-worker"
     exit 0
 fi
+# The unit file is part of the deploy: a changed one (a new key file, say) is installed before the restart.
+"${SSH[@]}" "$HOST" "cmp -s /opt/techgist/deploy/techgist-worker.service /etc/systemd/system/techgist-worker.service || { install -m 644 /opt/techgist/deploy/techgist-worker.service /etc/systemd/system/ && systemctl daemon-reload; }" </dev/null
 "${SSH[@]}" "$HOST" "/opt/techgist/venv/bin/python -m compileall -q /opt/techgist/worker /opt/techgist/tools >/dev/null; systemctl restart techgist-worker && sleep 3 && systemctl is-active techgist-worker" </dev/null
 echo "deployed $REV"

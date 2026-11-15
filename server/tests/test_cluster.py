@@ -242,12 +242,14 @@ def test_every_item_is_in_one_live_event(replayed):
         assert e is not None and ev(db, e)["status"] == "live", (name, r["title"])
 
 
-def test_event_text_comes_from_the_lead_and_published_at_is_the_earliest_member(replayed):
+def test_event_text_comes_from_the_lead_and_published_at_is_the_earliest_hard_news_member(replayed):
     name, db = replayed
     for e in db.q("SELECT * FROM events WHERE status = 'live'"):
-        members = db.q("SELECT i.published_at FROM event_members m JOIN items i USING (url_canonical)"
-                       " WHERE m.event_id = ?", e["id"])
-        assert e["published_at"] == min(m["published_at"] for m in members)
+        members = db.q("SELECT i.published_at, w.type, w.status FROM event_members m JOIN items i USING (url_canonical)"
+                       " JOIN writes w USING (url_canonical) WHERE m.event_id = ?", e["id"])
+        # The clock is the first hard-news report; a profile or explainer that joined doesn't move it back.
+        hard = [m for m in members if m["type"] in cluster.HARD_NEWS and m["status"] != "thin"] or members
+        assert e["published_at"] == min(m["published_at"] for m in hard)
         lead = db.one("SELECT headline FROM writes WHERE url_canonical = ?", e["lead_url"])
         assert e["headline"] == lead["headline"]
 

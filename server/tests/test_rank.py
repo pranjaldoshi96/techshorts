@@ -139,8 +139,16 @@ def test_tab_topics_and_types():
 
 
 def test_unclassified_items_reach_only_top_and_only_from_tier1():
-    c = cand(type=None, topics=(), relevance=0, classified=False, lead_tier1=True)
+    c = cand(type=None, topics=(), relevance=0, classified=False, lead_tier1=True,
+             title="Samsung opens a chip plant in Texas")
     assert rank.eligible(c, TOP, NOW) is None
+    # Nothing has judged an unclassified item, so it needs a tech word in its title or a second publisher: an
+    # outage test put "Rachelle Hampton won't admit how long she spent charting the use of murmur in Twilight"
+    # (a Verge entertainment interview) at Top rank 1.
+    off = rank.Candidate(**{**c.__dict__, "title": "Rachelle Hampton won't admit how long she spent charting "
+                                                    "the use of murmur in Twilight"})
+    assert rank.eligible(off, TOP, NOW) == "unclassified"
+    assert rank.eligible(rank.Candidate(**{**off.__dict__, "n_publishers": 2}), TOP, NOW) is None
     assert rank.eligible(c, rank.TABS["ai"], NOW) == "unclassified"
     assert rank.eligible(rank.Candidate(**{**c.__dict__, "lead_tier1": False}), TOP, NOW) == "unclassified"
 

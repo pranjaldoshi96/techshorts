@@ -157,6 +157,12 @@ CREATE INDEX IF NOT EXISTS publishes_at ON publishes(at);
 -- "new" card once the primary leaves the edition.
 CREATE TABLE IF NOT EXISTS twins (twin_id TEXT PRIMARY KEY, primary_id TEXT NOT NULL, cosine REAL, at TEXT NOT NULL);
 
+-- The clustering judge's rulings (cluster.py), so a pair is asked about once. a is an item URL (b an event id), or
+-- "pair:<event id>" (b the other event id, the two sorted). verdict: same | followup | different.
+CREATE TABLE IF NOT EXISTS judgements (
+  a TEXT NOT NULL, b TEXT NOT NULL, verdict TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (a, b)
+);
+
 CREATE TABLE IF NOT EXISTS event_signals (
   event_id TEXT NOT NULL, url_canonical TEXT NOT NULL, source_id TEXT NOT NULL, how TEXT, points INTEGER,
   comments INTEGER, hn_url TEXT, at TEXT NOT NULL,
@@ -165,7 +171,13 @@ CREATE TABLE IF NOT EXISTS event_signals (
 """
 
 # Columns added after a table first shipped; added in place so an existing state.db keeps working.
-MIGRATIONS = {"items": [("hold_reason", "TEXT"), ("og_image", "TEXT")], "write_log": [("attempt", "INTEGER"), ("tok_in", "INTEGER"), ("tok_out", "INTEGER")]}
+MIGRATIONS = {
+    "items": [("hold_reason", "TEXT"), ("og_image", "TEXT"), ("triaged", "INTEGER")],
+    "write_log": [("attempt", "INTEGER"), ("tok_in", "INTEGER"), ("tok_out", "INTEGER")],
+    # Spice and the push alert's title (owner's direction, 2026-11-15); NULL spice on older rows reads as 5.
+    "writes": [("spice", "INTEGER"), ("notif_title", "TEXT")],
+    "events": [("spice", "INTEGER"), ("notif_title", "TEXT"), ("rewrite_spice", "INTEGER"), ("social", "TEXT")],
+}
 # Run once, right after a migration adds the column.
 BACKFILL = {("write_log", "attempt"): (
     "UPDATE write_log SET attempt = (SELECT COUNT(*) FROM write_log w2 WHERE w2.kind = 'item'"
@@ -329,12 +341,13 @@ class DB:
         if o is not None:
             row.update(
                 type=o.type, is_news=int(o.is_news), relevance=o.relevance, importance=o.importance,
-                breaking=int(o.breaking), sensitive=int(o.sensitive), region=o.region, topics=json.dumps(o.topics),
+                spice=getattr(o, "spice", None), breaking=int(o.breaking), sensitive=int(o.sensitive), region=o.region, topics=json.dumps(o.topics),
                 entities=o.entities.model_dump_json(), event=o.event, material_update=int(o.material_update),
                 output=o.model_dump_json())
             if result.status == "ok":
                 row.update(headline=o.headline, summary=result.full, summary_short=result.short,
-                           notif_line=o.notif_line, s1=o.s1, s2=o.s2, s3=o.s3)
+                           notif_line=o.notif_line, notif_title=getattr(o, "notif_title", None) or None,
+                           s1=o.s1, s2=o.s2, s3=o.s3)
         old = self.one("SELECT status FROM writes WHERE url_canonical = ?", url_canonical)
         # A failed retry must not wipe an earlier thin item's classification.
         if old is not None and o is None and old["status"] == "thin":

@@ -36,7 +36,7 @@ HUANG_SRC = (
 HUANG = dict(
     is_news=True, type="news", relevance=3, importance=9, region="global", topics=["bigtech"], sensitive=True,
     headline="Jensen Huang admits affair with suspected Chinese spy",
-    s1="Nvidia CEO Jensen Huang admitted to an affair with a suspected Chinese spy at a Monday staff meeting.",
+    s1="Nvidia CEO Jensen Huang admitted to the affair at a Monday staff meeting, people at the meeting said.",
     s2="The FBI is looking into the relationship, and the board has hired outside lawyers to review whether "
        "secrets were shared.",
     s3="Shares fell 4% in early trading as investors weighed the risk to the leadership of the chipmaker.",
@@ -444,7 +444,7 @@ def test_entailment_failure_retries_with_the_unsupported_claim():
     client = FakeClient([DAYLIGHT, DAYLIGHT], entail=["no", "yes"])
     r = llm.write_item(client, CFG, ITEM, "Example News", text.choose([DAYLIGHT_SRC], ""))
     assert r.status == "ok" and r.passed_at == 2
-    assert "does not support: a record raise" in client.calls[2][2][-1]["content"]
+    assert "The fact-check failed: a record raise" in client.calls[2][2][-1]["content"]
 
 
 def test_entailment_gate_is_spec_2_8_or_rule():
@@ -458,11 +458,12 @@ def test_entailment_gate_is_spec_2_8_or_rule():
     assert r.status == "ok" and r.entailed is None and [c[0] for c in client.calls] == ["write"]
 
 
-def test_essay_is_judged_on_whole_text_news_on_the_opening():
+def test_every_card_is_judged_on_the_whole_text():
+    # The fact-check covers S2, S3 and the push alert, whose facts come from anywhere in the text.
     paras = ["Opening line one."] * 3 + ["Longer paragraph " * 60] * 3 + ["The essay's actual point is here."]
     t = text.choose(paras, "")
     news = out(DAYLIGHT, importance=4, relevance=2)
-    assert entail.context(news, t) == t.lead() and "actual point" not in entail.context(news, t)
+    assert entail.context(news, t) == t.text and "actual point" in entail.context(news, t)
     essay = out({**DAYLIGHT, "type": "analysis", "is_news": False}, importance=4, relevance=2)
     assert "actual point" in entail.context(essay, t)
     labelled = out({**DAYLIGHT, "headline": "Analysis: Nvidia's lead is shrinking"}, importance=4, relevance=2)

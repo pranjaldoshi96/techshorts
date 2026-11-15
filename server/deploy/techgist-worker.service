@@ -18,6 +18,7 @@ Environment=TECHGIST_STATE=/var/lib/techgist
 Environment=PYTHONUNBUFFERED=1
 # The key is read from the file at start; it is never in the environment, the unit or the journal.
 Environment=NVIDIA_API_KEY_FILE=/etc/techgist/nvidia_key
+Environment=HUB_API_KEY_FILE=/etc/techgist/hub_key
 # Optional NTFY_TOPIC=... (root:techgist, mode 640).
 EnvironmentFile=-/etc/techgist/env
 ExecStart=/opt/techgist/venv/bin/python -m worker.main --out /var/lib/techgist/edition

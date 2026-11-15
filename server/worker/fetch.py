@@ -6,6 +6,7 @@ in the worker's main thread.
 import calendar
 import hashlib
 import html
+import json
 import re
 import time
 from dataclasses import dataclass, field
@@ -92,9 +93,12 @@ def _image(e):
     return None
 
 
-def _signal_extra(source_id, e, summary_html):
+def _signal_extra(source, e, summary_html):
     """Points and comments from hnrss; the linked article from Techmeme (whose own link is a permalink)."""
     extra = {}
+    source_id = source.id
+    if source.kind == "techmeme":
+        source_id = "techmeme"
     if source_id.startswith("hn"):
         for key, rx in (("points", r"Points:\s*(\d+)"), ("comments", r"# Comments:\s*(\d+)")):
             m = re.search(rx, summary_html)
@@ -110,7 +114,61 @@ def _signal_extra(source_id, e, summary_html):
     return extra
 
 
+class _JsonFeed:
+    """Stands in for feedparser's result when the body is JSON: `bozo` is the parse failure flag."""
+
+    def __init__(self, bozo):
+        self.bozo = bozo
+
+
+def _iso_dt(s):
+    try:
+        return datetime.fromisoformat((s or "").replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def parse_json_entries(body, source, limit):
+    """Hacker News through the Algolia search API, and Lobsters' hottest.json: both give the linked article, its
+    points and its comment count directly. (hnrss.org, the RSS route, answered in 3-8 s from the VPS and timed out
+    on 3 of 45 polls; the API answers in about a second.)"""
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return [], _JsonFeed(True)
+    out = []
+    if source.format == "hn_algolia":
+        for h in (data.get("hits") if isinstance(data, dict) else None) or []:
+            title, oid = plain(h.get("title")), h.get("objectID")
+            if not title or not oid:
+                continue
+            hn_url = f"https://news.ycombinator.com/item?id={oid}"
+            url = (h.get("url") or hn_url).strip()
+            if not url.startswith(("http://", "https://")):
+                continue
+            ts = h.get("created_at_i")
+            out.append(Entry(url=url, url_canonical=canonical_url(url), title=title,
+                             feed_published_at=datetime.fromtimestamp(ts, timezone.utc) if ts else None,
+                             extra={"points": int(h.get("points") or 0), "comments": int(h.get("num_comments") or 0),
+                                    "hn_url": hn_url}))
+    elif source.format == "lobsters":
+        for h in data if isinstance(data, list) else []:
+            title = plain(h.get("title"))
+            url = (h.get("url") or h.get("comments_url") or "").strip()
+            if not title or not url.startswith(("http://", "https://")):
+                continue
+            out.append(Entry(url=url, url_canonical=canonical_url(url), title=title,
+                             feed_published_at=_iso_dt(h.get("created_at")),
+                             extra={"points": int(h.get("score") or 0), "comments": int(h.get("comment_count") or 0),
+                                    "hn_url": h.get("comments_url")}, tags=tuple(h.get("tags") or ())))
+    epoch = datetime.min.replace(tzinfo=timezone.utc)
+    out.sort(key=lambda x: x.feed_published_at or epoch, reverse=True)
+    return out[:limit], _JsonFeed(False)
+
+
 def parse_entries(body, source, limit):
+    if source.format != "rss":
+        return parse_json_entries(body, source, limit)
     feed = feedparser.parse(body)
     out = []
     for e in feed.entries:
@@ -129,7 +187,7 @@ def parse_entries(body, source, limit):
             text=text,
             image=_image(e),
             # The byline names the writer for attribution prefixes on opinion pieces (attribution.py).
-            extra=_signal_extra(source.id, e, summary_html) if source.is_signal else (
+            extra=_signal_extra(source, e, summary_html) if source.is_signal else (
                 {"author": plain(e.get("author"))} if e.get("author") else {}),
             tags=tuple(t.get("term") for t in e.get("tags") or () if t.get("term")),
         ))
@@ -217,12 +275,17 @@ def ingest(db, source, sources, entries, now, first_run, cfg):
         first_seen = from_iso(existing["first_seen_at"]) if existing else now
         if db.add_sighting(e.url_canonical, source.id, e.title, e.feed_published_at, now):
             stats.sightings += 1
+        if existing and source.is_signal:
+            _update_signal(db, existing, source, e)
         # A URL first seen only on a signal source becomes a real item when a news source lists it.
         if existing and not (existing["status"] == "signal" and not source.is_signal):
             continue
         status, rule, published = classify(e, source, sources, now, first_seen, first_run, cfg)
+        extra = e.extra
+        if existing and not source.is_signal:
+            extra = {**e.extra, **_carried(existing)}
         item = dict(url_canonical=e.url_canonical, url=e.url, source_id=source.id, title=e.title,
-                    feed_text=e.text, image=e.image, extra=e.extra, feed_published_at=e.feed_published_at,
+                    feed_text=e.text, image=e.image, extra=extra, feed_published_at=e.feed_published_at,
                     first_seen_at=first_seen, published_at=published, status=status, drop_rule=rule)
         (db.replace_item if existing else db.insert_item)(item)
         if status == "dropped":
@@ -235,6 +298,134 @@ def ingest(db, source, sources, entries, now, first_run, cfg):
         else:
             stats.new += 1
     return stats
+
+
+POINT_KEYS = ("points", "comments", "hn_url")
+
+
+def _update_signal(db, existing, source, e):
+    """Keeps a signal's points current. They were frozen at the value first seen (the row was skipped as "already
+    known"), so a story first polled at 30 points that reached 800 kept the multiplier of a 30-point story.
+    On the signal's own row they live at the top of `extra`; on a news item the signal also listed (or an article
+    imported from the signal's link), under extra.signals.<source id>, where cluster.attach_signals reads them."""
+    new = {k: e.extra[k] for k in POINT_KEYS if e.extra.get(k) is not None}
+    if not new:
+        return
+    extra = json.loads(existing["extra"] or "{}")
+    own = existing["status"] == "signal" and existing["source_id"] == source.id
+    cur = extra if own else extra.setdefault("signals", {}).setdefault(source.id, {})
+    if all(cur.get(k) == v for k, v in new.items()):
+        return
+    cur.update(new)
+    db.conn.execute("UPDATE items SET extra = ? WHERE url_canonical = ?",
+                    (json.dumps(extra), existing["url_canonical"]))
+
+
+def _carried(existing):
+    """What a signal row knows that must survive a news source taking the URL over: its points."""
+    extra = json.loads(existing["extra"] or "{}")
+    pts = {k: extra[k] for k in POINT_KEYS if extra.get(k) is not None}
+    signals = dict(extra.get("signals") or {})
+    if pts:
+        signals[existing["source_id"]] = pts
+    return {"signals": signals} if signals else {}
+
+
+# Signals that become cards
+
+# Links that are not articles: discussion pages, social posts, video, code hosts, PDFs.
+NOT_ARTICLE_HOSTS = ("news.ycombinator.com", "x.com", "twitter.com", "youtube.com", "youtu.be", "github.com",
+                     "gitlab.com", "reddit.com", "lobste.rs", "bsky.app", "threads.net", "linkedin.com",
+                     "facebook.com", "instagram.com", "tiktok.com", "techmeme.com", "mediagazer.com")
+PROMOTE_DEFAULTS = {"techmeme": 0, "hn": 150, "lobsters": 60, "max_age_h": 36, "per_tick": 10}
+_TECHMEME_CREDIT = re.compile(r"\s*\((?:[^()]|\([^()]*\))*\)\s*$")
+
+
+def host_name(url):
+    host = (urlsplit(url).hostname or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def promote_signals(db, srcs, cfg, now):
+    """Turns strong signals into items of their own, so a story that only Techmeme or Hacker News carries can
+    become a card: Techmeme and Mediagazer picks (an editor chose them), and HN or Lobsters links past a points
+    bar. The linked article is fetched and written like any item; the signal still attaches to its event by URL.
+
+    The 2026-11-15 test run held "Bessent urges Nvidia to hire an outside CEO" (Techmeme), "Lovable apps expose
+    passport details and 200K private messages" (HN, 944 points) and a dozen more only as signals, with no card,
+    because the outlets that broke them were not sources. The publisher is the listed source that owns the host
+    (sources.yaml `domains`), else the catch-all "web" source showing the host name.
+    Returns the number of items created."""
+    bars = {**PROMOTE_DEFAULTS, **((cfg.get("signals") or {}).get("promote") or {})}
+    by_id = srcs.by_id()
+    web = by_id.get("web")
+    since = iso(now - timedelta(hours=bars["max_age_h"]))
+    made = 0
+    rows = db.q("SELECT * FROM items WHERE status = 'signal' AND published_at >= ? ORDER BY published_at DESC", since)
+    for r in rows:
+        if made >= bars["per_tick"]:
+            break
+        source = by_id.get(r["source_id"])
+        extra = json.loads(r["extra"] or "{}")
+        if source is None or not source.is_signal or extra.get("promoted"):
+            continue
+        kind = source.kind or ("hn" if source.id.startswith("hn") else source.id)
+        bar = bars.get(kind)
+        if bar is None or (extra.get("points") or 0) < bar:
+            continue
+        target = extra.get("linked_url") if kind == "techmeme" else r["url_canonical"]
+        if not target:
+            continue
+
+        def done(why):
+            extra["promoted"] = why
+            db.conn.execute("UPDATE items SET extra = ? WHERE url_canonical = ?",
+                            (json.dumps(extra), r["url_canonical"]))
+
+        host = host_name(target)
+        if any(host == h or host.endswith("." + h) for h in NOT_ARTICLE_HOSTS) or \
+                urlsplit(target).path.lower().endswith((".pdf", ".zip", ".mp4")):
+            done("not_article")
+            continue
+        publisher = srcs.for_host(target) or web
+        if publisher is None:
+            done("no_publisher")
+            continue
+        title = r["title"] if kind != "techmeme" else (_TECHMEME_CREDIT.sub("", r["title"]).strip() or r["title"])
+        rule = "domain_blocklist" if srcs.blocked(target) else prefilter.check(title, target)
+        if rule:
+            db.log_drop(now, r["source_id"], target, title, rule)
+            done(rule)
+            continue
+        pts = {k: extra[k] for k in POINT_KEYS if extra.get(k) is not None}
+        new_extra = {"via": r["source_id"]}
+        if publisher is web:
+            new_extra["publisher"] = host
+        if pts:
+            new_extra["signals"] = {r["source_id"]: pts}
+        item = dict(url_canonical=target, url=target, source_id=publisher.id, title=title,
+                    feed_text=r["feed_text"] if kind == "techmeme" else "", image=r["image"], extra=new_extra,
+                    feed_published_at=from_iso(r["feed_published_at"]), first_seen_at=from_iso(r["first_seen_at"]),
+                    published_at=from_iso(r["published_at"]), status="new", drop_rule=None)
+        existing = db.item(target)
+        if existing is None:
+            db.insert_item(item)
+            db.add_sighting(target, r["source_id"], r["title"], from_iso(r["feed_published_at"]), now)
+            done("item")
+            made += 1
+        elif existing["status"] == "signal":
+            # An HN or Lobsters row is itself the article's URL (this row, or another signal's row for the same
+            # article): the row becomes the article and keeps every signal's points.
+            item["extra"] = {**new_extra, "signals": {**_carried(existing).get("signals", {}),
+                                                      **new_extra.get("signals", {})}}
+            db.replace_item(item)
+            if existing["url_canonical"] != r["url_canonical"]:
+                db.add_sighting(target, r["source_id"], r["title"], from_iso(r["feed_published_at"]), now)
+                done("item")
+            made += 1
+        else:
+            done("known")       # a news source already carries the linked article
+    return made
 
 
 def record(db, source, sources, res, now, cfg):

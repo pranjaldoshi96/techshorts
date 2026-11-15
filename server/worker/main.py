@@ -32,6 +32,8 @@ def due_sources(db, srcs, now, poll_all=False, slack=timedelta(seconds=30)):
     # Half a tick of slack, so a 3 min poll happens on the 3rd tick rather than slipping to the 4th.
     out = []
     for s in srcs.sources:
+        if not s.polled:
+            continue
         nxt = from_iso(db.source_state(s.id)["next_poll_at"])
         if poll_all or nxt is None or nxt <= now + slack:
             out.append(s)
@@ -77,19 +79,23 @@ def maybe_check_sources(db, srcs, cfg):
 
 
 def make_client(cfg):
-    key = llm.api_key()
-    if not cfg["llm"].get("model") or not key:
-        log.warning("no LLM model or NVIDIA_API_KEY; card writing is off")
+    """The chat client: a Router over the providers in config.yaml (llm.providers), each with its own key file."""
+    client = llm.make_router(cfg) if cfg["llm"].get("model") else None
+    if client is None:
+        log.warning("no LLM model or API key; card writing is off")
         return None
-    bucket = llm.TokenBucket(rate=cfg["llm"]["rate_per_min"], per=60.0)
-    return llm.Client(cfg["llm"]["base_url"], key, bucket, timeout=cfg["llm"]["timeout_s"])
+    if client.split(cfg["llm"]["model"])[0] not in client.clients and not cfg["llm"].get("backup_model"):
+        log.warning("the writing model's provider has no key and there is no backup; card writing is off")
+        return None
+    log.info("LLM providers with a key: %s", ", ".join(sorted(client.clients)))
+    return client
 
 
 def probe(db, cfg, client):
     """One tiny chat call, to notice a revoked key coming back when there is nothing to write."""
     try:
-        client.chat(cfg["llm"]["model"], [{"role": "user", "content": "Reply with {}"}], max_tokens=4, kind="probe",
-                    tries=1)
+        client.chat(llm.role_model(cfg, "write"), [{"role": "user", "content": "Reply with {}"}], max_tokens=64,
+                    kind="probe", tries=1)
     except llm.LLMError:
         pass
     now = utcnow()
@@ -103,6 +109,10 @@ def tick(db, cfg, poll_all=False, client=None, embedder=None, out_dir=None, star
     srcs = sources_mod.load()
     maybe_check_sources(db, srcs, cfg)
     counts = fetch_due(db, srcs, cfg, poll_all)
+    promoted = fetch.promote_signals(db, srcs, cfg, utcnow())
+    if promoted:
+        counts["signals_promoted"] = promoted
+        db.commit()
     if client is not None:
         client.reset_breaker()          # the circuit is per tick: each tick tries the endpoint again
         degraded.key_check(db, cfg, client.key, utcnow())
@@ -123,9 +133,15 @@ def tick(db, cfg, poll_all=False, client=None, embedder=None, out_dir=None, star
                                                                       candidates_for=cands).items()})
     # Runs without embeddings too: it then refreshes events (signals, coverage, importance) from what is stored.
     rewriter = (lambda store, ev: llm.rewrite_event(client, cfg, store, ev)) if client is not None else None
+    judge = (lambda title, text, events: llm.judge_events(client, cfg, title, text, events)) \
+        if client is not None else None
     counts.update({f"cluster_{k}": v for k, v in cluster.run(db, cfg, srcs, utcnow(), embedder,
-                                                             rewriter).items() if v})
+                                                             rewriter, judge).items() if v})
     now = utcnow()
+    if client is not None:
+        # The clustering stage's calls (judge, rewrite, its entailment check) are logged with this tick.
+        for kind, model, outcome, ms, tok_in, tok_out in client.drain():
+            db.log_write(now, None, kind, model, outcome, None, ms, tok_in=tok_in, tok_out=tok_out)
     outage = degraded.llm_outage(db, now, have_client=has_client)
     report = None
     if out_dir:
@@ -171,7 +187,7 @@ def main():
         args.out or (cfg.get("publish") or {}).get("out_dir") or os.path.join(cfg["state_dir"], "edition"))
     log.info("worker start, state in %s, publishing to %s", cfg["state_dir"], out_dir)
     client = make_client(cfg)
-    embedder = embed.make(cfg, llm.api_key())
+    embedder = embed.make(cfg, llm.api_key((cfg.get("embed") or {}).get("key_env") or "NVIDIA_API_KEY"))
     if embedder is None:
         log.warning("no embedding model or key; clustering is off")
     started_at = utcnow()
