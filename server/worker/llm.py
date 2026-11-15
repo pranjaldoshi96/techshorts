@@ -876,19 +876,31 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
         vetted = _techmeme_linked(db)
         fresh = [r for r in rows if r["status"] == "new" and not r["triaged"] and r["url_canonical"] not in vetted
                  and not by_id[r["source_id"]].curated
-                 and not json.loads(r["extra"] or "{}").get("via")][:TRIAGE_BATCH]
-        drops = triage_batch(client, cfg, fresh, by_id)
-        for r in fresh:
-            url = r["url_canonical"]
-            if url in drops:
-                rule = f"triage_{drops[url]}"
-                db.conn.execute("UPDATE items SET status = 'dropped', drop_rule = ? WHERE url_canonical = ?",
-                                (rule, url))
-                db.log_drop(now, r["source_id"], r["url"], r["title"], rule)
-                stats["triaged_out"] += 1
-            else:
-                db.conn.execute("UPDATE items SET triaged = 1 WHERE url_canonical = ?", (url,))
-        rows = [r for r in rows if r["url_canonical"] not in drops]
+                 and not json.loads(r["extra"] or "{}").get("via")]
+        # A backlog (a restart after downtime, or the re-screen of a day's drops after a prompt change) is
+        # screened TRIAGE_BATCH at a time, a few batches a tick, and what is left waits for the next tick. It
+        # used to go on to the writer unscreened: on the VPS the first tick after the screening prompt changed
+        # put 163 drops back, screened 40 and wrote the next ones in the queue as they came, how-tos and
+        # lifestyle columns included.
+        screened, fresh = fresh[:TRIAGE_BATCH * TRIAGE_BATCHES], fresh[TRIAGE_BATCH * TRIAGE_BATCHES:]
+        skip = {r["url_canonical"] for r in fresh}
+        if skip:
+            stats["screen_waiting"] = len(skip)
+        for i in range(0, len(screened), TRIAGE_BATCH):
+            batch = screened[i:i + TRIAGE_BATCH]
+            drops = triage_batch(client, cfg, batch, by_id)
+            for r in batch:
+                url = r["url_canonical"]
+                if url in drops:
+                    rule = f"triage_{drops[url]}"
+                    db.conn.execute("UPDATE items SET status = 'dropped', drop_rule = ? WHERE url_canonical = ?",
+                                    (rule, url))
+                    db.log_drop(now, r["source_id"], r["url"], r["title"], rule)
+                    stats["triaged_out"] += 1
+                    skip.add(url)
+                else:
+                    db.conn.execute("UPDATE items SET triaged = 1 WHERE url_canonical = ?", (url,))
+        rows = [r for r in rows if r["url_canonical"] not in skip]
     rows = rows[:llm_cfg.get("max_items_per_tick", 18)]
     if not rows:
         for kind, model, outcome, ms, tok_in, tok_out in client.drain():
@@ -1437,6 +1449,7 @@ Reply with only JSON: {"drop": [{"n": 3, "why": "offtopic"}]}  (an empty list wh
 Items:
 <<items>>"""
 TRIAGE_BATCH = 40
+TRIAGE_BATCHES = 4          # screening calls a tick; the rest of a backlog waits, unwritten
 TRIAGE_RULES = ("offtopic", "shopping", "dull")
 RESCREEN_WINDOW = timedelta(hours=36)
 
