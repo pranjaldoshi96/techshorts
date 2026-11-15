@@ -11,6 +11,7 @@ from . import validate
 
 HARD_NEWS = ("news", "launch", "funding", "acquisition", "earnings", "policy", "security_incident")
 GADGET_TOPICS = {"consumer", "hardware"}
+COMMENTARY = ("analysis", "opinion", "interview", "explainer")
 FUNDING_FLOOR_USD = 500e6
 
 
@@ -84,7 +85,12 @@ def compute(members, event_type, topics, on_techmeme=False, hn_points=0, rewrite
     # 4. Release notes and tutorials are never Top material.
     if event_type in ("release_notes", "tutorial"):
         cap(4, "release_notes_tutorial")
-    # 5. A $500M+ round is major news, but only once clamp 3's corroboration holds.
+    # 5. Commentary on a story is not the story. A feature on a week-old scandal came back 9 ("'Jensen Huang lost
+    # his mind': how AI's smartest man fell for the world's oldest trick") and took a Top rank, which analysis gets
+    # only at 8 or more; that needs the piece itself to be widely picked up.
+    if event_type in COMMENTARY and not (len(publishers) >= 3 or on_techmeme):
+        cap(7, "commentary")
+    # 6. A $500M+ round is major news, but only once clamp 3's corroboration holds.
     if corroborated and event_type == "funding" and funding_usd(members) >= FUNDING_FLOOR_USD and value < 8:
         value = 8
         clamps.append("funding_floor")

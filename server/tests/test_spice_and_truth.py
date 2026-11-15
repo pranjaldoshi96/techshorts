@@ -596,3 +596,17 @@ def test_rulings_are_asked_in_parallel_before_assignment_and_cached():
     four = _item("https://d.test/4", [0.75, 0.66, 0], "Report four", source_id="bbc")
     cluster.prefetch_rulings(store, [(four.url, four.title, four.text, [store.events[eid]])])
     assert store.ruling(four.url, eid) is None                            # a failed call caches nothing
+
+
+def test_commentary_on_a_story_cannot_score_like_the_story():
+    from worker import importance
+
+    def member(pub, type="analysis", imp=9):
+        return importance.Member(f"u-{pub}", pub, pub, True, type, imp, ["bigtech"], [])
+    res = importance.compute([member("guardian"), member("verge")], "analysis", ["bigtech"])
+    assert res.value == 7 and "commentary" in res.clamps
+    # Widely picked up, it may keep its score; hard news is untouched.
+    res = importance.compute([member("guardian"), member("verge"), member("bbc")], "analysis", ["bigtech"])
+    assert res.value == 9
+    res = importance.compute([member("guardian", "news"), member("bbc", "news")], "news", ["bigtech"])
+    assert res.value == 9 and "commentary" not in res.clamps
