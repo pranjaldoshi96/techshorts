@@ -34,6 +34,8 @@ def test_hn_api_and_lobsters_json_are_parsed():
     assert not feed.bozo and len(entries) == 3
     e = next(x for x in entries if x.extra["points"] == 944)
     assert e.url_canonical == "https://sec.example.org/lovable-leak"
+    assert fetch.canonical_url("https://www.nytimes.com/2026/11/15/x.html?unlocked_article_code=1.ab&smid=url-share") \
+        == "https://www.nytimes.com/2026/11/15/x.html"
     assert e.extra == {"points": 944, "comments": 360, "hn_url": "https://news.ycombinator.com/item?id=101"}
     ask = next(x for x in entries if x.title.startswith("Ask HN"))
     assert ask.url == "https://news.ycombinator.com/item?id=102"

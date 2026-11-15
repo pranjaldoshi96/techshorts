@@ -376,9 +376,12 @@ def make_router(cfg, keys=api_key):
 
 def role_model(cfg, role):
     """The model for a role: `llm.<role>_model`, else `llm.model`. Roles: write (cards), judge (the fact-check),
-    cluster (same-development rulings; the judge's model unless set) and triage (screening)."""
+    cluster (same-development rulings; the judge's model unless set), triage (screening) and thin (classifying
+    an item too short to write; the triage model unless set)."""
     if role == "cluster" and not cfg["llm"].get("cluster_model"):
         role = "judge"
+    if role == "thin" and not cfg["llm"].get("thin_model"):
+        role = "triage" if cfg["llm"].get("triage_model") else "write"
     return cfg["llm"].get(f"{role}_model") or cfg["llm"]["model"]
 
 
@@ -651,7 +654,9 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
 def triage_thin(client, cfg, item, source_name, text, attribution=None, candidates=()):
     """Thin items (< 60 words) get one call for their classification only: they may join an event as a member
     (WP3) but never lead one, so their text fields are not used or validated."""
-    model = role_model(cfg, "write")
+    # The smaller model: only the classification of a thin item is kept, and the paywalled business feeds
+    # (a title and a sentence each) are a large share of every tick.
+    model = role_model(cfg, "thin")
     try:
         reply = client.chat(model, build_messages(item, source_name, text.text or item["title"], attribution,
                                                   candidates), kind="triage", max_tokens=WRITE_TOKENS)

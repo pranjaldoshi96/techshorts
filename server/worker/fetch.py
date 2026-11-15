@@ -20,7 +20,11 @@ from . import prefilter
 from .db import from_iso, iso
 
 # Tracking parameters that make one story look like several URLs.
-_DROP_PARAMS = re.compile(r"^(utm_.*|fbclid|gclid|mc_cid|mc_eid|ocid|cmpid|smid|guccounter|amp|outputtype)$", re.I)
+# Gift and share codes too: Hacker News linked an NYT story with ?unlocked_article_code=..., Techmeme without, and
+# the story was imported twice.
+_DROP_PARAMS = re.compile(r"^(utm_.*|fbclid|gclid|mc_cid|mc_eid|ocid|cmpid|smid|guccounter|amp|outputtype|"
+                          r"unlocked_article_code|giftcopy|gift|accesstoken|st|reflink|ref_src|share|sh|"
+                          r"partner|cmp|ref)$", re.I)
 
 
 def canonical_url(url):

@@ -64,12 +64,12 @@ llm:
   # Chat calls (screen + write + fact-check + cluster judge) per rolling 24 h; writing pauses past it.
   daily_budget: 12000
   rate_per_min: 30
-  concurrency: 8
+  concurrency: 12
   # A timeout is not retried, and two in a row open a per-tick circuit for that provider (llm.Client), so a slow
   # endpoint costs a tick one timeout and the backup model takes over.
   timeout_s: 30
   # Caps one tick's LLM stage, so polling isn't starved during a backlog.
-  max_items_per_tick: 24
+  max_items_per_tick: 30
 embed:
   # The only embedding model that answered for this key on 2026-11-11; nv-embedqa-e5-v5, llama-3.2-nv-embedqa-1b-v2,
   # llama-nemotron-embed-1b-v2, nv-embed-v1 and bge-m3 return 410. It accepts `dimensions` (Matryoshka).
