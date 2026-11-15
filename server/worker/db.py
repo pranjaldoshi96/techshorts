@@ -145,6 +145,12 @@ CREATE TABLE IF NOT EXISTS shipped (
   first_seen_at TEXT
 );
 
+-- The earliest report of each shipped story that the engine saw: the earliest publisher time over the event's
+-- members (thin and commentary ones included) and the signals attached to it. health.json counts the
+-- publisher-to-app lag from here; shipped.published_at is the time the card shows, which a lead change or a
+-- material update moves forward.
+CREATE TABLE IF NOT EXISTS story_first_report (event_id TEXT PRIMARY KEY, at TEXT NOT NULL);
+
 -- One row per publish attempt (WP4). ok = 0 when check_edition refused it.
 CREATE TABLE IF NOT EXISTS publishes (
   at TEXT NOT NULL, ok INTEGER NOT NULL, degraded TEXT, articles INTEGER, top INTEGER, sha TEXT, problem TEXT

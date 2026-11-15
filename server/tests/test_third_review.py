@@ -6,8 +6,11 @@ from datetime import timedelta
 
 import pytest
 
-from worker import cluster, embed, fetch, llm, newsdate, publish_v1, rank, text, validate  # noqa: F401
+from worker import cluster, embed, fetch, health, llm, newsdate, publish_v1, rank, text, validate  # noqa: F401
 from worker.db import from_iso, iso
+from worker import editorial, images
+import test_cluster as tc
+from test_publish_v1 import FakeSession
 from test_second_run_review import CFG as BRIEF_CFG, Replies, _thin, _written
 from test_validate import CFG as WRITE_CFG, DAYLIGHT, DAYLIGHT_SRC, FakeClient, _db_with, _sources
 from test_spice_and_truth import (NOW, S, SEBI, SEBI_SRC, SEBI_TITLE, SRCS, _cand, _db, _item, _judge,  # noqa: F401
@@ -580,3 +583,57 @@ def test_a_widely_shared_security_story_is_dev_and_top_news_not_startups():
 ])
 def test_dev_takes_a_breach_for_its_developer_angle_not_for_a_word(title, summary, is_dev):
     assert (rank.eligible(_sec(title, summary=summary), rank.TABS["dev"], NOW) is None) == is_dev
+
+
+# 6. freshness.live counts from the earliest report of the story the engine saw
+
+def test_the_lag_counts_from_the_first_report_not_from_the_time_the_card_shows(tmp_path, monkeypatch):
+    """ev_0054e860a0 (the ULA failure): Spaceflight Now reported it at 19:16 and was seen at 19:26; the card
+    shipped after The Verge's report of 21:05 became the lead, and health counted 5.8 min from that."""
+    db = _db()
+    for m in range(0, 240, 3):
+        db.log_poll(NOW - timedelta(minutes=m), "verge", 304, 0, 0, 100, None)
+    first = _item("https://sfn.test/failure", [1, 0, 0], FAILURE, source_id="spaceflightnow", people=(),
+                  pub=NOW - timedelta(minutes=114), status="failed", spice=8, imp=7)
+    lead = _item("https://verge.test/failure", [1, 0.1, 0], "Vulcan rocket fails, destroying 40 Amazon Leo satellites",
+                 source_id="verge", people=(), pub=NOW - timedelta(minutes=6), spice=8, imp=7)
+    _written(db, [first, lead])
+    db.conn.execute("UPDATE items SET first_seen_at = ? WHERE url_canonical = ?",
+                    (iso(NOW - timedelta(minutes=104)), first.url))
+    store = cluster.Store(db, SRCS, S, NOW)
+    eid, _ = cluster.create(store, first)
+    cluster.join(store, store.events[eid], lead, 0.95, "judge")
+    cluster.refresh(store, store.events[eid], lambda s: True)
+    assert store.events[eid].row["lead_url"] == lead.url
+    ctx = publish_v1.Ctx(db, CTX_CFG, SRCS, NOW)
+    c, _ = publish_v1.event_candidate(ctx, db.one("SELECT * FROM events WHERE id = ?", eid))
+    assert c.data["first_report_at"] == iso(first.published_at)
+    # A signal's post counts too: Techmeme's headline is often the first sight of a story.
+    db.insert_item({"url_canonical": "https://techmeme.test/p1", "url": "https://techmeme.test/p1",
+                    "source_id": "techmeme", "title": "ULA loses Vulcan", "first_seen_at": NOW,
+                    "published_at": NOW - timedelta(minutes=120), "status": "signal"})
+    db.conn.execute("INSERT INTO event_signals VALUES (?,?,?,?,?,?,?,?)",
+                    (eid, "https://techmeme.test/p1", "techmeme", "judge", None, None, None, iso(NOW)))
+    assert publish_v1.first_report(db, eid, c.data["members"]) == iso(NOW - timedelta(minutes=120))
+    db.conn.execute("DELETE FROM event_signals")
+    # What the card shows is the lead's time (a lead change is a material update); the lag is not counted from it.
+    card_time = NOW - timedelta(minutes=6)
+    db.conn.execute("INSERT INTO shipped (event_id, published_at, first_at, last_at, first_seen_at) VALUES (?,?,?,?,?)",
+                    (eid, iso(card_time), iso(NOW), iso(NOW), iso(NOW - timedelta(minutes=104))))
+    since = NOW - timedelta(hours=24)
+    assert health.freshness(db, since)["live"]["publisherToAppMin"]["p50"] == 6.0          # as it was
+    db.conn.execute("INSERT INTO story_first_report VALUES (?,?)", (eid, c.data["first_report_at"]))
+    live = health.freshness(db, since)["live"]
+    assert live["events"] == 1 and live["publisherToAppMin"]["p50"] == 114.0
+    assert live["feedLagMin"]["p50"] == 10.0 and live["bySource"]["verge"]["publisherToAppMin"] == 114.0
+    # A publish records it, and an earlier report found later moves it back, never forward.
+    db.conn.execute("DELETE FROM shipped")
+    db.conn.execute("DELETE FROM story_first_report")
+    monkeypatch.setattr(images.Images, "page_images", lambda self, rows: None)
+    report = publish_v1.publish(db, {**tc.CFG, "state_dir": str(tmp_path)}, SRCS, NOW, str(tmp_path / "site"),
+                                check=False, session=FakeSession({}), editorial=editorial.Editorial())
+    assert report["published"]
+    assert db.one("SELECT at FROM story_first_report WHERE event_id = ?", eid)["at"] == iso(first.published_at)
+    db.conn.execute("INSERT INTO story_first_report VALUES (?,?) ON CONFLICT(event_id) DO UPDATE SET"
+                    " at = MIN(at, excluded.at)", (eid, iso(NOW)))
+    assert db.one("SELECT at FROM story_first_report WHERE event_id = ?", eid)["at"] == iso(first.published_at)

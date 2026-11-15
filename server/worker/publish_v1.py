@@ -177,6 +177,7 @@ def event_candidate(ctx, ev):
     c.data = {"lead": lead, "members": members, "publishers": publishers, "headline": headline, "summary": summary,
               "hn": hn, "parent_id": ev["parent_id"], "title_words": _words(lead["title"]),
               "first_seen_at": min(m["first_seen_at"] for m in members),
+              "first_report_at": first_report(ctx.db, ev["id"], members),
               "images": image_sources(ctx, lead, members), "orgs": primary_orgs(members),
               # An owner's override replaces the card's text, so the alert written for the old text is dropped.
               "people": people(members),
@@ -186,6 +187,18 @@ def event_candidate(ctx, ev):
               "notif_title": None if over else _col(ev, "notif_title"),
               "notif_line": None if over else ev["notif_line"]}
     return c, None
+
+
+def first_report(db, eid, members):
+    """The earliest report of the story the engine saw (ISO): the earliest publisher time among the event's
+    members, whatever their type or length, and the signal posts attached to it (a Techmeme headline is often
+    the first sight of a story)."""
+    times = [m["published_at"] for m in members]
+    row = db.one("SELECT MIN(i.published_at) at FROM event_signals s JOIN items i ON i.url_canonical = s.url_canonical"
+                 " WHERE s.event_id = ?", eid)
+    if row is not None and row["at"]:
+        times.append(row["at"])
+    return min(times)
 
 
 def _col(row, name):
@@ -758,6 +771,10 @@ def write(ctx, edition, report, used_images, out_dir, check=True, tabs=None):
         ctx.db.conn.execute(
             "INSERT INTO shipped VALUES (?,?,?,?,?) ON CONFLICT(event_id) DO UPDATE SET last_at = excluded.last_at",
             (a["eventId"], a["publishedAt"], iso(ctx.now), iso(ctx.now), _first_seen(tabs, a["eventId"])))
+        first = _first_seen(tabs, a["eventId"], "first_report_at")
+        if first:
+            ctx.db.conn.execute("INSERT INTO story_first_report VALUES (?,?) ON CONFLICT(event_id) DO UPDATE SET"
+                                " at = MIN(at, excluded.at)", (a["eventId"], first))
     # The cards ranked for push alerts, next to the edition (the next app release's sender reads it).
     notes = final[:-len("edition.json")] + "notifications.json"
     with open(notes + ".tmp", "w") as f:
@@ -770,11 +787,11 @@ def write(ctx, edition, report, used_images, out_dir, check=True, tabs=None):
     return True, None
 
 
-def _first_seen(tabs, eid):
+def _first_seen(tabs, eid, key="first_seen_at"):
     for ranked in (tabs or {}).values():
         for c, _ in ranked:
             if c.id == eid:
-                return c.data.get("first_seen_at")
+                return c.data.get(key)
     return None
 
 
