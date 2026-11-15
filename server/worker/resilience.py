@@ -114,14 +114,15 @@ def alert(key, title, message, every_s=3600, priority="high", state_dir=None, no
 
 # The database
 
-def quick_check(path):
-    """None when SQLite finds the file sound, else what is wrong with it. A missing file is sound (a fresh state)."""
+def quick_check(path, full=False):
+    """None when SQLite finds the file sound, else what is wrong with it. A missing file is sound (a fresh state).
+    `full` runs integrity_check, which also compares every index with its table."""
     if not os.path.exists(path):
         return None
     try:
         conn = sqlite3.connect(path, timeout=30)
         try:
-            rows = conn.execute("PRAGMA quick_check").fetchall()
+            rows = conn.execute("PRAGMA integrity_check" if full else "PRAGMA quick_check").fetchall()
         finally:
             conn.close()
     except sqlite3.DatabaseError as e:
@@ -161,14 +162,53 @@ def is_disk_full(exc):
     return isinstance(exc, sqlite3.DatabaseError) and "full" in str(exc).lower()
 
 
+SUSPECT = ".suspect"
+# The worker exited this many times in a row on a corruption error from a file that passes every check: the file
+# is replaced anyway rather than restarting for ever.
+SUSPECT_LIMIT = 3
+
+
+def suspects(path):
+    """How many times in a row the worker has exited because a tick hit a corruption error."""
+    try:
+        with open(path + SUSPECT) as f:
+            return sum(1 for _ in f)
+    except OSError:
+        return 0
+
+
+def mark_suspect(path):
+    try:
+        with open(path + SUSPECT, "a") as f:
+            f.write(time.strftime("%Y-%m-%dT%H:%M:%SZ\n", time.gmtime()))
+    except OSError:
+        pass
+
+
+def clear_suspect(path):
+    try:
+        os.remove(path + SUSPECT)
+    except OSError:
+        pass
+
+
 def recover_state(path, state_dir, stamp=None, notify=alert):
     """Called before the worker opens state.db. A corrupt file is moved aside (never deleted) and replaced by the
     newest backup that passes the same check; with no good backup the worker starts from an empty state, which
     publishes again within minutes (a source's first poll only takes the last day and a half). Returns what was
-    done: None (the file was sound), "restored:<backup>" or "fresh"."""
+    done: None (the file was sound), "restored:<backup>" or "fresh".
+
+    The quick check is what every start pays for. After an exit on a corruption error (TickGuard) the full check
+    runs, and a file that keeps failing ticks that way while passing both is replaced on the third exit."""
     problem = quick_check(path)
+    n = suspects(path)
+    if problem is None and n:
+        problem = quick_check(path, full=True)
+        if problem is None and n >= SUSPECT_LIMIT:
+            problem = f"ticks failed with a corruption error {n} starts in a row although the file passes its checks"
     if problem is None:
         return None
+    clear_suspect(path)
     stamp = stamp or time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     for suffix in ("", "-wal", "-shm"):
         if os.path.exists(path + suffix):
@@ -227,11 +267,14 @@ class TickGuard:
       locked, anything   after MAX_FAILED_TICKS in a row, alert and exit.
     """
 
-    def __init__(self, state_dir, max_failed=MAX_FAILED_TICKS, notify=alert):
+    def __init__(self, state_dir, max_failed=MAX_FAILED_TICKS, notify=alert, db_path=None):
         self.state_dir, self.max_failed, self.notify = state_dir, max_failed, notify
+        self.db_path = db_path or os.path.join(state_dir, "state.db")
         self.failed = 0
 
     def ok(self):
+        if self.failed or suspects(self.db_path):
+            clear_suspect(self.db_path)
         self.failed = 0
 
     def failure(self, db, exc):
@@ -247,6 +290,7 @@ class TickGuard:
             self.notify("db_corrupt_seen", "Techgist: state.db is corrupt",
                         f"A tick failed with {why}. The worker is restarting and will restore the newest good backup.",
                         every_s=600, priority="urgent", state_dir=self.state_dir)
+            mark_suspect(self.db_path)
             return EXIT_DB_CORRUPT
         if is_disk_full(exc):
             try:

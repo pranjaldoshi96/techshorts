@@ -678,3 +678,113 @@ def test_the_github_workflow_is_manual_only():
     triggers = wf.get("on", wf.get(True))                         # YAML reads the bare key `on` as True
     assert set(triggers) == {"workflow_dispatch"}
     assert "check_freshness.py" in wf["jobs"]["check"]["steps"][-1]["run"]
+
+
+# The main loop
+
+def run_main(monkeypatch, tmp_path, ticks):
+    """Runs worker.main.main() with `ticks` as the tick function, no sleeping and no models, until it exits."""
+    from worker import config, embed, main
+    cfg = config.load()
+    cfg["state_dir"] = str(tmp_path)
+    monkeypatch.setattr(config, "load", lambda: cfg)
+    monkeypatch.setattr(main, "make_client", lambda cfg: None)
+    monkeypatch.setattr(embed, "make", lambda cfg, key: None)
+    monkeypatch.setattr(main, "tick", ticks)
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    monkeypatch.setattr(sys, "argv", ["worker.main", "--no-publish"])
+    monkeypatch.setenv("RUNTIME_DIRECTORY", str(tmp_path / "run"))
+    monkeypatch.delenv("NTFY_TOPIC", raising=False)
+    with pytest.raises(SystemExit) as e:
+        main.main()
+    return e.value.code
+
+
+def test_the_loop_survives_bad_ticks_and_exits_for_a_clean_restart_when_they_do_not_stop(monkeypatch, tmp_path):
+    calls = []
+
+    def ticks(db, *a, **k):
+        calls.append(1)
+        n = len(calls)
+        if n in (1, 2):
+            raise ValueError("a bad sources.yaml edit")           # two bad ticks, then a good one: carries on
+        if n == 3:
+            return {}
+        db.set_meta("half_done", "1")
+        raise sqlite3.OperationalError("database is locked")
+
+    assert run_main(monkeypatch, tmp_path, ticks) == resilience.EXIT_TICKS_FAILING
+    assert len(calls) == 3 + resilience.MAX_FAILED_TICKS
+    db = DB(str(tmp_path / "state.db"))
+    assert db.get_meta("half_done") is None and db.get_meta("worker_started_at")
+
+
+def test_the_loop_exits_at_once_on_a_corrupt_database_and_the_next_start_restores_a_backup(monkeypatch, tmp_path):
+    good = DB(str(tmp_path / "state.db"))
+    good.set_meta("from_backup", "1")
+    good.commit()
+    good.close()
+    assert backup_state.main(["--state", str(tmp_path)]) == 0
+    calls = []
+
+    def ticks(db, *a, **k):
+        calls.append(1)
+        raise sqlite3.DatabaseError("database disk image is malformed")
+
+    assert run_main(monkeypatch, tmp_path, ticks) == resilience.EXIT_DB_CORRUPT and len(calls) == 1
+    # What systemd does next: start the worker again. This time the file really is broken on disk.
+    for suffix in ("-wal", "-shm"):
+        if os.path.exists(str(tmp_path / "state.db") + suffix):
+            os.remove(str(tmp_path / "state.db") + suffix)
+    corrupt(tmp_path / "state.db")
+    seen = []
+
+    def one_good_tick(db, *a, **k):
+        seen.append(db.get_meta("from_backup"))
+        raise SystemExit(0)
+
+    assert run_main(monkeypatch, tmp_path, one_good_tick) == 0
+    assert seen == ["1"]
+    assert [n for n in os.listdir(tmp_path) if n.startswith("state.db.corrupt-")]
+
+
+def test_sqlite_running_out_of_room_is_recognised_as_a_full_disk(tmp_path):
+    db = DB(str(tmp_path / "s.db"))
+    db.conn.execute(f"PRAGMA max_page_count = {db.one('PRAGMA page_count')[0] + 2}")
+    with pytest.raises(sqlite3.DatabaseError) as e:
+        for i in range(2000):
+            db.set_meta(f"k{i}", "x" * 500)
+    assert resilience.is_disk_full(e.value) and not resilience.is_corruption(e.value)
+    told = []
+    g = resilience.TickGuard(str(tmp_path), notify=lambda key, title, msg, **k: told.append((key, msg)))
+    assert g.failure(db, e.value) is None and told[0][0] == "disk_full" and "MB free" in told[0][1]
+    db.commit()
+    assert db.get_meta("k0") is None                              # the failed tick's writes were rolled back
+
+
+def test_a_file_that_passes_its_checks_but_keeps_failing_ticks_is_replaced_on_the_third_exit(tmp_path):
+    p = tmp_path / "state.db"
+    good_db(p)
+    told = []
+    g = resilience.TickGuard(str(tmp_path), notify=lambda key, title, msg, **k: told.append(key))
+    bad = sqlite3.DatabaseError("database disk image is malformed")
+    for start in (1, 2):
+        assert g.failure(FakeDB, bad) == resilience.EXIT_DB_CORRUPT
+        assert resilience.suspects(str(p)) == start
+        # The full check passes, so the file is kept and the worker tries again.
+        assert resilience.recover_state(str(p), str(tmp_path), notify=lambda *a, **k: told.append("recovered")) is None
+    assert g.failure(FakeDB, bad) == resilience.EXIT_DB_CORRUPT
+    assert resilience.recover_state(str(p), str(tmp_path), stamp="X",
+                                    notify=lambda key, title, msg, **k: told.append(msg)) == "fresh"
+    assert "3 starts in a row" in told[-1] and (tmp_path / "state.db.corrupt-X").exists()
+    assert resilience.suspects(str(p)) == 0
+
+
+def test_a_good_tick_clears_the_suspicion(tmp_path):
+    p = tmp_path / "state.db"
+    good_db(p)
+    g = resilience.TickGuard(str(tmp_path), notify=lambda *a, **k: True)
+    g.failure(FakeDB, sqlite3.DatabaseError("database disk image is malformed"))
+    assert resilience.suspects(str(p)) == 1
+    g.ok()
+    assert resilience.suspects(str(p)) == 0
