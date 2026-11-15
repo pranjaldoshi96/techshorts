@@ -106,6 +106,25 @@ struct SourceMonogram: View {
     }
 }
 
+/// The main button on a screen: the accent colour with text that passes AA on it in both appearances
+/// (the system's prominent style keeps white text, which is 2.8:1 on the dark-mode blue).
+struct PrimaryButtonStyle: ButtonStyle {
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.semibold))
+            .multilineTextAlignment(.center)
+            .foregroundStyle(Theme.onAccent(scheme))
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .frame(minHeight: 44)
+            .background(Theme.accent, in: Capsule())
+            .opacity(configuration.isPressed ? 0.75 : (isEnabled ? 1 : 0.5))
+    }
+}
+
 /// A small filled capsule: BREAKING, DEVELOPING, HOT.
 struct BadgePill: View {
     let text: String

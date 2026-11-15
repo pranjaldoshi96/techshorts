@@ -21,6 +21,23 @@
 - [x] Store listing, review notes, privacy and age-rating answers in `AppStore/LISTING.md`
 - [x] Product, privacy and support pages live: https://pranjaldoshi96.github.io/apps/techgist/
 
+## 2.0 (branch `app-2.0`, not submitted)
+
+Built and checked in the iOS Simulator only. Version 2.0, build number set by `scripts/archive.sh` as before.
+
+- [x] New card and feed, server rank order, image pipeline, search, coverage sheet, Reader-mode sheet, accessibility pass
+- [x] Alerts with the story picture, Techgist's own chime (`techgist.caf`) and Read and Save buttons
+- [x] Notification Service Extension target `com.pranjald.techgist.NotificationService` (for server push later)
+- [x] Unit tests (`TechgistTests`), including the live edition as a fixture
+
+Before submitting 2.0, needs you:
+1. **Read the 1.1 rejection reason** in App Store Connect and check 2.0 against it.
+2. **Run it on a real iPhone** (TestFlight): the chime on a real alert, the picture in the banner and on a long press, the Read and Save buttons, paging feel, VoiceOver, and the largest text size. Settings → "Send a sample alert" fires one in 5 seconds.
+3. **The first archive registers the extension's App ID.** `scripts/archive.sh` uses `-allowProvisioningUpdates`, so Xcode creates `com.pranjald.techgist.NotificationService` and its profile; nothing to do by hand unless it fails.
+4. **Listing text is out of date** (`AppStore/LISTING.md`): the "Summaries written on your iPhone" paragraph, the review notes about Apple Intelligence, "swipe left/right between tabs", the source toggles and the screenshots all describe 1.0. On-device summaries are gone in 2.0; tabs change with the chips; swiping left opens the story.
+5. **Server push stays off** until you set `PushConfig.registerURL` in `Techgist/Services/PushRegistration.swift` and add the Push Notifications capability to the app target. Until then the app never asks iOS for a token. App Store Connect may still email "Missing Push Notification Entitlement" (ITMS-90078) because the app contains the registration code; it is a warning, not a rejection.
+6. Privacy answers are unchanged while push is off ("Data Not Collected").
+
 ## Before you submit — needs you ⚠️
 1. **Accept Apple's updated Program License Agreement** at developer.apple.com → Account. Until then Xcode can't create the App Store profile, and the upload fails with "PLA Update available". (Same blocker as Firstnest.)
 2. **Register the bundle ID and create the app record** (below). Register `com.pranjald.techgist` first at developer.apple.com/account/resources/identifiers/add/bundleId (App IDs → App → Explicit, no capabilities), or it won't appear in App Store Connect's bundle ID list. The store name is "Techgist: AI & Startup News" ("TechShorts: 60-Word Tech News" was already taken).

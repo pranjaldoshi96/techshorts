@@ -2,6 +2,7 @@
 # Archives a Release build and uploads it to App Store Connect (it then shows up in TestFlight).
 # Needs: Xcode signed in to your Apple Developer account (Xcode > Settings > Accounts).
 # Usage: scripts/archive.sh  (TEAM_ID and BUNDLE_ID default to the project's; override to use others)
+# BUNDLE_ID is the app's; the notification extension's is derived from it (BUNDLE_ID.NotificationService).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TEAM_ID="${TEAM_ID:-A4HLS6BV3C}"
@@ -12,7 +13,7 @@ archive="build/Techgist.xcarchive"
 
 xcodebuild -project Techgist.xcodeproj -scheme Techgist -configuration Release \
   -destination 'generic/platform=iOS' -archivePath "$archive" \
-  DEVELOPMENT_TEAM="$TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" CURRENT_PROJECT_VERSION="$build_number" \
+  DEVELOPMENT_TEAM="$TEAM_ID" APP_BUNDLE_ID="$BUNDLE_ID" CURRENT_PROJECT_VERSION="$build_number" \
   -allowProvisioningUpdates archive
 
 sed "s/TEAM_ID_PLACEHOLDER/$TEAM_ID/" scripts/ExportOptions.plist > build/ExportOptions.plist

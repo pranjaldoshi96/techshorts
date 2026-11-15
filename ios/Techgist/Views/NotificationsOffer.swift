@@ -38,9 +38,9 @@ struct NotificationsOffer: View {
                         dismiss()
                     }
                 } label: {
-                    Text("Turn on notifications").font(.body.bold()).frame(maxWidth: .infinity).padding(.vertical, 6)
+                    Text("Turn on notifications").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(PrimaryButtonStyle())
                 Button("Not now") {
                     notificationsOffered = true
                     dismiss()

@@ -100,7 +100,7 @@ struct FeedView: View {
                 Text(store.articles.isEmpty ? "Couldn't reach Techgist. Check your connection." : "Nothing here right now.")
             } actions: {
                 Button("Try again") { Task { await store.refresh() } }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(PrimaryButtonStyle())
             }
             .frame(maxHeight: .infinity)
         }
@@ -169,14 +169,13 @@ struct EndOfTabCard: View {
                     .foregroundStyle(Theme.metaText)
                     .multilineTextAlignment(.center)
                 Button(action: onTop) {
-                    Text("Back to top").font(.body.weight(.semibold)).frame(maxWidth: 260).padding(.vertical, 4)
+                    Text("Back to top").frame(maxWidth: 220)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(PrimaryButtonStyle())
                 .padding(.top, 8)
                 Button(action: onSaved) {
-                    Text("Saved stories").font(.body.weight(.semibold)).frame(maxWidth: 260).padding(.vertical, 4)
+                    Text("Saved stories").font(.body.weight(.semibold)).frame(maxWidth: 220).frame(minHeight: 44)
                 }
-                .buttonStyle(.bordered)
             }
             .padding(24)
             // Centred when it fits, scrollable when the text size makes it taller than the page.

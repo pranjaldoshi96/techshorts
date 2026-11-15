@@ -1,30 +1,58 @@
-# TechShorts
+# Techgist for iPhone
 
-Inshorts-style tech news for iPhone. One story per card, about 60 words each, across Top, AI, Startups, Dev and Blogs.
+Inshorts-style tech news. One story per card, about 60 words each, across Top, AI, Startups, Dev and Reads. SwiftUI, iOS 17 and later, no third-party code.
 
 ## How it works
 
-The app loads a ranked **edition** that the TechShorts publisher (`../server/`) posts to this repo's `edition` branch every 2 hours. If that edition is more than 8 hours old or can't be loaded, the app fetches the publishers' feeds and ranks them itself, using the same code, so it keeps working without the server.
+The app loads a ranked **edition** that the Techgist server (`../server/`) publishes to this repo's `edition` branch. If that edition is more than 8 hours old or can't be loaded, the app fetches the publishers' feeds and ranks them itself, so it keeps working without the server.
 
-| Piece | What it does | Apple tech |
+| Piece | What it does |
+|---|---|
+| `Models/Article.swift`, `Edition.swift` | The edition's shape. The v1 fields decode exactly as in 1.2; the 2.0 fields are optional and lenient (see below). |
+| `Services/FeedOrdering.swift` | Which stories a tab shows and in what order: the server's rank, muted sources removed, read stories below unread ones. |
+| `Services/NewsStore.swift` | App state. Shows the cached edition at once, fetches a newer one, and applies it only when nobody is mid-read (launch, the new-stories pill, pull to refresh). |
+| `Services/ReadState.swift` | Which stories were read (on screen 1.5 s, or opened), kept 7 days on the device. |
+| `Services/ImageLoader.swift` | Downloads, downsamples and decodes pictures off the main thread; memory cache plus a 7-day disk cache; prefetches the next three cards. |
+| `Services/FeedService.swift`, `FeedParser.swift`, `Ranker.swift`, `HTMLText.swift`, `PageMetadata.swift` | The direct-feed fallback. The server's safe-mode publisher compiles these same files (plus the two models and `Disk.swift`) on Linux, so they must stay Foundation-only and keep their paths. |
+| `Services/StoryNotification.swift`, `BreakingNews.swift`, `DailyDigest.swift` | Local alerts: the morning gist and big-story alerts, with the story picture, Techgist's chime, and Read and Save buttons. |
+| `Services/PushRegistration.swift` | Server push, ready but off: it does nothing until `PushConfig.registerURL` is set. |
+| `TechgistNotificationService/` | Notification Service Extension that attaches the picture named in a push's `image` key. |
+| `Views/` | `CardView` (the card and its layouts), `FeedView` (paging), `ChipBar`, `ContentView` (shell), `SupportViews` (reader, saved, search, coverage, settings), `Theme` (design tokens). |
+| `TechgistTests/` | Decoding against a snapshot of the live edition, ordering, alert content, image decoding. |
+
+### Edition fields the app reads
+
+Version 1 (required unless marked): `url`, `title`, `excerpt`, `content`, `source`, `category` (`Top`, `AI`, `Startups`, `Dev`, `Blogs`), `publishedAt`; optional `image`, `points`, `alsoCoveredBy`, `topRank`, `headline`, `summary`.
+
+Added for 2.0, all optional. A missing or mistyped value is ignored, never fatal:
+
+| Field | Type | Use |
 |---|---|---|
-| `Services/FeedService.swift`, `FeedParser.swift` | Fetches 22 RSS/Atom feeds in parallel, merges repeated links, drops deals, buying guides and sponsored posts | URLSession, XMLParser |
-| `Services/Ranker.swift` | Ranks stories by importance: how many outlets cover the same story (matched by headline), Hacker News points, source weight, and age. Merges same-story duplicates into one card marked "+N more", and stops one source from filling the top of a tab | |
-| `Services/PageMetadata.swift` | Fills in a missing image or excerpt from the article's `og:` tags | |
-| `Services/Summarizer.swift` | Writes 50–60 word summaries on the device and labels them "Summarized on device" | Foundation Models (Apple Intelligence, iOS 26+) |
-| `Services/DailyDigest.swift` | Sends a daily notification with the top headline, and refreshes stories in the background | UserNotifications, BackgroundTasks |
-| `Services/NewsStore.swift` | App state, offline cache, saved stories, source toggles | SwiftUI, JSON on disk |
-| `Views/` | Paging card feed, in-app Safari reader, share sheet, saved list, settings | SwiftUI, SafariServices |
+| `rank` | int | 0-based position inside the story's own tab. Without it, tabs other than Top are newest first. |
+| `summaryShort` | string | Shown when the full summary doesn't fit. Without it the app cuts the summary to two sentences. |
+| `alertLine` (or `notifLine`) | string | The body of an alert. Without it the summary's first sentence is used. |
+| `spice` | number, 0 to 1 (0 to 10 is scaled) | 0.75 and above shows a HOT badge and is preferred for alerts. |
+| `images` | `{hero, std, thumb, generated}` | `hero` on phones 390 pt and wider, `std` otherwise and for alerts, `thumb` in lists. Falls back to `image`. |
+| `badge` | `breaking` or `developing` | Badge on the card; `breaking` stories can alert with fewer than 3 outlets. |
+| `type` | string | `analysis`, `opinion`, `interview`, `release_notes` and `tutorial` get a label. |
+| `updatedAt` | ISO 8601 date | "Updated 2h" when more than an hour after `publishedAt`. |
+| `aiText` | bool | `false` shows "Summary pending" instead of the AI label. |
+| `eventId` | string | Carried along; not used yet. |
+| `degraded` (on the edition) | bool | Shows the "Summaries catching up" banner. |
 
-The app runs on iOS 17 and later. On iPhones without Apple Intelligence it shows the publisher's excerpt instead of an AI summary.
+An article that fails to decode (an unknown `category`, say) is dropped on its own; 1.2 rejects the whole edition in that case.
 
-## Run
+## Run and test
 
 Open `Techgist.xcodeproj` in Xcode and press Run, or use the command line:
 
 ```bash
-xcodebuild -project Techgist.xcodeproj -scheme Techgist -sdk iphonesimulator -derivedDataPath build build
+xcodebuild -project Techgist.xcodeproj -scheme Techgist -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath build test
 ```
+
+In a Debug build, `SIMCTL_CHILD_EDITION_URL=file:///path/to/edition.json xcrun simctl launch booted com.pranjald.techgist` points the app at another edition.
+
+`scripts/make_chime.sh` regenerates the notification sound (`Techgist/techgist.caf`). It is synthesised from sine waves in the script; nothing is sampled.
 
 ## Check the feeds
 
@@ -38,24 +66,17 @@ To add a source, add one line to `Models/FeedSource.swift`, then run the check.
 
 ## Publishing to the App Store
 
-Everything for the store is ready in this folder. Follow [`STORE_CHECKLIST.md`](STORE_CHECKLIST.md) for the remaining steps.
+Follow [`STORE_CHECKLIST.md`](STORE_CHECKLIST.md).
 
-- **Signing:** team `A4HLS6BV3C`, bundle ID `com.pranjald.techgist`, automatic signing.
+- **Signing:** team `A4HLS6BV3C`, bundle ID `com.pranjald.techgist`, automatic signing. The extension is `com.pranjald.techgist.NotificationService`; both come from the `APP_BUNDLE_ID` build setting.
 - **Listing text, review notes, privacy and age-rating answers:** [`AppStore/LISTING.md`](AppStore/LISTING.md)
 - **Screenshots:** [`AppStore/screenshots/`](AppStore/screenshots/), 6.9" (1320 × 2868)
-- **Product, support and privacy pages:** <https://pranjaldoshi96.github.io/apps/techgist/>, in the `pranjaldoshi96.github.io` repo with your other apps
-- **Upload a build:** `scripts/archive.sh` archives, signs and uploads to App Store Connect. It then appears in TestFlight after 10–30 minutes.
+- **Product, support and privacy pages:** <https://pranjaldoshi96.github.io/apps/techgist/>
+- **Upload a build:** `scripts/archive.sh` archives, signs and uploads to App Store Connect.
 - **Export compliance:** already answered in `Info.plist` (`ITSAppUsesNonExemptEncryption = NO`).
 
 ### Review risks
 
-- **Guideline 5.2 (intellectual property).** News aggregators sometimes get asked whether they have the right to show publishers' content. The app keeps to the safer pattern: headline, short excerpt or summary, clear source label, and a link to the original. If you're asked, explain this in the review notes. Drop any source that objects.
-- **Guideline 4.2 (minimum functionality).** Apps that only wrap web content get rejected. The native features (summaries, digest, saving, source settings, offline cache) help here, and the review notes should mention them.
-- **AI summaries** are labeled as such and only made when the feed contains enough of the article to summarize.
-
-## Next steps
-
-- **Home and Lock Screen widget** showing today's top story (WidgetKit).
-- **iCloud sync** of saved stories across devices (CloudKit, which needs the paid account).
-- **Siri and Shortcuts**: "What's in tech today?" (App Intents).
-- **Unit tests** for the parser and filter, beyond the live `feedcheck.sh`.
+- **Guideline 5.2 (intellectual property).** The app keeps to the safer pattern: headline, short summary, clear source label, and a link to the original. Drop any source that objects.
+- **Guideline 4.2 (minimum functionality).** The native features (ranked edition, saving, search, alerts, offline cache) help here, and the review notes should mention them.
+- **AI summaries** are labelled on every card that has one.

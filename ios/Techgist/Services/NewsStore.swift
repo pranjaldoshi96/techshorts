@@ -45,7 +45,9 @@ final class NewsStore: ObservableObject {
     private var backgroundedAt: Date?
     private var isChecking = false
     private let readState: ReadState
-    private let service: () async -> (articles: [Article], failed: [String], origin: NewsOrigin)
+    typealias Progress = @Sendable ([Article]) async -> Void
+    typealias Service = (Progress?) async -> (articles: [Article], failed: [String], origin: NewsOrigin)
+    private let service: Service
 
     private nonisolated static let savedFile = "saved.json"
     private static let staleAfter: TimeInterval = 10 * 60
@@ -53,9 +55,9 @@ final class NewsStore: ObservableObject {
 
     init(readState: ReadState? = nil,
          cache: ArticleCache? = ArticleCache.load(),
-         service: (() async -> (articles: [Article], failed: [String], origin: NewsOrigin))? = nil) {
+         service: Service? = nil) {
         self.readState = readState ?? .shared
-        self.service = service ?? { await FeedService().latest() }
+        self.service = service ?? { await FeedService().latest(onProgress: $0) }
         articles = (cache?.articles ?? []).map(Self.slim)
         lastUpdated = cache?.updatedAt
         origin = cache?.origin
@@ -120,7 +122,13 @@ final class NewsStore: ObservableObject {
         isRefreshing = true
         defer { isRefreshing = false }
 
-        let result = await service()
+        // With nothing to show yet (first launch, and the edition unavailable), stories appear as each feed
+        // answers instead of after the slowest one. Otherwise the full set is swapped in at once.
+        var onProgress: Progress?
+        if articles.isEmpty {
+            onProgress = { [weak self] partial in await self?.showPartial(partial) }
+        }
+        let result = await service(onProgress)
         failedSources = result.failed
         guard !result.articles.isEmpty else {
             isOffline = true
@@ -135,7 +143,7 @@ final class NewsStore: ObservableObject {
         guard !isRefreshing, !isChecking, !articles.isEmpty else { return }
         isChecking = true
         defer { isChecking = false }
-        let result = await service()
+        let result = await service(nil)
         guard !result.articles.isEmpty else {
             isOffline = true
             return
@@ -168,6 +176,14 @@ final class NewsStore: ObservableObject {
         // These stories are on screen now, so they shouldn't alert later.
         BreakingNews.markSeen(articles)
         Task { await DailyDigest.reschedule(with: topStory) }
+    }
+
+    private func showPartial(_ partial: [Article]) {
+        // Only while the first load is still running: later results must not shuffle cards someone is reading.
+        guard isRefreshing, lastUpdated == nil, readerIsAtTop else { return }
+        articles = partial.map(Self.slim)
+        origin = .direct
+        rebuildFeeds()
     }
 
     private func updateWaitingCount() {
