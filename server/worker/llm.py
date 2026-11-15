@@ -1119,6 +1119,7 @@ def brief_event(client, cfg, store, ev):
                            brief=True, outlets=outlets)
         if not v.ok:
             feedback = v.feedback
+            log.info("brief %s attempt %d failed (%s): %s", ev.id, attempt + 1, v.reason, "; ".join(feedback)[:300])
             continue
         try:
             e = entail.check(client, role_model(cfg, "judge"), lead.title, block, out.headline, out.s1, out.s2,
@@ -1129,6 +1130,8 @@ def brief_event(client, cfg, store, ev):
             return False
         if not e.ok:
             feedback = [e.feedback()]
+            log.info("brief %s attempt %d failed the fact-check: %s | %s", ev.id, attempt + 1, out.headline,
+                     feedback[0][:300])
             continue
         row["rewrite_spice"] = out.spice
         cluster._set_text(row, out.headline, v.full, v.short, out.notif_line, out.s1, 1, cluster.BRIEF, now,
@@ -1156,7 +1159,10 @@ context), s3 15-19 words (one more fact from the reports: what happens next, a r
 own inference); _alt versions 11-14 words (headline_alt at most 55 characters, headline_short at most 40); \
 notif_title at most 40 characters (who or what, and the gist); notif_line one sentence of at most 110 characters \
 written to be tapped: the most striking concrete fact, worded differently from the headline.
-- Lead with the newest material fact. Each report carries its publication time. Where reports give different \
+- The card is about the one development these reports share, and its headline reports that development. A \
+detail, a reaction or an angle that only one report adds belongs in the sentences, never in the headline: \
+reports of a product launch followed by a how-to on setting it up are still a card about the launch.
+- State the newest account of it. Each report carries its publication time. Where reports give different \
 accounts of the same thing (a cause, a status, a count, whether something planned has happened), the newest \
 report's account is the one the card states, attributed to whoever gives it; an older account is left out or \
 given as what was said earlier ("after first blaming ..."). Never state as still to come what a newer report \
@@ -1168,7 +1174,7 @@ earlier events keep their dates. Keep hedges (suspected, alleged, reportedly, ac
 on unnamed sources or one outlet's reporting, say so ("sources say", "CNBC reports"). Allegations against a named \
 person or company are written as allegations with who makes them. Never add a cause, motive, superlative or \
 consequence the reports do not state. Use only facts in the reports. Plain text, no first person, never "the \
-article". Never use: revolutionize, game-changer, groundbreaking, delve, landscape, seamless, cutting-edge.
+article", "the report says" or "the newest report": name the outlet. Never use: revolutionize, game-changer, groundbreaking, delve, landscape, seamless, cutting-edge.
 
 <<reports>>"""
 
@@ -1330,8 +1336,14 @@ def rewrite_event(client, cfg, store, ev):
     picked = picked[:REWRITE_MEMBERS]
     note = ""
     if newest:
-        note = (f"REPORT 2 is the newest {'development' if material else 'report'} "
-                f"({cluster.iso(newest[0].published_at)}); lead with {'it' if material else 'what it adds'}.\n\n")
+        # "Lead with what it adds" for a report that is merely newer turned cards into its side detail: the
+        # ChatGPT Wallet launch became "OpenAI seeks broader retailer support" from a how-to two days later, the
+        # AWS emulator "was written by coding agents" from a blog post (tools/eval_events.py on the VPS).
+        note = (f"REPORT 2 is the newest development ({cluster.iso(newest[0].published_at)}); lead with it.\n\n"
+                if material else
+                f"REPORT 2 is the newest report ({cluster.iso(newest[0].published_at)}): where it gives a newer "
+                f"account of the same development (its status, cause or numbers), state that account. The "
+                f"headline stays on the development the reports share.\n\n")
     reports = note + "\n\n".join(
         f"REPORT {i}: {store.by_id[m.source_id].name if m.source_id in store.by_id else m.source_id}\n"
         f"Published: {cluster.iso(m.published_at)}\n"
@@ -1375,6 +1387,8 @@ def rewrite_event(client, cfg, store, ev):
             v.fail("ungrounded", f"'{bad}' is not in REPORT 1 or in two reports; use REPORT 1's figure or drop it.")
         if not v.ok:
             feedback = v.feedback
+            log.info("rewrite %s attempt %d failed (%s): %s", ev.id, attempt + 1, v.reason,
+                     "; ".join(feedback)[:300])
             continue
         try:
             e = entail.check(client, role_model(cfg, "judge"), lead.title, "\n\n".join(
@@ -1386,6 +1400,8 @@ def rewrite_event(client, cfg, store, ev):
             return False
         if not e.ok:
             feedback = [e.feedback()]
+            log.info("rewrite %s attempt %d failed the fact-check: %s | %s", ev.id, attempt + 1, out.headline,
+                     feedback[0][:300])
             continue
         row["rewrite_importance"] = out.importance
         row["rewrite_spice"] = out.spice
