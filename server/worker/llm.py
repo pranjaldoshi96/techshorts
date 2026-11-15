@@ -21,8 +21,9 @@ from urllib.parse import urlsplit
 import requests
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from . import attribution as attribution_mod, entail, health, sources as sources_mod, text as text_mod, validate
-from .db import from_iso, utcnow
+from . import (attribution as attribution_mod, entail, health, newsdate, sources as sources_mod, text as text_mod,
+               validate)
+from .db import from_iso, iso, utcnow
 
 log = logging.getLogger("techgist")
 
@@ -77,6 +78,9 @@ class WriteOutput(BaseModel):
     entities: Entities = Entities()
     event: str = "new"
     material_update: bool = False
+    # The day the reported news happened when the text shows it is older than the article (YYYY-MM-DD), else "".
+    # Used only when the text itself carries that date (newsdate.news_at).
+    news_date: str = ""
     headline: str
     s1: str
     s2: str
@@ -95,6 +99,12 @@ class WriteOutput(BaseModel):
     s1_long: str = ""
     s2_long: str = ""
     s3_long: str = ""
+
+    @field_validator("news_date", mode="before")
+    @classmethod
+    def day_or_empty(cls, v):
+        # A malformed or missing date is no date; it never costs a retry.
+        return v.strip() if isinstance(v, str) and newsdate.parse_day(v) else ""
 
     @field_validator("topics", mode="before")
     @classmethod
@@ -465,7 +475,7 @@ PROMPT = """Return this JSON object:
 {"is_news": true, "type": "...", "relevance": 0-3, "importance": 1-10, "spice": 1-10, "breaking": false,
  "sensitive": false, "topics": [...], "region": "in|us|global",
  "entities": {"orgs": [], "people": [], "products": [], "amounts": []},
- "event": "new", "material_update": false,
+ "event": "new", "material_update": false, "news_date": "",
  "headline": "...", "headline_alt": "...", "headline_short": "...",
  "s1": "...", "s1_alt": "...", "s2": "...", "s2_alt": "...", "s3": "...", "s3_alt": "...",
  "notif_title": "...", "notif_line": "..."}
@@ -509,6 +519,11 @@ material_update: true when it adds a major new fact to that event, above all whe
 headline describes as coming has now happened (an IPO that was "upcoming" has priced or listed, a planned launch \
 has shipped, a deal "in talks" is signed, a resignation has taken effect, a vote or ruling has been made). \
 False for reactions, analysis, background and smaller details.
+- news_date: when the news itself happened, if the text shows that was before the article's Published date \
+("began selling on Friday", "announced on Tuesday", "on Nov. 13", "last week"): that day as YYYY-MM-DD, worked \
+out from the Published date. A late write-up of older news is common; date the news, not the article. Empty \
+when the text presents the news as new (today or yesterday) or gives no day, and never the date of mere \
+background ("founded in 2019", "resigned on Thursday" in a story about what followed).
 
 Writing. The card must make a tech reader want to tap, using only what the article states:
 - headline: 50 to 70 characters. Lead with the story's most striking true fact: the conflict, the name, the \
@@ -650,6 +665,8 @@ class WriteResult:
     steps: list = field(default_factory=list)
     # A backup model answered a write or fact-check call of this run (the primary's endpoint was failing).
     by_backup: bool = False
+    # When the news happened, if days before the article (newsdate.news_at); set by write_pending.
+    news_at: object = None
 
 
 # Extra feedback retries for a card being written by a backup model (write_item).
@@ -940,6 +957,9 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
         if text is not None and text.og_image is not None:
             db.conn.execute("UPDATE items SET og_image = ? WHERE url_canonical = ?", (text.og_image, url))
         attempt = (row["attempts"] or 0) + 1
+        published = backdate(db, row, text)
+        if result.status == "ok":
+            result.news_at = newsdate.news_at(result.output.news_date, published, row["title"], text.text)
         if result.output is not None or result.status == "failed":
             db.save_write(url, now, result, text, attr)
         if result.status == "ok":
@@ -971,6 +991,23 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
 
 
 BACKUP_FAILED = "backup_failed"
+PAGE_DATE_SLACK = timedelta(hours=1)
+PAGE_DATE_MAX = timedelta(days=30)
+
+
+def backdate(db, row, text):
+    """The item's publisher time, moved back to the page's own publication time when the page states an earlier
+    one: a feed that dates an entry by its last update, or carries no date at all (the item was then dated by
+    when the worker first fetched it, and a days-old post read as minutes old). Never forward. Returns the
+    item's published_at after any change."""
+    published = from_iso(row["published_at"])
+    page_at = getattr(text, "page_published_at", None) if text is not None else None
+    if page_at is None or page_at >= published or published - page_at > PAGE_DATE_MAX:
+        return published
+    if row["feed_published_at"] is not None and published - page_at < PAGE_DATE_SLACK:
+        return published           # the feed's own date, within an hour of the page's: the feed's stands
+    db.conn.execute("UPDATE items SET published_at = ? WHERE url_canonical = ?", (iso(page_at), row["url_canonical"]))
+    return page_at
 
 
 # Briefs: a short attributed card for a story with traction and no full text (cluster.brief_due)

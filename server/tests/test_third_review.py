@@ -6,8 +6,10 @@ from datetime import timedelta
 
 import pytest
 
-from worker import cluster, llm, publish_v1, rank, validate  # noqa: F401
+from worker import cluster, llm, newsdate, publish_v1, rank, text, validate  # noqa: F401
+from worker.db import from_iso, iso
 from test_second_run_review import Replies, _written
+from test_validate import CFG as WRITE_CFG, DAYLIGHT, DAYLIGHT_SRC, FakeClient, _db_with, _sources
 from test_spice_and_truth import (NOW, S, SEBI, SEBI_SRC, SEBI_TITLE, SRCS, _cand, _db, _item, _judge,  # noqa: F401
                                   _stored, check, out)
 
@@ -278,3 +280,109 @@ def test_routine_single_source_news_is_not_top_material(kw, why):
     c = _cand("ev", topics=("startups_funding", "india"), type="funding", **kw)
     assert rank.eligible(c, TOP, NOW) == why
     assert rank.eligible(c, rank.TABS["startups"], NOW) is None        # it keeps its place in its own tab
+
+
+# 3. A card's date and its alert eligibility come from when the news happened
+
+SUNDAY = from_iso("2026-11-15T21:55:51Z")
+HOMEVIEW = ("Apple began selling its HomeView Friday (Nov. 13), describing it in a press release as an artificial "
+            "intelligence-powered product that is designed to be the center of the home. HomeView features a "
+            "7-inch display and can be placed on a tabletop or mounted on a wall, according to the release.")
+MERCOR = ("Two Indian-origin entrepreneurs had their fortunes double with their artificial intelligence startup "
+          "Mercor. The company raised $750 million in a fresh funding round, taking its valuation to $20 billion, "
+          "as per multiple reports. Mercor's latest funding round, announced on Tuesday, was backed by investors "
+          "including Benchmark and General Catalyst.")
+
+
+def test_a_late_write_up_is_dated_by_the_news_not_the_article():
+    """ev_e54189102d "Apple starts selling HomeView" (PYMNTS, Sunday 21:55 on sales that began on Friday) shipped
+    as 15 minutes old and was the 8th push-alert candidate; ev_c94ca99595 "Mercor raises $750 million" (Mint,
+    Sunday, on a round announced on Tuesday) the 20th."""
+    title = "Apple Puts Siri AI at the Center of the Home With HomeView"
+    assert newsdate.news_at("", SUNDAY, title, HOMEVIEW) == from_iso("2026-11-13T12:00:00Z")
+    # The writer's date is used when the text itself carries that day, and only then.
+    assert newsdate.news_at("2026-11-10", SUNDAY, "Mercor founders", MERCOR) == from_iso("2026-11-10T12:00:00Z")
+    assert newsdate.news_at("2026-11-09", SUNDAY, "Mercor founders", MERCOR) is None         # no Monday in the text
+    assert newsdate.news_at("", SUNDAY, "Mercor founders", MERCOR) is None                    # not in the lede
+    assert newsdate.news_at("not a date", SUNDAY, "Mercor founders", MERCOR) is None
+    assert "news_date" in llm.PROMPT and llm.WriteOutput.model_validate(
+        {**DAYLIGHT, "news_date": "Tuesday"}).news_date == ""
+
+
+@pytest.mark.parametrize("lede", [
+    "Jensen Huang, who resigned Thursday, has discussed a comeback with allies, the Financial Times reported.",
+    "Days after Nvidia said Thursday that Huang had resigned, its board met again.",        # background
+    "Apple will begin selling its HomeView on Friday, the company said.",                     # still to come
+    "Apple began selling its HomeView Saturday, describing it as the center of the home.",    # yesterday
+    "Apple began selling its HomeView on Sunday.",                                            # today
+    "Apple began selling its HomeView Friday (Nov. 6), a week before the holidays.",          # not last Friday
+    "Apple began selling its HomeView this week.",
+])
+def test_the_article_time_stands_when_the_lede_does_not_date_the_news(lede):
+    assert newsdate.news_at("", SUNDAY, "t", lede) is None
+
+
+def test_the_page_states_when_it_was_published():
+    page = '<html><head><meta property="article:published_time" content="2026-11-12T08:30:00+05:30"></head></html>'
+    assert text.page_published(page) == from_iso("2026-11-12T03:00:00Z")
+    ld = '<script type="application/ld+json">{"@type":"NewsArticle","datePublished":"2026-11-12T03:00:00Z"}</script>'
+    assert text.page_published(ld) == from_iso("2026-11-12T03:00:00Z")
+    # A bare date would read as midnight and age a story by hours; no date is better than a wrong one.
+    assert text.page_published('<meta property="article:published_time" content="2026-11-12">') is None
+    assert text.page_published("<html></html>") is None
+
+
+def _late_item(**kw):
+    return {"url": "https://example.com/d", "url_canonical": "https://example.com/d", "source_id": "verge",
+            "title": "Daylight raises $80M", "feed_text": "", "published_at": "2026-11-13T03:00:00Z", **kw}
+
+
+def test_an_undated_feed_item_takes_the_page_date_and_the_write_stores_the_news_date():
+    # Friday's article on a round "the startup said on Tuesday": the item keeps its time, the news is Tuesday's.
+    db, now = _db_with([_late_item()])
+    fetch = lambda i, s: text.choose([DAYLIGHT_SRC], "")      # noqa: E731
+    assert llm.write_pending(db, _sources(), WRITE_CFG, FakeClient([DAYLIGHT]), fetch_text=fetch, now=now)["written"]
+    assert db.write_row("https://example.com/d")["news_at"] == "2026-11-10T12:00:00Z"
+    assert db.item("https://example.com/d")["published_at"] == "2026-11-13T03:00:00Z"
+
+    # No date in the feed: the item was dated by when it was fetched. The page's own date replaces that.
+    def dated(i, s, at="2026-11-08T09:00:00Z"):
+        t = text.choose([DAYLIGHT_SRC], "")
+        t.page_published_at = from_iso(at)
+        return t
+    db, now = _db_with([_late_item(published_at="2026-11-11T04:00:00Z")])           # = first seen
+    llm.write_pending(db, _sources(), WRITE_CFG, FakeClient([DAYLIGHT]), fetch_text=dated, now=now)
+    assert db.item("https://example.com/d")["published_at"] == "2026-11-08T09:00:00Z"
+    # A feed's own date within the hour stands; a later page date never moves an item forward.
+    row = {"url_canonical": "u", "published_at": "2026-11-11T04:00:00Z", "feed_published_at": "2026-11-11T04:00:00Z"}
+    for at in ("2026-11-11T03:30:00Z", "2026-11-11T09:00:00Z", "2026-09-01T00:00:00Z"):
+        assert llm.backdate(db, row, dated(None, None, at)) == from_iso("2026-11-11T04:00:00Z")
+    assert llm.backdate(db, row, dated(None, None, "2026-11-10T22:00:00Z")) == from_iso("2026-11-10T22:00:00Z")
+
+
+def test_old_news_is_shown_with_its_own_date_and_is_never_an_alert():
+    db = _db()
+    late = _item("https://pymnts.test/homeview", [1, 0, 0], "Apple starts selling HomeView, its Siri AI home display",
+                 source_id="pymnts", pub=NOW - timedelta(minutes=15), spice=8, imp=7, people=())
+    fresh = _item("https://verge.test/glasses", [0, 1, 0], "Apple reportedly plans smart glasses debut next year",
+                  source_id="verge", pub=NOW - timedelta(minutes=20), spice=8, imp=7, people=())
+    late.news_at = NOW - timedelta(hours=14)
+    for it in (late, fresh):
+        it.notif_title, it.notif_line = "Apple news lands", "A line about the story that says what happened."
+    _written(db, [late, fresh])
+    db.conn.execute("UPDATE items SET feed_published_at = published_at")
+    store = cluster.Store(db, SRCS, S, NOW)
+    for it in (late, fresh):
+        eid, _ = cluster.create(store, it)
+        cluster.refresh(store, store.events[eid], lambda s: True)
+    old, new = store.events[cluster.event_id(late.url)], store.events[cluster.event_id(fresh.url)]
+    assert old.row["published_at"] == iso(late.news_at) and new.row["published_at"] == iso(fresh.published_at)
+    ctx = publish_v1.Ctx(db, CTX_CFG, SRCS, NOW)
+    edition, report, _, tabs = publish_v1.build(ctx)
+    by_id = {a["eventId"]: a for a in edition["articles"]}
+    assert by_id[old.id]["publishedAt"] == iso(late.news_at)
+    assert [n["eventId"] for n in report["notifications"]] == [new.id]
+    # A lead with no publisher's date at all (dated by its first fetch) is no alert either.
+    db.conn.execute("UPDATE items SET feed_published_at = NULL, first_seen_at = published_at WHERE url_canonical = ?",
+                    (fresh.url,))
+    assert publish_v1.build(ctx)[1]["notifications"] == []

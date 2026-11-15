@@ -175,7 +175,8 @@ MIGRATIONS = {
     "items": [("hold_reason", "TEXT"), ("og_image", "TEXT"), ("triaged", "INTEGER")],
     "write_log": [("attempt", "INTEGER"), ("tok_in", "INTEGER"), ("tok_out", "INTEGER")],
     # Spice and the push alert's title (owner's direction, 2026-11-15); NULL spice on older rows reads as 5.
-    "writes": [("spice", "INTEGER"), ("notif_title", "TEXT")],
+    # news_at: when the item's news happened, if days before the article (newsdate.py); NULL = the article's time.
+    "writes": [("spice", "INTEGER"), ("notif_title", "TEXT"), ("news_at", "TEXT")],
     # superseded_by: the event whose newer report overtook this one's card (cluster.supersede).
     "events": [("spice", "INTEGER"), ("notif_title", "TEXT"), ("rewrite_spice", "INTEGER"), ("social", "TEXT"),
                ("superseded_by", "TEXT")],
@@ -353,6 +354,7 @@ class DB:
             passed_at=result.passed_at, reason=result.reason, text_origin=text.origin, text_words=text.words,
             text=text.text, attribution=attribution.prefix if attribution else None,
             entailed=None if result.entailed is None else int(result.entailed),
+            news_at=iso(getattr(result, "news_at", None)),
             steps=json.dumps([s.__dict__ for s in result.steps]))
         if o is not None:
             row.update(

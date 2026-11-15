@@ -218,6 +218,7 @@ class Item:
     publisher: str = None       # items.extra.publisher: the outlet of an item imported from a signal's link
     feed_text: str = None
     via: str = None             # items.extra.via: the signal source whose link this article was imported from
+    news_at: object = None      # when its news happened, if days before the article (newsdate.py)
     keys: set = field(default_factory=set)
 
     @property
@@ -229,6 +230,11 @@ class Item:
         return self.status == "thin"
 
     @property
+    def happened_at(self):
+        """When the news this item reports happened: its own time, or earlier for a late write-up."""
+        return self.news_at or self.published_at
+
+    @property
     def can_lead(self):
         return self.hard and not self.thin and self.text_words >= LEAD_MIN_WORDS
 
@@ -237,7 +243,7 @@ ITEM_SQL = """
 SELECT i.url_canonical, i.source_id, i.title, i.published_at, w.status, w.type, w.is_news, w.relevance,
        w.importance, w.breaking, w.sensitive, w.region, w.topics, w.entities, w.event, w.material_update,
        w.text_words, w.headline, w.summary, w.summary_short, w.notif_line, w.s1, w.entailed, w.text, e.vec,
-       w.spice, w.notif_title, i.extra, i.feed_text
+       w.spice, w.notif_title, i.extra, i.feed_text, w.news_at
 FROM items i JOIN writes w ON w.url_canonical = i.url_canonical
 JOIN embeddings e ON e.url_canonical = i.url_canonical AND e.kind = 'passage'
 """
@@ -255,7 +261,8 @@ def _item(r):
               vec=embed_mod.from_blob(r["vec"]), headline=r["headline"], summary=r["summary"],
               summary_short=r["summary_short"], notif_line=r["notif_line"], s1=r["s1"],
               entailed=r["entailed"], text=r["text"], spice=r["spice"], notif_title=r["notif_title"],
-              publisher=extra.get("publisher"), feed_text=r["feed_text"], via=extra.get("via"))
+              publisher=extra.get("publisher"), feed_text=r["feed_text"], via=extra.get("via"),
+              news_at=from_iso(r["news_at"]))
     it.keys = entity_keys(ents)
     return it
 
@@ -601,7 +608,7 @@ def join(store, ev, item, cos, how):
     mark_realized(store, ev, item)
     if item.material_update and item.hard:
         ev.dirty.add("material_update")
-        _set_material(ev, item.published_at)
+        _set_material(ev, item.happened_at)
     return ev.id, how
 
 
@@ -703,7 +710,7 @@ def merge_twins(store):
                 continue
         except LLMError:
             continue
-        updates = [m.published_at for m in src.members if m.material_update and m.hard]
+        updates = [m.happened_at for m in src.members if m.material_update and m.hard]
         merge(store, src, dst)
         for at in updates:
             _set_material(dst, at)
@@ -788,7 +795,7 @@ def refresh(store, ev, tier1_ok):
     # A member that joined before the event's headline said "upcoming" (or before this rule) still counts.
     for m in members:
         if mark_realized(store, ev, m):
-            _set_material(ev, m.published_at)
+            _set_material(ev, m.happened_at)
             ev.dirty.add("material_update")
     _set_anchor(ev)
     # The event's clock is its first hard-news report. A profile or explainer that joined does not move it back:
@@ -804,8 +811,13 @@ def refresh(store, ev, tier1_ok):
     if lead is not None and lead.url != prev_lead:
         row["lead_url"] = lead.url
         if prev_lead is not None:
-            _set_material(ev, lead.published_at)
+            _set_material(ev, lead.happened_at)
             _queue_rewrite(row, "lead_change")
+    # The clock is when the news happened, never when a late write-up of it was published or fetched: "Apple
+    # starts selling HomeView" (PYMNTS, Sunday evening, on sales that began on Friday) was shown as 15 minutes old
+    # and queued for a push alert.
+    if lead is not None and lead.news_at is not None and iso(lead.news_at) < row["published_at"]:
+        row["published_at"] = iso(lead.news_at)
     if "material_update" in ev.dirty:
         _queue_rewrite(row, "material_update")
     seen = set(json.loads(row.get("rewrite_publishers") or "[]"))

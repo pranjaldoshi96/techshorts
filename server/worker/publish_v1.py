@@ -61,7 +61,7 @@ def _words(s):
 
 MEMBER_SQL = """
 SELECT i.url_canonical, i.url, i.source_id, i.title, i.feed_text, i.image, i.og_image, i.published_at,
-       i.first_seen_at, i.extra, w.status, w.text, w.entities, w.type
+       i.first_seen_at, i.feed_published_at, i.extra, w.status, w.text, w.entities, w.type
 FROM event_members em JOIN items i ON i.url_canonical = em.url_canonical
 LEFT JOIN writes w ON w.url_canonical = em.url_canonical
 WHERE em.event_id = ?
@@ -178,6 +178,9 @@ def event_candidate(ctx, ev):
               "images": image_sources(ctx, lead, members), "orgs": primary_orgs(members),
               # An owner's override replaces the card's text, so the alert written for the old text is dropped.
               "people": people(members),
+              # No publisher's date at all (none in the feed, none on the page): the lead is dated by when the
+              # worker first fetched it, which says nothing about when the news happened.
+              "undated": lead["feed_published_at"] is None and lead["published_at"] == lead["first_seen_at"],
               "notif_title": None if over else _col(ev, "notif_title"),
               "notif_line": None if over else ev["notif_line"]}
     return c, None
@@ -618,6 +621,8 @@ def notification_candidates(tabs, now):
             note = notification(c)
             if c.id in seen or note is None or c.age_eff(now) > NOTIFY_MAX_AGE_H or not rank.notifiable(c):
                 continue
+            if c.data.get("undated"):
+                continue        # an alert says "this just happened"; a fetch time cannot vouch for that
             seen.add(c.id)
             out.append({"eventId": c.id, "score": round(rank.notification_score(c, now), 4), "spice": int(c.spice),
                         "importance": int(c.importance), "publishers": int(c.n_publishers),
