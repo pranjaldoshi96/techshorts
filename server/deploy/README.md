@@ -87,6 +87,22 @@ The aim: the worker keeps publishing without anyone watching, and when it cannot
   cutover that URL is the old publisher's edition, and nothing from the VPS is reachable from outside.
 - Not tested: a reboot (the unrelated site lives on this machine). Boot behaviour rests on the units being enabled.
 
+Measured on the VPS on 2026-11-15 (22:38-23:15 UTC), on the second run's state, `git_remote` null throughout:
+
+| Test | Result |
+|---|---|
+| `kill -9` of the worker | active again after 5.2 s, first tick done at 7.7 s, next publish 109 s after the kill (the edition was 103 s old; it is rewritten when it changes and at least every 5 min) |
+| Six `kill -9` in 89 s (restart delays 5, 8, 14, 22, 36, 60 s) | active 60 s after the sixth kill, publishing 84 s after it; one alert sent, five held back by the rate limit and counted in the next |
+| `SIGSTOP` (alive, silent), edition watchdog with the window shortened to 7 min for the test | restarted 462 s after the stop (42 s after the edition passed 7 min), published 23 s later; alert on the restart and a "publishing again" message. The window was put back to 15 min afterwards. |
+| `SIGSTOP`, real settings | systemd's watchdog killed it at 600 s, active at 605 s, next publish at 675 s; alert "stopped answering and was killed by the watchdog" |
+| Alert queue across the `kill -9` | 23 rows (21 waiting, one mid-send, one sent) identical before and after; the restarted worker's next publish queued 1 new story and no duplicate; re-queuing the sent story answers `duplicate` |
+| Corrupt `state.db` (a copy, 200 pages overwritten) | set aside, the nightly backup restored in 0.1 s, opens with all rows |
+| Nightly backup, run once by hand | 27.9 MB, integrity-checked, 0.1 s |
+
+The restart delay does not go back to 5 s by itself: systemd counts restarts until the unit is started by hand, by
+a deploy or by the watchdog timer, so after six crashes a seventh, days later, waits 60 s. `state-20261115T223826Z.db`
+is the backup taken before this deploy.
+
 ## Cutover rehearsal and rollback
 
 The push path (`worker/mirror.py`) is the old publisher's scheme: one commit on the branch, amended and

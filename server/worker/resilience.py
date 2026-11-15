@@ -127,7 +127,8 @@ def quick_check(path, full=False):
             conn.close()
     except sqlite3.DatabaseError as e:
         return str(e)
-    return None if rows == [("ok",)] else "; ".join(str(r[0]) for r in rows[:3])
+    # One line: the check's own report runs over several.
+    return None if rows == [("ok",)] else " ".join("; ".join(str(r[0]) for r in rows[:3]).split())
 
 
 def backups(state_dir):
