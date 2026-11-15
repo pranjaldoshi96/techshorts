@@ -165,7 +165,7 @@ CREATE TABLE IF NOT EXISTS event_signals (
 """
 
 # Columns added after a table first shipped; added in place so an existing state.db keeps working.
-MIGRATIONS = {"items": [("hold_reason", "TEXT"), ("og_image", "TEXT")], "write_log": [("attempt", "INTEGER")]}
+MIGRATIONS = {"items": [("hold_reason", "TEXT"), ("og_image", "TEXT")], "write_log": [("attempt", "INTEGER"), ("tok_in", "INTEGER"), ("tok_out", "INTEGER")]}
 # Run once, right after a migration adds the column.
 BACKFILL = {("write_log", "attempt"): (
     "UPDATE write_log SET attempt = (SELECT COUNT(*) FROM write_log w2 WHERE w2.kind = 'item'"
@@ -348,10 +348,11 @@ class DB:
     def write_row(self, url_canonical):
         return self.one("SELECT * FROM writes WHERE url_canonical = ?", url_canonical)
 
-    def log_write(self, at, url_canonical, kind, model, outcome, reason=None, ms=None, attempt=None):
-        self.conn.execute("INSERT INTO write_log (at, url_canonical, kind, model, outcome, reason, ms, attempt)"
-                          " VALUES (?,?,?,?,?,?,?,?)", (iso(at), url_canonical, kind, model, outcome, reason, ms,
-                                                        attempt))
+    def log_write(self, at, url_canonical, kind, model, outcome, reason=None, ms=None, attempt=None, tok_in=None,
+                  tok_out=None):
+        self.conn.execute("INSERT INTO write_log (at, url_canonical, kind, model, outcome, reason, ms, attempt,"
+                          " tok_in, tok_out) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                          (iso(at), url_canonical, kind, model, outcome, reason, ms, attempt, tok_in, tok_out))
 
     def llm_calls_since(self, since):
         return self.one("SELECT COUNT(*) n FROM write_log WHERE at >= ? AND kind != 'item'", iso(since))["n"]

@@ -196,7 +196,8 @@ class Client:
         self.session = session or requests.Session()
         self.timeout = timeout
         self.clock, self.sleep = clock, sleep
-        self.events = []            # (kind, model, outcome, ms) for health.json; drained by the stage
+        # (kind, model, outcome, ms, prompt tokens, completion tokens) for health.json; drained by the stage
+        self.events = []
         self.lock = threading.Lock()
         self.timeouts_in_row = 0
 
@@ -212,9 +213,9 @@ class Client:
         with self.lock:
             self.timeouts_in_row += 1
 
-    def _event(self, kind, model, outcome, ms):
+    def _event(self, kind, model, outcome, ms, tok_in=None, tok_out=None):
         with self.lock:
-            self.events.append((kind, model, outcome, ms))
+            self.events.append((kind, model, outcome, ms, tok_in, tok_out))
 
     def drain(self):
         with self.lock:
@@ -262,10 +263,16 @@ class Client:
             if r.status_code != 200:
                 self._event(kind, model, f"http_{r.status_code}", ms)
                 raise LLMError(f"HTTP {r.status_code}")
-            self._event(kind, model, "ok", ms)
             try:
-                return r.json()["choices"][0]["message"]["content"] or ""
-            except (ValueError, KeyError, IndexError, TypeError):
+                data = r.json()
+                usage = data.get("usage") if isinstance(data, dict) else None
+            except ValueError:
+                data, usage = None, None
+            usage = usage if isinstance(usage, dict) else {}
+            self._event(kind, model, "ok", ms, usage.get("prompt_tokens"), usage.get("completion_tokens"))
+            try:
+                return data["choices"][0]["message"]["content"] or ""
+            except (KeyError, IndexError, TypeError):
                 raise LLMError("malformed response")
         raise LLMError("gave up after retries")
 
@@ -661,8 +668,8 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
             logged = "thin" if result.status.startswith("thin") else result.status
             stats[logged] += 1
             db.log_write(now, url, "item", result.model, logged, result.reason, attempt=attempt)
-    for kind, model, outcome, ms in client.drain():
-        db.log_write(now, None, kind, model, outcome, None, ms)
+    for kind, model, outcome, ms, tok_in, tok_out in client.drain():
+        db.log_write(now, None, kind, model, outcome, None, ms, tok_in=tok_in, tok_out=tok_out)
     if auth_failed:
         health.notify(db, "llm_auth", "LLM API returned 401/403; card writing stopped")
         stats["auth_failed"] += 1

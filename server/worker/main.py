@@ -93,8 +93,8 @@ def probe(db, cfg, client):
     except llm.LLMError:
         pass
     now = utcnow()
-    for kind, model, outcome, ms in client.drain():
-        db.log_write(now, None, kind, model, outcome, None, ms)
+    for kind, model, outcome, ms, tok_in, tok_out in client.drain():
+        db.log_write(now, None, kind, model, outcome, None, ms, tok_in=tok_in, tok_out=tok_out)
 
 
 def tick(db, cfg, poll_all=False, client=None, embedder=None, out_dir=None, started_at=None):

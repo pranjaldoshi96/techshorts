@@ -77,7 +77,8 @@ def _pct(sorted_values, p):
 
 
 def llm_stats(db, since):
-    rows = db.q("SELECT kind, model, outcome, ms FROM write_log WHERE at >= ? AND kind != 'item'", iso(since))
+    rows = db.q("SELECT kind, model, outcome, ms, tok_in, tok_out FROM write_log WHERE at >= ? AND kind != 'item'",
+                iso(since))
     ok_ms = sorted(r["ms"] for r in rows if r["outcome"] == "ok" and r["ms"] is not None)
     by_model = {}
     for r in rows:
@@ -87,6 +88,8 @@ def llm_stats(db, since):
         "http429": sum(r["outcome"] == "http_429" for r in rows),
         "errors": sum(r["outcome"] not in ("ok", "http_429") for r in rows),
         "p50ms": _pct(ok_ms, 0.5), "p95ms": _pct(ok_ms, 0.95),
+        # As the endpoint reports them (`usage`); calls that failed or reported none count as 0.
+        "tokens": {"prompt": sum(r["tok_in"] or 0 for r in rows), "completion": sum(r["tok_out"] or 0 for r in rows)},
     }
 
 

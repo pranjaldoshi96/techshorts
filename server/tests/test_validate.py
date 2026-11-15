@@ -668,7 +668,20 @@ def test_retry_after_is_honoured():
                         clock=clock, sleep=clock.sleep)
     client.chat("primary", [{"role": "user", "content": "x"}])
     assert len(session.times) == 2 and session.times[1] - session.times[0] >= 7
-    assert ("write", "primary", "http_429", 0) in client.drain()
+    assert ("write", "primary", "http_429", 0, None, None) in client.drain()
+
+
+def test_token_usage_is_recorded_per_call():
+    class Usage(FakeSession):
+        def post(self, *a, **k):
+            r = super().post(*a, **k)
+            r._body["usage"] = {"prompt_tokens": 1200, "completion_tokens": 310}
+            return r
+    clock = FakeClock()
+    client = llm.Client("https://llm.test/v1", "k", llm.TokenBucket(30, 60.0, clock, clock.sleep),
+                        Usage(clock), clock=clock, sleep=clock.sleep)
+    client.chat("primary", [{"role": "user", "content": "x"}])
+    assert client.drain() == [("write", "primary", "ok", 0, 1200, 310)]
 
 
 # Fixture
