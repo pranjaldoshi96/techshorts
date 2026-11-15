@@ -22,7 +22,8 @@ from datetime import timedelta
 
 import requests
 
-from . import cluster, config, degraded, embed, fetch, health, llm, mirror, publish_v1, sources as sources_mod
+from . import (alertq, cluster, config, degraded, embed, fetch, health, llm, maintenance, mirror, publish_v1, resilience,
+               sources as sources_mod)
 from .db import DB, from_iso, iso, utcnow
 
 log = logging.getLogger("techgist")
@@ -105,10 +106,15 @@ def probe(db, cfg, client):
 
 def tick(db, cfg, poll_all=False, client=None, embedder=None, out_dir=None, started_at=None):
     has_client = client is not None
+    alertq.ensure(db)
     # Reloaded every tick so a sources.yaml edit applies without a restart.
     srcs = sources_mod.load()
     maybe_check_sources(db, srcs, cfg)
+    # A heartbeat between the stages: one that hangs (a feed, an LLM call, an image download that never returns)
+    # stops them, and systemd's watchdog (WatchdogSec= in the unit) kills and restarts the worker.
+    resilience.heartbeat()
     counts = fetch_due(db, srcs, cfg, poll_all)
+    resilience.heartbeat()
     promoted = fetch.promote_signals(db, srcs, cfg, utcnow())
     if promoted:
         counts["signals_promoted"] = promoted
@@ -131,6 +137,7 @@ def tick(db, cfg, poll_all=False, client=None, embedder=None, out_dir=None, star
                 return cluster.candidates(db, cfg, cluster.embed_items(db, cfg, embedder, prepared, now), now)
         counts.update({f"write_{k}": v for k, v in llm.write_pending(db, srcs, cfg, client,
                                                                       candidates_for=cands).items()})
+        resilience.heartbeat()
     # Runs without embeddings too: it then refreshes events (signals, coverage, importance) from what is stored.
     rewriter = (lambda store, ev: llm.rewrite_event(client, cfg, store, ev)) if client is not None else None
     judge = (lambda title, text, events: llm.judge_events(client, cfg, title, text, events)) \
@@ -138,6 +145,7 @@ def tick(db, cfg, poll_all=False, client=None, embedder=None, out_dir=None, star
     briefer = (lambda store, ev: llm.brief_event(client, cfg, store, ev)) if client is not None else None
     counts.update({f"cluster_{k}": v for k, v in cluster.run(db, cfg, srcs, utcnow(), embedder,
                                                              rewriter, judge, briefer).items() if v})
+    resilience.heartbeat()
     now = utcnow()
     if client is not None:
         # The clustering stage's calls (judge, rewrite, its entailment check) are logged with this tick.
@@ -148,7 +156,12 @@ def tick(db, cfg, poll_all=False, client=None, embedder=None, out_dir=None, star
     if out_dir:
         report = publish_v1.publish(db, cfg, srcs, now, out_dir, embedder, outage)
         counts["published"] += bool(report.get("published"))
+        resilience.heartbeat()
         if report.get("published"):
+            # The stories worth a push alert go into the durable queue (alertq.py), in this tick's transaction.
+            queued = alertq.enqueue_candidates(db, report.get("notifications"), now)
+            if queued:
+                counts["alerts_queued"] = queued
             pushed = mirror.push(db, cfg, out_dir, now)
             if pushed and pushed != "waiting":
                 counts[f"mirror_{pushed.split(':')[0]}"] += 1
@@ -164,12 +177,16 @@ def tick(db, cfg, poll_all=False, client=None, embedder=None, out_dir=None, star
         alerts.append("llm_backup")
     if int(db.get_meta("embed_failed_ticks") or 0) >= cluster.EMBED_ALERT_TICKS:
         alerts.append("embeddings_down")
+    low = resilience.disk_low(cfg["state_dir"])
+    if low:
+        health.notify(db, "disk_low", f"the disk is nearly full: {low}")
+        alerts.append("disk_low")
     if report and report.get("published") and report.get("emptyCategories"):
         empty = ", ".join(report["emptyCategories"])
         log.warning("v1 edition has no %s articles; 1.2 shows those tabs empty", empty)
         health.notify(db, "v1_empty_category", f"1.2 tabs with no articles: {empty}")
         alerts.append("v1_empty_category")
-    extra = {"llmOutage": outage, "alerts": alerts, "llmBackup": backup,
+    extra = {"llmOutage": outage, "alerts": alerts, "llmBackup": backup, "alertQueue": alertq.stats(db, now),
              "embedFailedTicks": int(db.get_meta("embed_failed_ticks") or 0),
              "llmBudget": {"used24h": db.llm_calls_since(now - timedelta(hours=24)),
                            "daily": cfg["llm"].get("daily_budget")}}
@@ -194,7 +211,13 @@ def main():
     # error, and both made a clean journal look broken.
     logging.getLogger("trafilatura").setLevel(logging.CRITICAL)
     cfg = config.load()
+    # A corrupt state.db is set aside and the newest good backup restored before anything opens it.
+    resilience.recover_state(config.state_path(cfg, "state.db"), cfg["state_dir"])
     db = DB(config.state_path(cfg, "state.db"))
+    # Another process holding the write lock (a tool, a backup) is waited for rather than failing the tick.
+    db.conn.execute("PRAGMA busy_timeout = 30000")
+    alertq.ensure(db)
+    db.commit()
     out_dir = None if args.no_publish else os.path.expanduser(
         args.out or (cfg.get("publish") or {}).get("out_dir") or os.path.join(cfg["state_dir"], "edition"))
     log.info("worker start, state in %s, publishing to %s", cfg["state_dir"], out_dir)
@@ -204,17 +227,29 @@ def main():
         log.warning("no embedding model or key; clustering is off")
     started_at = utcnow()
     db.set_meta("worker_started_at", iso(started_at))
+    db.commit()
+    guard = resilience.TickGuard(cfg["state_dir"])
     while True:
         started = time.monotonic()
+        resilience.heartbeat()
         try:
             counts = tick(db, cfg, args.all, client, embedder, out_dir, started_at)
             if counts:
                 log.info("tick: %s", dict(sorted(counts.items())))
-        except Exception:
-            # One bad tick (a malformed sources.yaml edit, a disk hiccup) must not kill the loop.
+            maintenance.run(db, cfg, utcnow())
+            guard.ok()
+        except Exception as e:
+            # One bad tick (a malformed sources.yaml edit, a disk hiccup) must not kill the loop. One that keeps
+            # failing, or a corrupt database, ends the process with an alert: systemd starts a clean worker, and
+            # a corrupt state.db is replaced from a backup on the way up (resilience.py).
             log.exception("tick failed")
             if args.once:
                 raise
+            status = guard.failure(db, e)
+            if status is not None:
+                log.error("exiting with status %d for a clean restart", status)
+                raise SystemExit(status)
+        resilience.heartbeat()
         if args.once:
             break
         time.sleep(max(1.0, cfg["tick_seconds"] - (time.monotonic() - started)))

@@ -67,9 +67,8 @@ ufw allow 80/tcp >/dev/null
 ufw allow 443/tcp >/dev/null
 ufw status | grep -q "Status: active" || ufw --force enable >/dev/null
 
-install -m 644 "$APP/deploy/techgist-worker.service" "$APP/deploy/techgist-alert@.service" \
-    "$APP/deploy/techgist-watchdog.service" "$APP/deploy/techgist-watchdog.timer" /etc/systemd/system/
+install -m 644 "$APP"/deploy/techgist-*.service "$APP"/deploy/techgist-*.timer /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable techgist-worker >/dev/null 2>&1
-systemctl enable --now techgist-watchdog.timer >/dev/null 2>&1
+systemctl enable --now techgist-watchdog.timer techgist-backup.timer >/dev/null 2>&1
 echo "setup done; start with: systemctl restart techgist-worker"

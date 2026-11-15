@@ -1,11 +1,16 @@
 # Checks the published edition's age from outside the worker (deploy/check_freshness.py) and restarts the worker
-# when it has not published for 30 min: a hung tick or a crashed worker is then noticed and recovered without
-# anyone watching. Runs as root because it may restart a unit; it reads one file and touches nothing else.
+# when it has not published for 15 min: a worker that is alive but silent, however it got there, is noticed and
+# recovered without anyone watching, and the owner is told. Runs as root because it restarts a unit; it reads one
+# file and /etc/techgist/env and writes /run/techgist-watchdog.json.
+# To stop the worker on purpose for longer than 15 min, stop techgist-watchdog.timer too.
 [Unit]
 Description=Techgist edition freshness check
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 /opt/techgist/deploy/check_freshness.py /var/lib/techgist/edition/edition.json --max-age-min 30 --restart techgist-worker
-# Stale is an answer, not a failure of this unit.
-SuccessExitStatus=1
+ExecStart=/usr/bin/python3 /opt/techgist/deploy/check_freshness.py /var/lib/techgist/edition/edition.json --max-age-min 15 --restart techgist-worker --quiet
+# Stale (1) or unreadable (2) is an answer, not a failure of this unit.
+SuccessExitStatus=1 2
+# Every minute: keep the journal to what matters. The script prints only when the edition is not fresh.
+SyslogLevel=notice
+LogLevelMax=notice

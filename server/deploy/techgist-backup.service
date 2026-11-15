@@ -1,0 +1,20 @@
+# Nightly backup of state.db (deploy/backup_state.py): one consistent snapshot, integrity-checked, the newest 7
+# kept in /var/lib/techgist/backups/nightly. A failed backup alerts through OnFailure=.
+[Unit]
+Description=Techgist nightly state backup
+OnFailure=techgist-alert@%n.service
+
+[Service]
+Type=oneshot
+User=techgist
+Group=techgist
+Environment=TECHGIST_STATE=/var/lib/techgist
+ExecStart=/usr/bin/python3 /opt/techgist/deploy/backup_state.py
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/techgist
+UMask=0027

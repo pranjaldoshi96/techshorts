@@ -1,4 +1,5 @@
-# Sends an ntfy alert when the unit named by %i fails (OnFailure= in techgist-worker.service).
+# Sends an ntfy alert when the unit named by %i fails (OnFailure= in techgist-worker.service and
+# techgist-backup.service). systemd passes what happened in MONITOR_SERVICE_RESULT / MONITOR_EXIT_STATUS.
 [Unit]
 Description=Techgist alert for %i
 
@@ -7,4 +8,9 @@ Type=oneshot
 User=techgist
 Group=techgist
 EnvironmentFile=-/etc/techgist/env
-ExecStart=/bin/sh -c 'if [ -n "$NTFY_TOPIC" ]; then curl -s -m 10 -H "Title: Techgist: %i failed" -d "%i failed on $(hostname); see journalctl -u %i" "https://ntfy.sh/$NTFY_TOPIC"; else echo "%i failed (NTFY_TOPIC unset)"; fi'
+# /run/techgist-alert: the rate limit's memory (one message per 15 min per unit in a crash loop).
+RuntimeDirectory=techgist-alert
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/bin/python3 /opt/techgist/deploy/alert.py --unit-failed %i
+# No topic (exit 3) or ntfy unreachable (exit 1) is logged by the script; it is not a failure of this unit.
+SuccessExitStatus=1 3

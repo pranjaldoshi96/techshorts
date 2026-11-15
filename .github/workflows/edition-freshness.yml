@@ -1,0 +1,42 @@
+# Checks, from outside the server, that Techgist is still publishing: reads the edition the app reads and fails
+# (and sends an ntfy alert) when it is stale or unreachable. This is the check that still works when the whole VPS
+# is down, which nothing running on the VPS can report.
+#
+# MANUAL TRIGGER ONLY. The schedule below is commented out on purpose: it is the owner's decision to turn it on
+# (Actions tab > "Edition freshness" > Run workflow works today). To enable it:
+#   1. add the repository secret NTFY_TOPIC (the topic in /etc/techgist/env on the VPS), so a stale edition alerts;
+#   2. uncomment the two `schedule` lines;
+#   3. after cutover to the worker, lower max_age_min's default from 45 (the old publisher runs every 30 min)
+#      to 25 (the worker pushes at most every 10 min).
+# GitHub may start scheduled runs 5-15 min late and stops them in a repository with no activity for 60 days.
+name: Edition freshness
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: URL of the published edition.json or health.json
+        default: https://raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/edition.json
+      max_age_min:
+        description: Minutes since the last publish before it counts as stale
+        default: "45"
+  # schedule:
+  #   - cron: "7,22,37,52 * * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: server/deploy
+      - name: Check the published edition's age
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          URL: ${{ inputs.url || 'https://raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/edition.json' }}
+          MAX_AGE_MIN: ${{ inputs.max_age_min || '45' }}
+        run: python3 server/deploy/check_freshness.py "$URL" --max-age-min "$MAX_AGE_MIN" --alert

@@ -8,33 +8,31 @@ import logging
 import os
 from datetime import timedelta
 
-import requests
-
 from statistics import median
 
-from . import degraded as degraded_mod, sources as sources_mod
+from . import degraded as degraded_mod, resilience, sources as sources_mod
 from .db import from_iso, iso, utcnow
 
 log = logging.getLogger("techgist")
 ALERT_EVERY = timedelta(hours=6)
 
 
+# Conditions that mean readers are not getting news: sent at ntfy's high priority.
+URGENT = ("no_publish", "v1_check", "llm_auth", "disk_low")
+
+
 def notify(db, condition, message):
-    """ntfy alert, at most once per condition per 6 h. Without NTFY_TOPIC it only logs."""
+    """ntfy alert, at most once per condition per 6 h. Without NTFY_TOPIC it only logs. The 6 h starts when ntfy
+    accepted the message: one that could not be sent is tried again on the next tick, not dropped for 6 h."""
     now = utcnow()
     last = from_iso(db.get_meta(f"alert:{condition}"))
     if last and now - last < ALERT_EVERY:
         return False
+    sent = resilience.ntfy(f"Techgist: {condition}", message,
+                           priority="high" if condition.split(":")[0] in URGENT else None)
+    if not sent and os.environ.get("NTFY_TOPIC"):
+        return False
     db.set_meta(f"alert:{condition}", iso(now))
-    topic = os.environ.get("NTFY_TOPIC")
-    if not topic:
-        log.warning("ALERT %s: %s (NTFY_TOPIC unset; not sent)", condition, message)
-        return True
-    try:
-        requests.post(f"https://ntfy.sh/{topic}", data=message.encode(), timeout=10,
-                      headers={"Title": f"Techgist: {condition}"})
-    except requests.RequestException as e:
-        log.warning("ntfy failed for %s: %s", condition, type(e).__name__)
     return True
 
 

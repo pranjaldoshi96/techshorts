@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | Host | `root@213.210.36.218` (key `~/.ssh/techgist_vps`), Ubuntu 24.04. nginx there serves an unrelated site: never touch it. |
-| Service | `techgist-worker.service` (system unit, user `techgist`, `Restart=always`, logs in journald) |
+| Service | `techgist-worker.service` (system unit, user `techgist`, restarted for ever with no start limit, enabled at boot, logs in journald). See "Staying up" below. |
 | Code | `/opt/techgist` (a copy of `server/`, owned by root), venv in `/opt/techgist/venv`, deployed revision in `/opt/techgist/REVISION` |
 | State | `/var/lib/techgist` (`TECHGIST_STATE`): `state.db`, `health.json`, `editorial.yaml`, `bin/v1decode` |
 | Edition | `/var/lib/techgist/edition/` (`edition.json`, `health.json`, `img/`). Not served and not pushed: `publish.git_remote` is null and `deploy.sh` refuses to deploy otherwise. |
-| Keys | `/etc/techgist/` (`root:techgist`, directory 750, files 640). The worker reads `hub_key` (GPT and Gemini on the inference hub: card writing, fact-check, clustering judge, screening) through `HUB_API_KEY_FILE` and `nvidia_key` (embeddings and the backup chat model) through `NVIDIA_API_KEY_FILE`; keys are never in the unit, the environment or the journal. Optional `/etc/techgist/env` with `NTFY_TOPIC=...`. |
+| Keys | `/etc/techgist/` (`root:techgist`, directory 750, files 640). The worker reads `hub_key` (GPT and Gemini on the inference hub: card writing, fact-check, clustering judge, screening) through `HUB_API_KEY_FILE` and `nvidia_key` (embeddings and the backup chat model) through `NVIDIA_API_KEY_FILE`; keys are never in the unit, the environment or the journal. `/etc/techgist/env` holds `NTFY_TOPIC=...`, the ntfy topic alerts go to: a secret, never in the repository. |
 | Firewall | ufw: OpenSSH, 80, 443 |
 | 1.2 decoder | `/var/lib/techgist/bin/v1decode`, built by `setup_vps.sh` with the Swift 6.2 toolchain in `/opt/swift` (static stdlib; no Docker on this box). Every publish runs it. |
 
@@ -37,19 +37,55 @@ Notes
   health.json of 21:15 beside the first. After
   the first deploy `tools/requeue.py --hours 14 --no-text` put 27 paywalled tier-1 items that had been dropped for
   too little text back in the queue, so they could start events and get briefs.
-- `deploy.sh` installs the unit files when they have changed (a new key file variable, say) before restarting,
-  and enables `techgist-watchdog.timer`.
-- `techgist-watchdog.timer` (root, every 5 min) runs `deploy/check_freshness.py` on the edition file: after 30 min
-  without a publish it alerts (ntfy when `NTFY_TOPIC` is set, else the journal) and restarts the worker, at most
-  once per 30 min. The worker unit itself restarts without a start limit. The same script takes a URL, for a cron
-  on another machine after cutover: `check_freshness.py https://raw.githubusercontent.com/.../edition/edition.json`.
+- `deploy.sh` installs every `techgist-*` unit file that has changed before restarting, keeps the worker enabled
+  and enables `techgist-watchdog.timer` and `techgist-backup.timer`.
 - Still to decide before cutover (owner): where `edition.json` and `img/` are served from. Image URLs in the
   edition point at `publish.base_url` (the GitHub raw URL), where nothing from this box is published, so they do
-  not resolve; `health.json` reports this as `edition.last.imageUrls.served: false`. And `NTFY_TOPIC` is unset, so
-  alerts are only logged.
+  not resolve; `health.json` reports this as `edition.last.imageUrls.served: false`.
 - Checking a change against real data without touching the service: copy the state with a SQLite backup, then
   `tools/eval_cards.py COPY "title words"` (writes those cards with the current prompts and prints every check)
   and `tools/recluster.py COPY --grep word` (re-clusters the copy and prints the events).
+
+## Staying up
+
+The aim: the worker keeps publishing without anyone watching, and when it cannot, the owner hears about it.
+
+| What goes wrong | What happens | Where |
+|---|---|---|
+| The worker crashes or is killed | systemd restarts it: 5 s after the first failure, then 8, 14, 22, 36 and at most 60 s. There is no start limit, so it never gives up. An ntfy alert per crash, one per 15 min in a crash loop. | `techgist-worker.service`, `techgist-alert@.service`, `deploy/alert.py` |
+| The machine reboots | The worker and both timers are enabled (`multi-user.target`, `timers.target`) and start by themselves. | `systemctl is-enabled` |
+| A tick hangs (a feed, an LLM call or an image download that never returns; a stopped process) | The worker tells systemd it is alive between a tick's stages. After 10 min of silence systemd kills and restarts it (`WatchdogSec=600`). | `worker/resilience.py` `heartbeat()` |
+| The worker is alive but has not published for 15 min, for any reason | `techgist-watchdog.timer` (root, every minute) reads the edition's `publishedAt`, restarts the worker and alerts. A worker started less than 15 min ago is left to publish; reminders every 30 min; one message when it publishes again. | `deploy/check_freshness.py` |
+| `state.db` is corrupt | The worker exits at once; on the way up the file is set aside as `state.db.corrupt-<time>` and the newest backup that passes a check is restored (or an empty state started). Alert either way. | `resilience.recover_state()` |
+| `state.db` is locked, or ticks keep failing | Each failed tick is rolled back and retried; after 5 in a row the worker alerts and exits for a clean start. | `resilience.TickGuard` |
+| The disk is full | Alert at once (hourly while it lasts); the worker keeps trying every minute. Under 1 GB or 3% free it alerts before that (`disk_low`). | `resilience.TickGuard`, `disk_low()` |
+| A memory leak | `MemoryMax=2G` ends the worker (and it restarts), not the machine. | the unit |
+| The whole VPS is down | Nothing on the VPS can say so. `deploy/check_freshness.py URL` from another machine exits non-zero; `.github/workflows/edition-freshness.yml` runs it, **manual trigger only** until the owner enables its schedule. | below |
+
+- **Alerts** go to the ntfy topic in `/etc/techgist/env` (`NTFY_TOPIC=...`, `root:techgist` 640). Subscribe to it
+  in the ntfy app. Anyone who knows the topic can read and post to it, so it is not in the repository or the
+  journal. `python3 /opt/techgist/deploy/alert.py --test` (as root) sends a labelled test message. The worker's
+  own alerts (`health.notify`) are stamped only once ntfy accepted them, so one that could not be sent is tried
+  again on the next tick.
+- **Push-alert queue** (`worker/alertq.py`, table `alert_queue` in `state.db`): every publish puts its push-alert
+  candidates in, one row per story for good. Rows survive a kill; a sent story is never queued again, under any of
+  its merged ids. No sender exists yet (R3), so rows expire after 6 h. `tools/alertq.py` shows the queue;
+  `health.json` has `alertQueue`. A sender must pass a row's `collapse_id` as `apns-collapse-id`: a send cut off
+  by a crash is offered once more after 5 min, and that header is what keeps it to one alert on the phone.
+- **Pruning** (`worker/maintenance.py`, once a day inside the worker): poll and prefilter logs over 7 days, the
+  write log and publish rows over 14, embeddings and the stored article/feed text of items over 30. Item rows
+  themselves stay (a known URL must stay known).
+- **Backups**: `techgist-backup.timer` (03:40 UTC) runs `deploy/backup_state.py` as `techgist`: one consistent
+  snapshot, integrity-checked, into `backups/nightly/`, newest 7 kept. Hand-made `backups/state-<time>.db` files
+  are thinned to the newest 5 by the same run; `run1-*` and saved editions are never touched. By hand before a
+  risky change: `sudo -u techgist python3 /opt/techgist/deploy/backup_state.py --state /var/lib/techgist --label x`.
+- **Stopping the worker on purpose** for more than 15 min: `systemctl stop techgist-watchdog.timer` too, or the
+  watchdog starts it again.
+- **From another machine** (needs only Python 3 and `deploy/alert.py` beside it):
+  `check_freshness.py https://raw.githubusercontent.com/<owner>/<repo>/edition/edition.json --max-age-min 25 --alert`
+  exits 0 fresh, 1 stale, 2 unreachable. It also reads the `health.json` published beside the edition. Until
+  cutover that URL is the old publisher's edition, and nothing from the VPS is reachable from outside.
+- Not tested: a reboot (the unrelated site lives on this machine). Boot behaviour rests on the units being enabled.
 
 ## Cutover rehearsal and rollback
 
@@ -79,8 +115,7 @@ sudo -u techgist env TECHGIST_STATE=/var/lib/techgist venv/bin/python tools/rehe
 
 Cutover, once step 2 passes: on the old box comment out the two `publish.sh` cron lines; on the VPS install the
 real repository's deploy key, set `publish.git_remote` and `publish.deploy_key` in `config.yaml` (`deploy.sh`
-refuses a non-null remote on purpose: remove that guard in the same commit), set `NTFY_TOPIC` in
-`/etc/techgist/env`, deploy, and watch `journalctl -u techgist-worker -f` for `mirror_pushed`.
+refuses a non-null remote on purpose: remove that guard in the same commit), deploy, and watch `journalctl -u techgist-worker -f` for `mirror_pushed`.
 
 Rollback: on the VPS set `publish.git_remote: null` and deploy (or `systemctl stop techgist-worker`); on the old
 box restore the two `publish.sh` cron lines and run `~/TechShorts/server/publish.sh --log` once. Its next push

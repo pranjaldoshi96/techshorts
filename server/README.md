@@ -193,8 +193,9 @@ to `publish.sh` and is not read by the worker.)
   more than 20 LLM 429s an hour or any 401/403, 10+ LLM timeouts/5xx an hour, the 1.2 decoder check failing, a
   source failing 6 polls in a row, more than 10% of stories (events) at raw importance ≥ 8, the primary LLM
   endpoint being answered by a backup (`llm_backup`), the embedding endpoint failing 5 ticks in a row, and the
-  systemd unit failing (`techgist-alert@.service`). On the VPS `techgist-watchdog.timer` also checks the
-  edition's age from outside the worker every 5 min and restarts it after 30 min without a publish. A low pass rate is an alert only, never degraded mode; an endpoint that
+  systemd unit failing (`techgist-alert@.service`), a nearly full disk, a corrupt `state.db` and ticks that keep
+  failing. On the VPS `techgist-watchdog.timer` also checks the edition's age from outside the worker every
+  minute and restarts it after 15 min without a publish (`deploy/README.md`, "Staying up"). A low pass rate is an alert only, never degraded mode; an endpoint that
   times out more than it answers for 15 min is (`degraded.py`).
 
 ### Cutover (WP5, owner)

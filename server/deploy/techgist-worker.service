@@ -1,13 +1,15 @@
-# System unit for the Techgist worker on the public VPS (deploy/README.md). Installed by deploy/setup_vps.sh as
-# /etc/systemd/system/techgist-worker.service. The user unit one directory up is for the old private box.
+# System unit for the Techgist worker on the public VPS (deploy/README.md). Installed by deploy/setup_vps.sh and
+# deploy/deploy.sh as /etc/systemd/system/techgist-worker.service. The user unit one directory up is for the old
+# private box.
 [Unit]
 Description=Techgist worker (fetch, write, rank, publish)
 After=network-online.target
 Wants=network-online.target
+# Runs on every failure, also when Restart= is about to bring the worker back (systemd 255 triggers OnFailure= on
+# each failed exit): the owner hears about a crash, and deploy/alert.py keeps a crash loop to one message per 15 min.
 OnFailure=techgist-alert@%n.service
-# Restart forever. With a start limit (5 starts in 10 min) systemd gave up for good after a crash loop, and with
-# NTFY_TOPIC unset nobody was told: the worker stayed down until someone looked. A crash loop is now noticed by
-# techgist-watchdog.timer, which checks the edition's age from outside the worker and alerts.
+# No start limit: with one (5 starts in 10 min) systemd gave up for good after a crash loop and the worker stayed
+# down until someone looked. It is restarted for ever, with a delay that grows so a crash loop does not spin.
 StartLimitIntervalSec=0
 
 [Service]
@@ -20,11 +22,30 @@ Environment=PYTHONUNBUFFERED=1
 # The key is read from the file at start; it is never in the environment, the unit or the journal.
 Environment=NVIDIA_API_KEY_FILE=/etc/techgist/nvidia_key
 Environment=HUB_API_KEY_FILE=/etc/techgist/hub_key
-# Optional NTFY_TOPIC=... (root:techgist, mode 640).
+# NTFY_TOPIC=... for alerts (root:techgist, mode 640). The topic is a secret and is not in the repository.
 EnvironmentFile=-/etc/techgist/env
 ExecStart=/opt/techgist/venv/bin/python -m worker.main --out /var/lib/techgist/edition
+# Always restarted, whatever the exit: 5 s after the first failure, then longer each time up to 60 s
+# (5, 8, 14, 22, 36, 60, 60, ...). The count starts again when the unit is started by hand, by a deploy or by
+# the watchdog timer.
 Restart=always
-RestartSec=15
+RestartSec=5
+RestartSteps=5
+RestartMaxDelaySec=60
+# The worker tells systemd it is alive at the start and end of every tick and between a tick's stages
+# (worker/resilience.py). Ten minutes of silence means a stage is hung (a network or LLM call that never returns,
+# a deadlock, a stopped process): it is killed and restarted. The slowest stage seen in the test runs took 5 min.
+WatchdogSec=600
+WatchdogSignal=SIGKILL
+NotifyAccess=main
+# A stop that does not finish in 30 s is killed, so a restart never waits on a hung process.
+TimeoutStopSec=30
+# /run/techgist (tmpfs): where the worker remembers which alerts it sent, usable with a full disk.
+RuntimeDirectory=techgist
+RuntimeDirectoryPreserve=yes
+# A leak ends this service (and it restarts), not the machine: the box also serves an unrelated site and has no
+# swap. The worker uses under 200 MB.
+MemoryMax=2G
 # The worker only needs its state directory, outbound HTTPS and the key files.
 NoNewPrivileges=true
 ProtectSystem=strict

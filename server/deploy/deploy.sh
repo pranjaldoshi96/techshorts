@@ -24,7 +24,8 @@ if [ "${1:-}" = "--setup" ]; then
     echo "setup running on the VPS; follow /var/log/techgist-setup.log, then: systemctl restart techgist-worker"
     exit 0
 fi
-# The unit file is part of the deploy: a changed one (a new key file, say) is installed before the restart.
-"${SSH[@]}" "$HOST" 'changed=0; for u in techgist-worker.service techgist-alert@.service techgist-watchdog.service techgist-watchdog.timer; do cmp -s /opt/techgist/deploy/$u /etc/systemd/system/$u || { install -m 644 /opt/techgist/deploy/$u /etc/systemd/system/ && changed=1; }; done; [ $changed = 1 ] && systemctl daemon-reload; systemctl enable --now techgist-watchdog.timer >/dev/null 2>&1; true' </dev/null
+# The unit files are part of the deploy: a changed one (a new key file, a restart policy) is installed before the
+# restart, and the watchdog and backup timers are enabled. The worker itself stays enabled, so it starts at boot.
+"${SSH[@]}" "$HOST" 'changed=0; for f in /opt/techgist/deploy/techgist-*.service /opt/techgist/deploy/techgist-*.timer; do u=$(basename "$f"); cmp -s "$f" "/etc/systemd/system/$u" || { install -m 644 "$f" /etc/systemd/system/ && changed=1; }; done; [ $changed = 1 ] && systemctl daemon-reload; systemctl enable techgist-worker >/dev/null 2>&1; systemctl enable --now techgist-watchdog.timer techgist-backup.timer >/dev/null 2>&1; [ $changed = 1 ] && systemctl restart techgist-watchdog.timer; true' </dev/null
 "${SSH[@]}" "$HOST" "/opt/techgist/venv/bin/python -m compileall -q /opt/techgist/worker /opt/techgist/tools >/dev/null; systemctl restart techgist-worker && sleep 3 && systemctl is-active techgist-worker" </dev/null
 echo "deployed $REV"

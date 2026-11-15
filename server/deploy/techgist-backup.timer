@@ -1,0 +1,11 @@
+[Unit]
+Description=Techgist nightly state backup
+
+[Timer]
+OnCalendar=*-*-* 03:40:00 UTC
+RandomizedDelaySec=5min
+# A backup missed while the machine was off is taken at the next boot.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
