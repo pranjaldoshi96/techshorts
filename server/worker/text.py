@@ -267,9 +267,12 @@ def page_published(page_html):
         if value and _ISO_TIME.match(value):
             value = re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", value.replace("Z", "+00:00"))
             try:
-                return datetime.fromisoformat(value).astimezone(timezone.utc).replace(microsecond=0)
+                at = datetime.fromisoformat(value)
             except ValueError:
                 continue
+            if (at.hour, at.minute, at.second) == (0, 0, 0):
+                continue        # midnight on the dot is a date wearing a timestamp ("2026-11-10T00:00:00Z")
+            return at.astimezone(timezone.utc).replace(microsecond=0)
     return None
 
 

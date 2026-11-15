@@ -224,6 +224,7 @@ class Candidate:
     lead_publisher: str = None      # v1_name, for the diversity caps
     lead_reads: bool = False
     lead_tier1: bool = False
+    lead_dev: bool = False          # the lead's source writes for developers (sources.yaml `desk: dev`)
     ai_text: bool = True            # validated headline + summary exist
     classified: bool = True
     image_hash: str = None          # dHash hex of the real (not generated) image
@@ -459,7 +460,7 @@ def eligible(c, tab, now, degraded=False):
     # round) and to consumer AI apps, so it must be the main topic, or come second on release notes or a tutorial.
     if tab.id == "dev":
         dev = ("dev_tools" in topics and c.type not in NOT_DEV_TYPES
-               and (c.topics[0] == "dev_tools" or c.type in ("release_notes", "tutorial")))
+               and (c.topics[0] == "dev_tools" or c.type in ("release_notes", "tutorial") or c.lead_dev))
         sec = "security" in topics and c.type == "security_incident" and dev_security(c)
         if not (dev or sec):
             return "topic"

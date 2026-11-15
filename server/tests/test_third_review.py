@@ -730,3 +730,56 @@ def test_cards_without_a_photo_each_get_their_own_generated_picture(tmp_path):
     assert len(pictures) == len(items) and len(set(pictures)) == len(pictures)
     assert all("/img/gen_ai_" in p for p in pictures)
     assert publish_v1.build(ctx, None, str(tmp_path))[0]["articles"] == edition["articles"]      # and stable
+
+
+# 10. The Dev tab: developer outlets' stories are Dev news, and feeds that cannot yield a card are gone
+
+def test_a_developer_outlets_story_is_dev_news_with_dev_tools_anywhere():
+    """The review's Dev tab had three cards under 24 h. InfoQ's "Uber builds AI agent security beyond access
+    permissions" and JetBrains' "AI models bash Python but rally behind PHP" were [ai, dev_tools]: AI, or no tab."""
+    dev = rank.TABS["dev"]
+    by_id = SRCS.by_id()
+    for sid in ("infoq", "thenewstack", "lwn", "phoronix", "jetbrains", "github", "cloudflare", "rust_blog"):
+        assert by_id[sid].desk == "dev", sid
+    assert by_id["techcrunch"].desk == "" and by_id["openai"].desk == ""
+    story = dict(importance=4, topics=("ai", "dev_tools"), type="news")
+    assert rank.eligible(_cand("x", **story), dev, NOW) == "topic"                   # from a general outlet: AI news
+    assert rank.eligible(_cand("x", lead_dev=True, **story), dev, NOW) is None
+    # Still developer news only: the topic must be there, and company news is not.
+    assert rank.eligible(_cand("x", lead_dev=True, importance=6, topics=("ai", "security")), dev, NOW) == "topic"
+    assert rank.eligible(_cand("x", lead_dev=True, importance=6, type="funding", topics=("ai", "dev_tools")), dev,
+                         NOW) == "topic"
+    # ... and it is filed under Dev, where a general outlet's [ai, dev_tools] story stays under AI.
+    placed = [("ai", 20, 30), ("dev", 2, 12)]
+    assert publish_v1.v1_category(_cand("x", lead_dev=True, **story), placed, False) == "Dev"
+    assert publish_v1.v1_category(_cand("x", **story), placed, False) == "AI"
+    # The event's candidate carries the desk of its lead's source.
+    db = _db()
+    it = _item("https://infoq.test/uber", [1, 0, 0], "Uber builds AI agent security beyond access permissions",
+               source_id="infoq", people=(), imp=5)
+    it.topics = ["ai", "dev_tools"]
+    _written(db, [it])
+    store = cluster.Store(db, SRCS, S, NOW)
+    eid, _ = cluster.create(store, it)
+    cluster.refresh(store, store.events[eid], lambda s: True)
+    c, _ = publish_v1.event_candidate(publish_v1.Ctx(db, CTX_CFG, SRCS, NOW),
+                                      db.one("SELECT * FROM events WHERE id = ?", eid))
+    assert c.lead_dev and rank.eligible(c, dev, NOW) is None
+
+
+def test_feeds_that_cannot_yield_a_card_are_not_polled():
+    by_id = SRCS.by_id()
+    # Changelog News: newest entry 200 days old. Tech in Asia: 12 words an item in the feed, no text on the page.
+    assert "changelog" not in by_id and "techinasia" not in by_id
+    # A benchmark write-up is not a product review and an article is not a podcast (The New Stack's pieces were
+    # typed review and podcast, which never ship). Prompt change, untested against a live model.
+    assert "a benchmark, test or study that reports what it found is news or analysis" in " ".join(llm.PROMPT.split())
+    assert "an episode page or its show notes" in " ".join(llm.PROMPT.split())
+
+
+def test_a_date_wearing_a_timestamp_is_not_a_publication_time():
+    # anthropic.com: "2026-11-10T00:00:00Z" for a post of that afternoon.
+    page = '<meta property="article:published_time" content="2026-11-10T00:00:00.000Z">'
+    assert text.page_published(page) is None
+    assert text.page_published(page.replace("T00:00:00.000Z", "T00:00:00+05:30")) is None
+    assert text.page_published(page.replace("T00:00:00.000Z", "T18:00:00Z")) == from_iso("2026-11-10T18:00:00Z")

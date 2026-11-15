@@ -167,6 +167,7 @@ def event_candidate(ctx, ev):
         published_at=from_iso(ev["published_at"]), material_at=from_iso(ev["last_material_update_at"]),
         lead_source=lead["source_id"], lead_publisher=ctx.pub(lead),
         lead_reads=bool(lead_src and lead_src.reads), lead_tier1=lead_tier1, ai_text=ai_text,
+        lead_dev=bool(lead_src and lead_src.desk == "dev"),
         classified=ev["type"] is not None, boost=ctx.editorial.boost.get(ev["id"], 1.0),
         pin=frozenset(ctx.editorial.pins.get(ev["id"], ())), title=headline or lead["title"] or "",
         spice=_col(ev, "spice") or rank.SPICE_NEUTRAL,
@@ -523,6 +524,8 @@ def v1_category(c, placements, in_top):
     main topic wins when the event made it (a funding round under Startups, not under Dev because Dev was a long
     tab with weak competition); otherwise the tab where it ranks best relative to the tab's length."""
     main = PRIMARY_TAB.get((c.topics or [None])[0])
+    if c.lead_dev:
+        main = "dev"        # a developer outlet's story that made Dev is filed there, whatever topic came first
     if c.type in ("funding", "acquisition") and "startups_funding" in (c.topics or []):
         main = "startups"
     if main and any(tid == main for tid, _, _ in placements):

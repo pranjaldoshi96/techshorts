@@ -486,10 +486,13 @@ explainers, reviews, essays without news, promos.
 - type, one of: news (reporting a new fact; the default), launch (a product, model or feature release), \
 funding (a startup raise or a new VC fund), acquisition, earnings, policy (law, regulation, court or government \
 action), security_incident (breach, hack, outage, exploited vulnerability), analysis (reported analysis or \
-commentary on news), opinion (a columnist's or pundit's view), interview, review (a product review), tutorial, \
+commentary on news), opinion (a columnist's or pundit's view), interview, review (a hands-on review of a product \
+for buyers; a benchmark, test or study that reports what it found is news or analysis, not review), tutorial, \
 explainer (evergreen background), release_notes (version notes for a library, tool or app), customer_story (a \
-vendor's story about a customer using its product), podcast, promo, deal (a shopping deal), roundup (a digest or \
-newsletter issue that lists several unrelated stories), other. A profile ("Who is ..."), timeline, "what we \
+vendor's story about a customer using its product), podcast (an episode page or its show notes; an article that \
+reports what someone said or what a project released is news or interview even if a recording is attached), \
+promo, deal (a shopping deal), roundup (a digest or newsletter issue that lists several unrelated stories), \
+other. A profile ("Who is ..."), timeline, "what we \
 know" or "what happens next" piece, live blog or round-up of reactions to a known story is explainer or analysis, \
 not news, even when it is current.
 - relevance, does the story have a tech angle: 3 = tech is the story (a tech company, product, founder, \
