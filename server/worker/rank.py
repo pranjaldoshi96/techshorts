@@ -19,6 +19,38 @@ DIVERSITY_TOP10 = 2     # lead-publisher cap in ranks 1-10
 DIVERSITY_TAB = 4       # and per tab
 TUTORIAL_PER_10 = 1     # Dev: at most one tutorial per 10 cards
 IMAGE_HAMMING = 6       # dHash distance at or under which two images count as the same picture
+# One storyline (a story, its follow-ups and its look-alike angles) takes at most this many cards in a tab, the
+# freshest/highest scored first. The 2026-11 shadow Top had 3 Nvidia/Huang cards and 3 Anthropic-IPO cards.
+STORYLINE_CAP = 2
+# Dev is for developers: a dev_tools story whose main topic is dev tools or whose type is a developer release, or a
+# real security incident. Company news that merely involves a dev-tools company (funding, earnings, M&A) is not.
+DEV_TYPES = ("launch", "release_notes", "tutorial")
+NOT_DEV_TYPES = ("funding", "acquisition", "earnings")
+DEV_LABELLED_MIN = 5
+
+
+@dataclass(frozen=True)
+class Dedup:
+    """When two cards' headlines are one story (calibrated by tools/label_pairs.py on headline query vectors):
+    cosine >= `alone`, or cosine >= `t` with a shared non-org entity (person, product, amount)."""
+    alone: float
+    t: float = None
+
+    @classmethod
+    def from_cfg(cls, cfg):
+        d = (cfg or {}).get("dedup") or {}
+        return cls(alone=d.get("t_headline_alone", 0.65), t=d.get("t_headline", 0.5))
+
+    def cosine(self, a, b):
+        if a.headline_vec is None or b.headline_vec is None:
+            return None
+        return float(a.headline_vec @ b.headline_vec)
+
+    def duplicate(self, a, b):
+        cos = self.cosine(a, b)
+        if cos is None:
+            return False
+        return cos >= self.alone or (self.t is not None and cos >= self.t and bool(a.keys & b.keys))
 
 
 @dataclass(frozen=True)
@@ -80,6 +112,8 @@ class Candidate:
     classified: bool = True
     image_hash: str = None          # dHash hex of the real (not generated) image
     headline_vec: object = None     # unit vector of the headline, for the duplicate guard
+    keys: frozenset = frozenset()   # non-org entity keys of the members (cluster.entity_keys)
+    storyline: str = None           # id shared by the cards of one storyline (publish_v1.storylines)
     boost: float = 1.0              # editorial boost / bury multiplier
     pin: frozenset = frozenset()    # tabs this event is pinned to the head of
     data: dict = field(default_factory=dict)    # whatever publish_v1 needs later (lead row, text, members)
@@ -148,9 +182,16 @@ def eligible(c, tab, now):
     if tab.id == "india" and not (c.region == "in" or "india" in topics):
         return "topic"
     # Dev is developer news: dev tools, or a real security incident (the LLM also tags "security" for national or
-    # physical safety stories, which don't belong here).
-    if tab.id == "dev" and not ("dev_tools" in topics or ("security" in topics and c.type == "security_incident")):
-        return "topic"
+    # physical safety stories, which don't belong here). The LLM adds dev_tools to much company news (a rocket
+    # launch, CoreWeave earnings, a bike startup's round), so it must be the main topic or come with a developer
+    # release type.
+    if tab.id == "dev":
+        dev = ("dev_tools" in topics and c.type not in NOT_DEV_TYPES
+               and (c.topics[0] == "dev_tools" or c.type in DEV_TYPES))
+        if not (dev or ("security" in topics and c.type == "security_incident")):
+            return "topic"
+        if c.type in LABELLED and c.importance < DEV_LABELLED_MIN:
+            return "importance"
     if tab.id == "reads" and not c.lead_reads:
         return "not_reads"
     return None
@@ -161,8 +202,9 @@ def hamming(a, b):
 
 
 def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None):
-    """Filter → drop below 25% of the median → sort → duplicate guard → diversity → image dedupe → cap. Never
-    pads. Returns [(candidate, score)] in rank order."""
+    """Filter → drop below 25% of the median → sort → duplicate guard → diversity → storyline → image dedupe →
+    cap. Never pads. Returns [(candidate, score)] in rank order. `dup_threshold` is a Dedup, or a bare cosine."""
+    dedup = dup_threshold if isinstance(dup_threshold, Dedup) or dup_threshold is None else Dedup(dup_threshold)
     pool = []
     for c in cands:
         # An owner's pin is a decision, not a signal: it skips the filters too.
@@ -180,16 +222,16 @@ def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None):
     pool = [(c, s) for c, s in pool if tab.id not in c.pin and s >= YIELD_FLOOR * med]
     pool.sort(key=lambda x: (-x[1], x[0].id))
     out = list(pinned)
-    per_pub, tutorials = {}, 0
+    per_pub, per_story, tutorials = {}, {}, 0
     for c, _ in pinned:
         pub = c.lead_publisher or c.lead_source
         per_pub[pub] = per_pub.get(pub, 0) + 1
+        if c.storyline:
+            per_story[c.storyline] = per_story.get(c.storyline, 0) + 1
 
     def is_duplicate(c):
         # The merge pass should have joined these, but the feed must never show one story twice (spec 8 WP4 AC).
-        # Headline vectors are query embeddings, where no labelled different-event fixture pair reaches T_join.
-        return dup_threshold is not None and c.headline_vec is not None and any(
-            o.headline_vec is not None and float(c.headline_vec @ o.headline_vec) >= dup_threshold for o, _ in out)
+        return dedup is not None and any(dedup.duplicate(c, o) for o, _ in out)
 
     def blocked(c, relax):
         """Why `c` can't take the next rank now (it may later), or None."""
@@ -197,6 +239,8 @@ def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None):
         cap = DIVERSITY_TAB if relax or len(out) >= 10 else DIVERSITY_TOP10
         if per_pub.get(pub, 0) >= cap:
             return "diversity"
+        if c.storyline and per_story.get(c.storyline, 0) >= STORYLINE_CAP:
+            return "storyline"
         if tab.id == "dev" and c.type == "tutorial" and tutorials >= TUTORIAL_PER_10 * (1 + len(out) // 10):
             return "tutorial_cap"
         if len(out) < 10 and c.image_hash and any(
@@ -232,6 +276,8 @@ def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None):
         out.append((c, s))
         pub = c.lead_publisher or c.lead_source
         per_pub[pub] = per_pub.get(pub, 0) + 1
+        if c.storyline:
+            per_story[c.storyline] = per_story.get(c.storyline, 0) + 1
         tutorials += c.type == "tutorial"
     return out
 

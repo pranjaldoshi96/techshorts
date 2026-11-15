@@ -236,6 +236,17 @@ def thresholds(rows, vecs, pv="passage", qv="query"):
     return {k: (choose(c), c) for k, c in curves.items()}, pp
 
 
+def dedup_thresholds(rows, vecs, qv="query"):
+    """The edition's headline rules (config.yaml `dedup`), on query vectors of the titles (a card's headline is
+    embedded as a query): t_headline = cosine AND a shared non-org entity, t_headline_alone = cosine alone (both
+    same vs different), t_storyline = cosine AND entity, same-or-related vs different."""
+    pairs = load_pairs()
+    qq = scores(rows, vecs, pairs, qv)
+    curves = {"t_headline": curve(gated(rows, qq)), "t_headline_alone": curve(qq),
+              "t_storyline": curve(gated(rows, qq), positive=("same", "related"))}
+    return {k: (choose(c), c) for k, c in curves.items()}
+
+
 def _table(title, c, lo, hi):
     print(f"\n{title}")
     print("| cosine >= | same kept | different kept | precision | recall |")
@@ -271,6 +282,15 @@ def report(rows, vecs, pv="passage", qv="query", write=False):
     print("\nClosest different-event pairs under the join rule:")
     for s, p in top_fp:
         print(f"  {s:.3f}  {p['a_title'][:55]!r} ~ {p['b_title'][:55]!r}  [{p['why']}]")
+    dd = dedup_thresholds(rows, vecs)
+    _table("Headline duplicate guard: query cosine AND a shared entity (same vs different):", dd["t_headline"][1],
+           0.40, 0.71)
+    _table("Headline duplicate guard: query cosine alone (same vs different):", dd["t_headline_alone"][1], 0.40, 0.71)
+    _table("Storylines: query cosine AND a shared entity (same-or-related vs different):", dd["t_storyline"][1],
+           0.35, 0.61)
+    for name, (t, c) in dd.items():
+        tp, fp, p, r = at(c, t) if t is not None else (0, 0, 0, 0)
+        print(f"dedup.{name} at precision >= {PRECISION}: {t}  (precision {p:.3f}, recall {r:.3f})")
     values = {k: v[0] for k, v in th.items()}
     if write and None not in values.values():
         write_config(**values)

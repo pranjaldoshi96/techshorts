@@ -34,7 +34,10 @@ llm:
   daily_budget: 3000
   rate_per_min: 30
   concurrency: 6
-  timeout_s: 45
+  # 30 s, not 45: healthy write calls took p50 6.8 s, p95 19.3 s, p99 27.6 s in the 2026-11 shadow run, and every
+  # timeout came from a stalled endpoint (all at ~45 s, in bursts). A timeout is not retried, and two in a row open
+  # a per-tick circuit (llm.Client), so a slow endpoint costs a tick ~30 s instead of up to 460 s.
+  timeout_s: 30
   # Caps one tick's LLM stage at about a minute of the rate limit, so polling isn't starved during a backlog.
   max_items_per_tick: 18
 embed:
@@ -60,6 +63,19 @@ cluster:
   alias_days: 30
   max_candidates: 5
   rewrite_cap_h: 2
+
+# The edition's duplicate guard and storyline grouping (publish_v1, rank.Dedup) compare the headline each card shows,
+# embedded as a query. Spec 2.12/8 used T_join for this, but T_join was calibrated for passage vectors plus a shared
+# entity; on short headlines it fired on distinct stories ("Workday outage locks millions out" vs "Microsoft
+# Outlook hit by new outage" = 0.54) and hid them. From `tools/label_pairs.py --report` on query vectors of the
+# labelled fixture titles: t_headline (with a shared non-org entity) 0.49 -> 0.5; cosine alone 0.59 at precision
+# 0.97 on the fixture, raised to 0.65 because the shadow run showed a different-angle pair at 0.585. A storyline
+# (same-or-related, with an entity) caps a tab at rank.STORYLINE_CAP cards; it only holds cards back, so it uses
+# the 0.95-precision point, 0.45.
+dedup:
+  t_headline: 0.5
+  t_headline_alone: 0.65
+  t_storyline: 0.45
 
 # v1 publish (WP4, spec 2.13). The worker writes edition.json, health.json and img/ into out_dir (default
 # <state_dir>/edition; `--out` overrides). base_url is where that directory is served from: image URLs in the edition

@@ -22,6 +22,14 @@ TITLE_RULES = [
     ("title_podcast", r"\b(podcast|episode)\b"),
     ("title_gift_guide", r"\bgift guide\b"),
     ("title_best_to_buy", r"\bbest .* (to buy|for 20\d\d)\b"),
+    # Roundups, digests and live blogs: the LLM summarises one item of the list as if it were the story (Entrackr's
+    # weekly funding list became a single "Greenjoules raises" card; NYT's "Here's the latest." was rated 9).
+    ("title_roundup", "|".join([
+        r"\bthis week\s*:", r"\btop \d+ (stories|news|headlines|reads)\b", r"\b(roundup|round-up|recap|digest)\b",
+        r"\bweek in review\b", r"\bnewsletter\b", r"^here's the latest\b", r"\bfunding and acquisitions\b.*\bweek\b",
+        r"\bweekly (funding|report|wrap)\b", r"\bquiz\b", r"\blive updates?\b",
+    ])),
+
     # Ported from the 1.2 app's ContentFilter (FeedService.swift), which the live edition still uses.
     ("v1_title", "|".join([
         r"\d+% off", r"\$\d+ off", r"\bon sale\b", r"\b(best|lowest) price", r"all-time low", r"black friday",
@@ -32,8 +40,13 @@ TITLE_RULES = [
     ])),
 ]
 V1_PATH = re.compile(r"/deals?/|deal-sale|-deals$|coupon|gift-guide|/sponsored", re.I)
+ROUNDUP_PATH = re.compile(r"(funding|deals|stories|news)[a-z-]*-this-week\b|/newsletters?/|/live-updates?/|"
+                          r"-week-in-review\b|/roundup/", re.I)
 
 _TITLE = [(name, re.compile(rx, re.I)) for name, rx in TITLE_RULES]
+# "Jensen Huang exits Nvidia after 33 years; Kia India plans $2B investment": two stories joined by ";", the second
+# starting with a name (case-sensitive, so "...; consultation open till December" is one story).
+DIGEST = re.compile(r"^[^;]{20,};\s*[A-Z][\w.&'-]*\s[^;]{12,}$")
 
 
 def normalize_title(title):
@@ -49,8 +62,12 @@ def check(title, url):
             return "url" + p.rstrip("/").replace("/", "_")
     if V1_PATH.search(path):
         return "v1_path"
+    if ROUNDUP_PATH.search(path):
+        return "url_roundup"
     t = normalize_title(title)
     for name, rx in _TITLE:
         if rx.search(t):
             return name
+    if DIGEST.search(t):
+        return "title_digest"
     return None

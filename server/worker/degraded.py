@@ -3,8 +3,13 @@
 Edition-wide outage, from the write_log the LLM stage already keeps:
   - auth:      the latest chat call got 401/403 (key revoked or expired), until a call succeeds again;
   - 429 storm: >= 10 rate-limit replies in 15 min and more of them than successful calls;
-  - pass rate: under 50% of item outcomes passing over the last 30 min (at least 6 outcomes);
+  - timeouts:  >= 5 chat timeouts, connection errors or 5xx in 15 min and more of them than successful calls;
   - no_key:    the worker has no key or model at all.
+Spec 2.14 also lists "a pass rate below 50% for 30 min". It is left out on purpose: a validation failure is a text
+problem, not an outage, and failing items already publish degraded one event at a time (spec 2.8). In the 2026-11
+shadow run it flagged 24 editions degraded while at most 3 of ~65 cards lacked AI text, and switched ranking to
+the outage formula; its real outage case, a slow or failing endpoint, is the `timeouts` condition. The pass rate
+stays an alert (health.alerts).
 Per event, outside an outage: an event whose lead's text failed validation still publishes in degraded form when
 it has >= 2 publishers or a tier-1 lead (spec 2.8 "Degraded publish"), so an important story is never hidden only
 because the AI text failed.
@@ -19,7 +24,13 @@ from . import text as text_mod
 
 EXCERPT_WORDS = 55
 STORM_WINDOW, STORM_MIN = timedelta(minutes=15), 10
-PASS_WINDOW, PASS_MIN_OUTCOMES, PASS_FLOOR = timedelta(minutes=30), 6, 0.5
+TIMEOUT_MIN = 5
+_FAILURE_OUTCOMES = ("ReadTimeout", "ConnectTimeout", "Timeout", "ConnectionError")
+
+
+def endpoint_failure(outcome):
+    """A chat outcome that says the endpoint is slow or down (not the key, not the text)."""
+    return outcome in _FAILURE_OUTCOMES or bool(outcome and outcome.startswith("http_5"))
 PROBE_EVERY = timedelta(minutes=10)
 
 
@@ -66,10 +77,9 @@ def llm_outage(db, now, have_client=True):
     n429 = sum(r["outcome"] == "http_429" for r in calls)
     if n429 >= STORM_MIN and n429 > sum(r["outcome"] == "ok" for r in calls):
         return "rate_limited"
-    items = db.q("SELECT outcome FROM write_log WHERE at >= ? AND kind = 'item' AND outcome IN ('ok', 'failed')",
-                 iso(now - PASS_WINDOW))
-    if len(items) >= PASS_MIN_OUTCOMES and sum(r["outcome"] == "ok" for r in items) / len(items) < PASS_FLOOR:
-        return "pass_rate"
+    failing = sum(endpoint_failure(r["outcome"]) for r in calls)
+    if failing >= TIMEOUT_MIN and failing > sum(r["outcome"] == "ok" for r in calls):
+        return "timeouts"
     return None
 
 
@@ -77,11 +87,9 @@ def outage_since(db, reason, now):
     """When the LLM stopped seeing new items, or None for "never saw any" (no_key). Only items first seen after
     this publish as outage singletons: anything older the LLM already judged, and that judgement stands.
     For auth it is the last success (chat ok or key check ok); with none on record, the first auth failure.
-    The 429 storm and pass-rate outages are judged over a window, so their start is that window's start."""
-    if reason == "rate_limited":
+    The 429 storm and timeout outages are judged over a window, so their start is that window's start."""
+    if reason in ("rate_limited", "timeouts"):
         return now - STORM_WINDOW
-    if reason == "pass_rate":
-        return now - PASS_WINDOW
     if reason != "auth":
         return None
     ok = db.one("SELECT MAX(at) at FROM write_log WHERE kind != 'item' AND outcome = 'ok'")["at"]

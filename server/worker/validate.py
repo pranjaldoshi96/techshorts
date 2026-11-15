@@ -46,6 +46,16 @@ analysts investors users developers customers critics officials experts shares s
 
 _WORD_SPLIT = re.compile(r"[\s/()\[\]\"“”‘—–]+")
 
+# A source title that is someone's claim ("Anthropic can retrain Mythos cheaply, says former researcher"): a
+# headline whose subject isn't that speaker must keep the attribution.
+TITLE_CLAIM = re.compile(r"\b(says|said|claims|claimed)\b", re.I)
+# Repetition: s1 must add to the headline, and no two sentences may say the same thing. Shares are over content
+# words (>= 3 letters, not function words). In the 2026-11 shadow edition 20 of 61 cards opened with an s1 that
+# restated the headline, so a 50-word card carried about 35 words of news.
+S1_HEADLINE_MAX = 0.6
+SENTENCE_JACCARD_MAX = 0.5
+REPORT_PREFIX = "Report: "
+
 
 def word_count(s):
     return len((s or "").split())
@@ -101,10 +111,14 @@ def trim(s1, s2, s3):
     return full, short, problems
 
 
-def select(out, attribution=None):
+def select(out, attribution=None, hedge_source=None):
     """Picks, per sentence, the model's version or its shorter `_alt`, so the summary fits: the combination
     inside both ranges that is closest to the 52/36 targets, else the closest one (whose problems then become
-    retry feedback). Likewise the headline. Mutates and returns `out`; text is chosen, never cut."""
+    retry feedback). Likewise the headline. Mutates and returns `out`; text is chosen, never cut.
+
+    With `hedge_source` (hedge_scope(title, text)), a headline that keeps the source's hedge wins over one that
+    drops it; when every offered headline drops it, the best one gets the "Report: " label, the same way code adds
+    "Analysis:". The model's feedback retry fixed only about half of the hedge_dropped failures."""
     def options(name):
         out_ = [getattr(out, name)]
         for v in (getattr(out, name + "_alt", ""), getattr(out, name + "_long", "")):
@@ -129,7 +143,8 @@ def select(out, attribution=None):
                 n_short, n_full = word_count(join(s1, s2)), word_count(join(s1, s2, s3))
                 miss = (max(0, SHORT_MIN - n_short, n_short - SHORT_MAX)
                         + max(0, FULL_MIN - n_full, n_full - FULL_MAX))
-                bad = style(s1) + style(s2) + (style(s3) if s3 else 0)
+                bad = style(s1) + style(s2) + (style(s3) if s3 else 0) + len(
+                    repeat_problems(out.headline, s1, s2, s3))
                 key = ((bad > 0) + (miss > 0), bad, miss, abs(n_full - FULL_TARGET) + abs(n_short - SHORT_TARGET))
                 if best is None or key < best[0]:
                     best = (key, s1, s2, s3)
@@ -155,6 +170,14 @@ def select(out, attribution=None):
             return f"{attribution.prefix} {rest[:1].upper()}{rest[1:]}"
         candidates = [prefixed(h) for h in candidates]
     fitting = [h for h in candidates if not headline_problems(h)] or [h for h in candidates if len(h) <= HEADLINE_MAX]
+    if hedge_source and fitting:
+        hedged = [h for h in fitting if not hedge_problem(h, hedge_source)]
+        if hedged:
+            fitting = hedged
+        else:
+            labelled = [REPORT_PREFIX + h for h in fitting if not PREFIX.match(h)]
+            labelled = [h for h in labelled if not headline_problems(h)]
+            fitting = labelled + fitting
     out.headline = fitting[0] if fitting else candidates[0] if candidates else out.headline
     return out
 
@@ -295,6 +318,60 @@ def hedge_dropped(headline, source):
     return None
 
 
+def hedge_scope(title, text):
+    """What the hedge rule reads: the source title and the opening of its text (HEDGE_SCOPE_WORDS)."""
+    return f"{title}\n" + " ".join((text or "").split()[:HEDGE_SCOPE_WORDS])
+
+
+def title_claim_dropped(headline, title):
+    """A title that reports someone's claim ("X, says Y" / "Y says X") binds a headline whose subject isn't the
+    speaker: "Anthropic can retrain Mythos cheaply, says former researcher Coxon" can't ship as "Anthropic can
+    retrain Mythos cheaply". Returns ("says", title) for a dropped attribution, or None."""
+    if not title or HEDGE_KEPT.search(headline or "") or PREFIX.match(headline or ""):
+        return None
+    m = TITLE_CLAIM.search(title)
+    if not m:
+        return None
+    before, after = title[:m.start()].rstrip(), title[m.end():].strip()
+    if not before or before.endswith((",", "-", "—", ":")):
+        speaker = after                 # "claim, says X"
+    elif "," in before:
+        speaker = before.rsplit(",", 1)[1]      # "claim, X says"
+    else:
+        speaker = before                # "X says claim"
+    words = {w.lower() for w in re.findall(r"[\w’']+", speaker) if len(w) >= 3}
+    head = [w.lower().split("'")[0].split("’")[0] for w in re.findall(r"[\w’']+", headline or "")]
+    if not words or any(_same_entity(h, w) for h in head for w in words):
+        return None                     # the speaker is named: their own claim, or attributed
+    return m.group(1).lower(), title
+
+
+def hedge_problem(headline, scope):
+    """hedge_dropped over the hedge scope, plus the title's own claim attribution. (word, snippet) or None."""
+    return hedge_dropped(headline, scope) or title_claim_dropped(headline, scope.split("\n", 1)[0])
+
+
+def _content(s):
+    return {w.rstrip("s") for w in re.findall(r"[a-z0-9$%.]+", (s or "").lower().replace("’", "'"))
+            if len(w) >= 3 and w not in FUNCTION_WORDS}
+
+
+def repeat_problems(headline, s1, s2, s3=""):
+    """s1 restating the headline, or two sentences saying the same thing. [(code, feedback)]."""
+    out = []
+    c1, ch = _content(s1), _content(headline)
+    if c1 and ch and len(c1 & ch) / len(c1) >= S1_HEADLINE_MAX:
+        out.append(("repeats_headline", "S1 repeats the headline; the reader has just read it. Open S1 with what "
+                                        "the headline lacks: the key number, who, when or how."))
+    sents = [("S1", c1), ("S2", _content(s2))] + ([("S3", _content(s3))] if s3 else [])
+    for i, (na, a) in enumerate(sents):
+        for nb, b in sents[i + 1:]:
+            if a and b and len(a & b) / len(a | b) > SENTENCE_JACCARD_MAX:
+                out.append(("repeats_sentence", f"{na} and {nb} say the same thing; give {nb} a different fact "
+                                                 f"from the text."))
+    return out
+
+
 def hedges_in(source, limit=3):
     """Snippets around the source's hedges, for the prompt: telling the model up front is cheaper than a retry."""
     out = []
@@ -387,8 +464,9 @@ def check(out, source_text, title, source_name, attribution=None, author=None, l
     ok, bad = grounded(f"{full} {notif}", source, allowed, headline=out.headline or "")
     if not ok:
         v.fail("ungrounded", f"'{bad}' is not in the source text; use only facts from the text.")
-    opening = " ".join((lead or source_text or "").split()[:HEDGE_SCOPE_WORDS])
-    dropped = hedge_dropped(out.headline or "", f"{title}\n{opening}")
+    for code, msg in repeat_problems(out.headline, out.s1, out.s2, out.s3):
+        v.fail(code, msg)
+    dropped = hedge_problem(out.headline or "", hedge_scope(title, lead or source_text))
     if dropped:
         v.fail("hedge_dropped", f"Headline drops '{dropped[0]}'; keep the hedge. The source says: "
                                 f"\"...{dropped[1]}...\". Keep that word or attribute the claim "

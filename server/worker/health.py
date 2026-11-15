@@ -10,7 +10,9 @@ from datetime import timedelta
 
 import requests
 
-from . import sources as sources_mod
+from statistics import median
+
+from . import degraded as degraded_mod, sources as sources_mod
 from .db import from_iso, iso, utcnow
 
 log = logging.getLogger("techgist")
@@ -88,14 +90,43 @@ def llm_stats(db, since):
     }
 
 
-def validation_stats(db, since):
-    """Pass rate over items with enough text; thin (no_text) items are counted separately as skips."""
-    rows = db.q("SELECT outcome, reason FROM write_log WHERE at >= ? AND kind = 'item'", iso(since))
+# The pass rate is per item, on its first ladder run: one row per URL. Counting every write_log row counted a bad
+# item up to three times (its hold retries at +30 min and +2 h), and items that failed together came back together,
+# so in the 2026-11 shadow run 23 of 39 hours read under 80% while only 5 were on first attempts. LLM errors
+# (timeouts) are the endpoint's, not the text's, and are counted apart.
+FIRST_ATTEMPT = "COALESCE(attempt, 1) = 1"
+
+
+def first_attempt_rate(db, since, until=None):
+    """(passed, failed) over items whose first ladder run fell in the window."""
+    rows = db.q(f"SELECT outcome FROM write_log WHERE at >= ? AND at <= ? AND kind = 'item' AND {FIRST_ATTEMPT}"
+                " AND outcome IN ('ok', 'failed')", iso(since), iso(until) if until else "9999")
     ok = sum(r["outcome"] == "ok" for r in rows)
-    failed = sum(r["outcome"] == "failed" for r in rows)
+    return ok, len(rows) - ok
+
+
+def validation_stats(db, since):
+    """Pass rate over items with enough text, on first attempts; thin (no_text) items and LLM errors are counted
+    separately. eventualPassRate is the share of those items that passed on any attempt (hold retries)."""
+    rows = db.q("SELECT outcome, reason, attempt FROM write_log WHERE at >= ? AND kind = 'item'", iso(since))
+    ok, failed = first_attempt_rate(db, since)
+    first = db.q(f"SELECT DISTINCT url_canonical FROM write_log WHERE at >= ? AND kind = 'item' AND {FIRST_ATTEMPT}"
+                 " AND outcome IN ('ok', 'failed')", iso(since))
+    urls = [r["url_canonical"] for r in first]
+    eventual = 0
+    for i in range(0, len(urls), 500):
+        chunk = urls[i:i + 500]
+        eventual += db.one("SELECT COUNT(DISTINCT url_canonical) n FROM write_log WHERE kind = 'item' AND outcome ="
+                           f" 'ok' AND url_canonical IN ({','.join('?' * len(chunk))})", *chunk)["n"]
     skips = _count([r for r in rows if r["outcome"] != "ok"], "reason")
+    retries = [r for r in rows if (r["attempt"] or 1) > 1 and r["outcome"] in ("ok", "failed")]
     return {"window": "24h", "passed": ok, "failed": failed, "thin": sum(r["outcome"] == "thin" for r in rows),
-            "passRate": round(ok / (ok + failed), 3) if ok + failed else None, "skipReasons": skips}
+            "llmErrors": sum(r["outcome"] == "llm_error" for r in rows),
+            "passRate": round(ok / (ok + failed), 3) if ok + failed else None,
+            "eventualPassRate": round(eventual / len(urls), 3) if urls else None,
+            "retries": {"passed": sum(r["outcome"] == "ok" for r in retries),
+                        "failed": sum(r["outcome"] == "failed" for r in retries)},
+            "skipReasons": skips}
 
 
 def event_stats(db, since):
@@ -111,18 +142,29 @@ def event_stats(db, since):
 
 
 def importance_drift(db, since):
-    """Spec 2.10 drift check: the raw LLM score per item against the clamped score per event, over 24 h. ntfy
-    alerts when more than 10% of items come back raw >= 8 (the model inflating, or a prompt regression)."""
-    raw = [r["importance"] for r in db.q("SELECT importance FROM writes WHERE written_at >= ? AND importance IS NOT"
-                                         " NULL", iso(since))]
+    """Spec 2.10 drift check: the raw LLM score against the clamped score per event, over 24 h. ntfy alerts when
+    more than 10% of stories come back raw >= 8 (the model inflating, or a prompt regression).
+
+    A story is an event (the median raw score of its validated members) or an unclustered item: counted per item,
+    one big story with 50 follow-ups swamped the share in the 2026-11 shadow run (89 of 211 items at 8+ were one
+    scandal). Only validated writes count; failed and thin rows are classification-only guesses. The per-item
+    histogram stays for diagnosis."""
+    rows = db.q("SELECT w.importance, em.event_id FROM writes w LEFT JOIN event_members em USING (url_canonical)"
+                " WHERE w.written_at >= ? AND w.importance IS NOT NULL AND w.status = 'ok'", iso(since))
+    raw = [r["importance"] for r in rows]
+    stories = {}
+    for r in rows:
+        stories.setdefault(r["event_id"] or id(r), []).append(r["importance"])
+    per_story = [median(v) for v in stories.values()]
     ev = db.q("SELECT importance FROM events WHERE status = 'live' AND updated_at >= ? AND importance IS NOT NULL",
               iso(since))
     hist = lambda vals: {str(i): sum(v == i for v in vals) for i in range(1, 11)}  # noqa: E731
-    share = round(sum(v >= 8 for v in raw) / len(raw), 3) if raw else None
-    if share is not None and len(raw) >= 20 and share > 0.10:
-        notify(db, "importance_drift", f"{share:.0%} of items scored raw importance >= 8 in 24 h (limit 10%)")
+    share = round(sum(v >= 8 for v in per_story) / len(per_story), 3) if per_story else None
+    if share is not None and len(per_story) >= 20 and share > 0.10:
+        notify(db, "importance_drift", f"{share:.0%} of stories scored raw importance >= 8 in 24 h (limit 10%)")
     return {"window": "24h", "rawItems": hist(raw), "clampedEvents": hist([r["importance"] for r in ev]),
-            "rawShareAtLeast8": share}
+            "stories": len(per_story), "rawShareAtLeast8": share,
+            "itemShareAtLeast8": round(sum(v >= 8 for v in raw) / len(raw), 3) if raw else None}
 
 
 def edition_stats(db, now, publish):
@@ -143,7 +185,10 @@ def freshness(db, since):
     """Publisher-to-app lag (event_published_at -> first edition with the event) and pipeline lag (first seen ->
     first edition), over events first published in the window. A post that was already old when the worker first
     saw it (a Reads item after downtime) counts in the first only for what it is: old."""
-    rows = db.q("SELECT published_at, first_at, first_seen_at FROM shipped WHERE first_at >= ?", iso(since))
+    # A twin (the same story as an event that already shipped) isn't a first ship; it is merged away now (cluster.
+    # merge_twins), but older rows still count it 1-2 days late.
+    rows = db.q("SELECT published_at, first_at, first_seen_at FROM shipped WHERE first_at >= ?"
+                " AND event_id NOT IN (SELECT twin_id FROM twins)", iso(since))
     pub = sorted((from_iso(r["first_at"]) - from_iso(r["published_at"])).total_seconds() / 60 for r in rows)
     seen = sorted((from_iso(r["first_at"]) - from_iso(r["first_seen_at"])).total_seconds() / 60
                   for r in rows if r["first_seen_at"])
@@ -164,16 +209,17 @@ def alerts(db, now, started_at=None, top_min=12):
     last = db.one("SELECT top, ok FROM publishes ORDER BY at DESC LIMIT 1")
     if last is not None and last["ok"] and (last["top"] or 0) < top_min:
         on.append(("top_low", f"Top has {last['top']} stories (minimum {top_min})"))
-    items = db.q("SELECT outcome FROM write_log WHERE at >= ? AND kind = 'item' AND outcome IN ('ok', 'failed')",
-                 iso(now - timedelta(hours=1)))
-    if len(items) >= 10:
-        rate = sum(r["outcome"] == "ok" for r in items) / len(items)
-        if rate < 0.8:
-            on.append(("pass_rate", f"validation pass rate {rate:.0%} over 1 h (minimum 80%)"))
+    ok, failed = first_attempt_rate(db, now - timedelta(hours=1), now)
+    if ok + failed >= 10 and ok / (ok + failed) < 0.8:
+        on.append(("pass_rate", f"validation pass rate {ok / (ok + failed):.0%} over 1 h on {ok + failed} new items"
+                                f" (minimum 80%)"))
     calls = db.q("SELECT outcome FROM write_log WHERE at >= ? AND kind != 'item'", iso(now - timedelta(hours=1)))
     n429 = sum(r["outcome"] == "http_429" for r in calls)
     if n429 > 20:
         on.append(("rate_limited", f"{n429} LLM 429s in 1 h"))
+    slow = sum(degraded_mod.endpoint_failure(r["outcome"]) for r in calls)
+    if slow >= 10 and slow > sum(r["outcome"] == "ok" for r in calls) / 4:
+        on.append(("llm_timeouts", f"{slow} LLM timeouts or 5xx in 1 h"))
     key_failed = db.get_meta("key_auth_failed_at")
     if any(r["outcome"] in ("http_401", "http_403") for r in calls) or (
             key_failed and key_failed >= iso(now - timedelta(hours=1))):

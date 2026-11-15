@@ -264,16 +264,27 @@ def test_outage_from_the_per_tick_key_check():
     assert degraded.llm_outage(db, NOW + timedelta(minutes=2)) is None
 
 
-def test_outage_on_429_storm_and_low_pass_rate():
+def test_outage_on_429_storm_and_timeouts_but_not_on_a_low_pass_rate():
     db = DB(":memory:")
     for i in range(12):
         log(db, NOW - timedelta(minutes=i), "write", "http_429")
     log(db, NOW, "write", "ok")
     assert degraded.llm_outage(db, NOW) == "rate_limited"
+    # Failed validations are a text problem: alerted on (health.alerts), never an edition-wide outage.
     db = DB(":memory:")
     for i in range(8):
         log(db, NOW - timedelta(minutes=i), "item", "failed" if i < 5 else "ok")
-    assert degraded.llm_outage(db, NOW) == "pass_rate"
+    assert degraded.llm_outage(db, NOW) is None
+    # A slow endpoint is: more timeouts/5xx than answers in 15 min.
+    db = DB(":memory:")
+    for i, outcome in enumerate(["ReadTimeout"] * 4 + ["http_503", "ok", "ok"]):
+        log(db, NOW - timedelta(minutes=i), "write", outcome)
+    assert degraded.llm_outage(db, NOW) == "timeouts"
+    assert degraded.outage_since(db, "timeouts", NOW) == NOW - degraded.STORM_WINDOW
+    db = DB(":memory:")
+    for i, outcome in enumerate(["ReadTimeout"] * 5 + ["ok"] * 6):
+        log(db, NOW - timedelta(minutes=i), "write", outcome)
+    assert degraded.llm_outage(db, NOW) is None            # answers still outnumber them
 
 
 def test_degraded_excerpt_is_55_words_at_a_sentence_boundary():

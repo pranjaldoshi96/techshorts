@@ -32,6 +32,12 @@ ARTICLE = "https://example.com/2026/11/story/"
     ("Best Early Amazon Black Friday Deals (2026)", "v1_title"),
     ("The 12 best mechanical keyboards", "v1_title"),
     ("StrictlyVC comes to Bengaluru", "v1_title"),
+    # Roundups and digests (2026-11 shadow run).
+    ("MediaNama This Week: Top 10 Stories", "title_roundup"),
+    ("Here's the latest.", "title_roundup"),
+    ("Funding and acquisitions in Indian startups this week [Nov 09 - Nov 14]", "title_roundup"),
+    ("YourStory quiz edition 258", "title_roundup"),
+    ("Jensen Huang exits Nvidia after 33 years; Kia India plans $2B investment", "title_digest"),
 ])
 def test_drops_with_named_rule(title, rule):
     assert prefilter.check(title, ARTICLE) == rule
@@ -52,6 +58,9 @@ def test_drops_with_named_rule(title, rule):
     "Seagate's new hybrid drive raises some old questions",
     "Proximal Ventures raises debut fund to back startups bringing AI to drug development",
     "Reviewers flag problems in Glasswing's CVE findings",
+    "Apple to launch its first foldable iPhone this week",
+    "Nvidia's week from hell: how the Huang probe unfolded",
+    "Sebi issues AI usage guidelines for brokers; consultation open till December",
 ])
 def test_keeps_news(title):
     assert prefilter.check(title, ARTICLE) is None

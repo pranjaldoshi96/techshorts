@@ -169,6 +169,16 @@ class ModelGone(LLMError):
     """404/410: the model was retired. Skips straight to the next rung of the ladder."""
 
 
+class CircuitOpen(LLMError):
+    """The endpoint timed out BREAKER_TIMEOUTS times in a row this tick: the remaining items are left untouched for
+    the next tick instead of each blocking a worker thread for another timeout."""
+
+
+# Consecutive timeouts (across threads) that open the per-tick circuit. Reset by any answer and by reset_breaker().
+BREAKER_TIMEOUTS = 2
+TIMEOUT_OUTCOMES = ("ReadTimeout", "ConnectTimeout", "Timeout")
+
+
 class Client:
     def __init__(self, base_url, key, bucket=None, session=None, timeout=30, clock=time.monotonic,
                  sleep=time.sleep):
@@ -180,6 +190,19 @@ class Client:
         self.clock, self.sleep = clock, sleep
         self.events = []            # (kind, model, outcome, ms) for health.json; drained by the stage
         self.lock = threading.Lock()
+        self.timeouts_in_row = 0
+
+    def reset_breaker(self):
+        with self.lock:
+            self.timeouts_in_row = 0
+
+    @property
+    def circuit_open(self):
+        return self.timeouts_in_row >= BREAKER_TIMEOUTS
+
+    def _timed_out(self):
+        with self.lock:
+            self.timeouts_in_row += 1
 
     def _event(self, kind, model, outcome, ms):
         with self.lock:
@@ -196,14 +219,23 @@ class Client:
                 # Straight answer, no reasoning trace (Nemotron); other models ignore it.
                 "chat_template_kwargs": {"enable_thinking": False}}
         for attempt in range(tries):
+            if self.circuit_open:
+                raise CircuitOpen("circuit open after repeated timeouts")
             self.bucket.acquire()
             started = self.clock()
             try:
                 r = self.session.post(f"{self.base_url}/chat/completions", json=body, timeout=self.timeout,
                                       headers={"Authorization": f"Bearer {self.key}"})
+            except requests.Timeout as e:
+                # No retry: a timed-out call has already cost timeout_s, and in the 2026-11 shadow run timeouts came
+                # in bursts where the next try timed out too (3 tries x 45 s stalled ticks for up to 460 s).
+                self._event(kind, model, type(e).__name__, int((self.clock() - started) * 1000))
+                self._timed_out()
+                raise LLMError("timeout")
             except requests.RequestException as e:
                 self._event(kind, model, type(e).__name__, int((self.clock() - started) * 1000))
                 continue
+            self.reset_breaker()
             ms = int((self.clock() - started) * 1000)
             if r.status_code == 429:
                 self._event(kind, model, "http_429", ms)
@@ -263,24 +295,16 @@ its product), podcast, promo, deal (a shopping deal), other.
 - relevance, how relevant to tech professionals in Bengaluru and the Bay Area: 3 = core tech or business news; \
 2 = adjacent (science, or policy with a tech angle); 1 = tangential; 0 = off-topic (US partisan politics, \
 entertainment, celebrity, cars without a tech angle).
-- importance: 10 industry-defining. 8-9 frontier model from a top lab, >= $500M funding, a breach or outage \
-hitting millions, major regulation. 6-7 $25-500M funding (or >= $15M in India), notable launch or earnings. \
-4-5 smaller launches, open source, policy proposals, strong analysis. 1-3 how-to, reviews, explainers, promos, \
-minor updates. Calibration examples:
-  "Anthropic targets valuation of up to $1.4tn in stock market flotation" = 10, news
-  "Nvidia investigates CEO's ties to suspected Chinese spy" = 9, news
-  "CoreWeave beats on revenue and lifts guidance" = 7, earnings
-  "Daylight raises $80M Series B" = 6, funding
-  "Jim Cramer says Anthropic's explosive growth could justify a record-breaking IPO" = 4, opinion
-  "llm-gemini 0.36" (a plugin version's release notes) = 3, release_notes
-  "Gilbert + Tobin rethinks the business of law with AI" (OpenAI's story about a customer) = 2, customer_story
-  "How long do Blu-ray discs last?" = 1, explainer
+- importance: <<importance>>
 - breaking: true only for sudden, just-happened news of importance 8 or more.
 - sensitive: true when the story involves crime, espionage, sexual conduct, lawsuits, or allegations against a \
 named person.
-- topics: any of ai, startups_funding, bigtech, dev_tools, security, policy, hardware, india, science, consumer. \
-"security" means software and cyber security only (vulnerabilities, breaches, malware); not national, military, \
-physical or child safety. "dev_tools" means things developers build with (languages, frameworks, APIs, coding tools).
+- topics: any of ai, startups_funding, bigtech, dev_tools, security, policy, hardware, india, science, consumer; \
+the main topic first. "ai" whenever AI models, AI companies or AI's effects (on jobs, markets, law) are the \
+subject. "security" means software and cyber security only (vulnerabilities, breaches, malware); not national, \
+military, physical or child safety. "dev_tools" only when developers are the audience: languages, frameworks, \
+APIs, SDKs, IDEs, coding agents, cloud or devops platforms; never for a company's funding, earnings, deals, \
+hiring or leadership, nor for hardware, rockets or consumer app outages.
 - region: "us" only for US-only policy, US local news or US-market consumer news. Anything about a global company \
 or product is "global" (an Anthropic IPO, CoreWeave earnings and an Nvidia probe are all global). "in" for \
 India-market companies, Indian policy or Indian funding.
@@ -291,10 +315,11 @@ material_update: true when it adds a major new fact to that event.
 Writing:
 - headline: 50 to 70 characters. Fact-first, sentence case, active voice, present tense. The subject is the \
 company or person. Numbers as digits ($80M, $1.4T, 3x). No question, teaser, emoji or final period.
-- s1 (18 to 22 words): who did what, with the key number.
+- s1 (18 to 22 words): who did what, with the key number. The reader has just read the headline, so s1 must add \
+what it lacks (who, how much, when, how); never restate the headline.
 - s2 (16 to 20 words): the most important detail or context. S1 and S2 together stand alone as a summary.
 - s3 (15 to 19 words): the concrete consequence for builders, investors or operators.
-- Each fact once across the three sentences.
+- Each fact once across the headline and the three sentences.
 - Also give other lengths of each, same facts, still complete sentences: headline_alt (at most 55 characters) and \
 headline_short (at most 40 characters); s1_alt, s2_alt, s3_alt (11 to 14 words each); s1_long, s2_long, s3_long \
 (24 to 28 words each, adding one more specific fact from the text). Techgist picks the versions that fit the card.
@@ -375,7 +400,7 @@ class Step:
 
 @dataclass
 class WriteResult:
-    status: str                         # ok | failed | thin | thin_failed
+    status: str                         # ok | failed | llm_error | thin | thin_failed
     output: WriteOutput = None
     full: str = None
     short: str = None
@@ -386,31 +411,43 @@ class WriteResult:
     steps: list = field(default_factory=list)
 
 
-def write_item(client, cfg, item, source_name, text, attribution=None, author=None, candidates=()):
-    """Runs the ladder for one item whose text is long enough. Never raises except AuthError."""
+def write_item(client, cfg, item, source_name, text, attribution=None, author=None, candidates=(), prior=None):
+    """Runs the ladder for one item whose text is long enough. Never raises except AuthError and CircuitOpen.
+
+    `prior` is (last reply, feedback) from this item's previous ladder run, for a hold retry after a content
+    failure: the run then continues that conversation (a feedback turn at a higher temperature) instead of
+    sending the same prompt again, which in the shadow run mostly reproduced the same failure."""
     llm_cfg = cfg["llm"]
     rungs = [(1, llm_cfg["model"]), (2, llm_cfg["model"])]
     if llm_cfg.get("fallback_model"):
         rungs.append((3, llm_cfg["fallback_model"]))
     base = build_messages(item, source_name, text.text, attribution, candidates)
     feedback, last_reply, last_out, steps = [], None, None, []
+    continued = bool(prior and prior[0] and prior[1])
+    if continued:
+        last_reply, feedback = prior[0], list(prior[1])
+    hedge_scope = validate.hedge_scope(item["title"], text.lead() or text.text)
     gone = set()
     for rung, model in rungs:
         if model in gone:
             continue
         messages = list(base)
-        if feedback and last_reply:
+        retrying = bool(feedback and last_reply)
+        if retrying:
             messages += [{"role": "assistant", "content": last_reply},
                          {"role": "user", "content": "Your answer failed these checks:\n- " + "\n- ".join(feedback)
                           + "\nFix them and reply with the whole JSON object again."}]
         try:
             # A retry at the first call's low temperature mostly came back word for word, ignoring the feedback.
-            reply = client.chat(model, messages, kind="write", temperature=0.5 if rung == 2 else 0.2)
+            # A hold retry continues the last run: its first call is already a feedback turn, its second warmer still.
+            temperature = (0.2 if rung == 3 else {1: 0.5, 2: 0.7}[rung] if continued
+                           else 0.5 if rung == 2 else 0.2)
+            reply = client.chat(model, messages, kind="write", temperature=temperature)
         except ModelGone:
             gone.add(model)
             steps.append(Step(rung, model, "llm_error", "model_gone"))
             continue
-        except AuthError:
+        except (AuthError, CircuitOpen):
             raise
         except LLMError as e:
             steps.append(Step(rung, model, "llm_error", str(e)))
@@ -423,7 +460,7 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
             steps.append(Step(rung, model, "bad_json", "bad_json", feedback))
             continue
         attribution_mod.apply(out, attribution)
-        validate.select(out, attribution)
+        validate.select(out, attribution, hedge_source=hedge_scope)
         last_out = out
         v = validate.check(out, text.text, item["title"], source_name, attribution, author, text.lead())
         if not v.ok:
@@ -435,7 +472,7 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
             try:
                 e = entail.check(client, llm_cfg["model"], item["title"], entail.context(out, text, attribution),
                                  out.headline, out.s1)
-            except AuthError:
+            except (AuthError, CircuitOpen):
                 raise
             except (LLMError, ValueError) as err:
                 steps.append(Step(rung, model, "llm_error", f"entail: {err}"))
@@ -447,9 +484,15 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
             entailed = True
         steps.append(Step(rung, model, "ok"))
         return WriteResult("ok", out, v.full, v.short, None, entailed, rung, model, steps)
-    reason = steps[-1].reason if steps else "llm_error"
     # The classification of a failed write is still kept (type, relevance...), but never its text.
-    return WriteResult("failed", output=last_out, reason=reason, steps=steps)
+    content = [s for s in steps if s.outcome in ("invalid", "entail_fail")]
+    if content:
+        # A timeout on the feedback retry doesn't hide that the text failed validation first.
+        return WriteResult("failed", output=last_out, reason=content[-1].reason, steps=steps)
+    if steps and all(s.outcome == "llm_error" for s in steps):
+        # The endpoint failed, not the text: transient, held, and kept out of the validation pass rate.
+        return WriteResult("llm_error", output=last_out, reason="llm_error", steps=steps)
+    return WriteResult("failed", output=last_out, reason=steps[-1].reason if steps else "llm_error", steps=steps)
 
 
 def triage_thin(client, cfg, item, source_name, text, attribution=None, candidates=()):
@@ -460,12 +503,22 @@ def triage_thin(client, cfg, item, source_name, text, attribution=None, candidat
         reply = client.chat(model, build_messages(item, source_name, text.text or item["title"], attribution,
                                                   candidates), kind="triage")
         out = parse(reply)
-    except AuthError:
+    except (AuthError, CircuitOpen):
         raise
     except (LLMError, BadOutput) as e:
         return WriteResult("thin_failed", reason="no_text", steps=[Step(1, model, "llm_error", str(e))])
     attribution_mod.apply(out, attribution)
     return WriteResult("thin", out, reason="no_text", model=model, steps=[Step(1, model, "ok")])
+
+
+def prior_attempt(db, url):
+    """(last reply, its feedback) from the item's stored failed write, for a hold retry; None when there is none."""
+    row = db.one("SELECT status, output, steps FROM writes WHERE url_canonical = ?", url)
+    if row is None or row["status"] != "failed" or not row["output"]:
+        return None
+    steps = json.loads(row["steps"] or "[]")
+    fb = next((s.get("feedback") for s in reversed(steps) if s.get("feedback")), None)
+    return (row["output"], fb) if fb else None
 
 
 # The worker stage
@@ -542,20 +595,29 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
             log.warning("embedding for candidates failed: %s", e)
             stats["embed_failed"] += 1
 
+    priors = {row["url_canonical"]: prior_attempt(db, row["url_canonical"])
+              for row, text, _, _ in prepared if row["status"] == "held" and not text.thin}
+    client.reset_breaker()
+
     def job(p):
         row, text, attr, author = p
         item = dict(row)
         source = by_id[row["source_id"]]
         c = cands.get(row["url_canonical"], ())
         try:
+            if client.circuit_open:
+                return row, None, attr, "circuit"
             if text.thin:
                 url = row["url_canonical"]
                 if url in triaged and (url in clustered or not c):
                     return row, text, attr, WriteResult("thin", reason="no_text")   # only the text is retried
                 return row, text, attr, triage_thin(client, cfg, item, source.name, text, attr, c)
-            return row, text, attr, write_item(client, cfg, item, source.name, text, attr, author, c)
+            return row, text, attr, write_item(client, cfg, item, source.name, text, attr, author, c,
+                                               priors.get(row["url_canonical"]))
         except AuthError:
             return row, None, attr, None
+        except CircuitOpen:
+            return row, None, attr, "circuit"
 
     with cf.ThreadPoolExecutor(llm_cfg.get("concurrency", 6)) as pool:
         results = list(pool.map(job, prepared))
@@ -563,24 +625,28 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
     auth_failed = False
     for row, text, attr, result in results:
         url = row["url_canonical"]
+        if isinstance(result, str):
+            stats["circuit_skipped"] += 1   # left as it was (new or due), for the next tick
+            continue
         if result is None:
             auth_failed = True          # left as it was; retried when the key works again
             continue
         if text is not None and text.og_image is not None:
             db.conn.execute("UPDATE items SET og_image = ? WHERE url_canonical = ?", (text.og_image, url))
+        attempt = (row["attempts"] or 0) + 1
         if result.output is not None or result.status == "failed":
             db.save_write(url, now, result, text, attr)
         if result.status == "ok":
             db.mark_written(url)
             stats["written"] += 1
             stats[f"passed_at_{result.passed_at}"] += 1
-            db.log_write(now, url, "item", result.model, "ok", None)
+            db.log_write(now, url, "item", result.model, "ok", None, attempt=attempt)
         else:
             outcome = db.hold(url, result.reason or "no_text", now)
             stats[outcome] += 1
-            stats["thin" if result.status.startswith("thin") else "failed"] += 1
-            db.log_write(now, url, "item", result.model, "thin" if result.status.startswith("thin") else "failed",
-                         result.reason)
+            logged = "thin" if result.status.startswith("thin") else result.status
+            stats[logged] += 1
+            db.log_write(now, url, "item", result.model, logged, result.reason, attempt=attempt)
     for kind, model, outcome, ms in client.drain():
         db.log_write(now, None, kind, model, outcome, None, ms)
     if auth_failed:
@@ -599,12 +665,10 @@ Return this JSON object:
  "s1": "...", "s1_alt": "...", "s1_long": "...", "s2": "...", "s2_alt": "...", "s2_long": "...",
  "s3": "...", "s3_alt": "...", "s3_long": "...", "notif_line": "..."}
 
-- importance, for the event as a whole: 10 industry-defining. 8-9 frontier model from a top lab, >= $500M \
-funding, a breach or outage hitting millions, major regulation. 6-7 $25-500M funding (or >= $15M in India), \
-notable launch or earnings. 4-5 smaller launches, open source, policy proposals, strong analysis. 1-3 how-to, \
-reviews, explainers, promos, minor updates.
+- importance, for the event as a whole: <<importance>>
 - Same writing rules as a single card: headline 50 to 70 characters, fact-first, sentence case, present tense, \
-numbers as digits, no question or final period; s1 18-22 words (who did what, with the key number), s2 16-20 \
+numbers as digits, no question or final period; s1 18-22 words (who did what, with the key number, adding what \
+the headline lacks rather than restating it), s2 16-20 \
 words (the most important detail or context), s3 15-19 words (the concrete consequence); _alt versions 11-14 \
 words (headline_alt at most 55 characters, headline_short at most 40), _long versions 24-28 words; notif_line one \
 sentence under 90 characters with information not in the headline.
@@ -616,6 +680,36 @@ first person, never "the article". Never use: revolutionize, game-changer, groun
 seamless, cutting-edge.
 
 <<reports>>"""
+
+# The importance scale and its anchors, shared by the write and rewrite prompts (spec 2.10: "the same anchors").
+# The anchors are invented stories of each tier, not real ones: the first set named the week's two biggest real
+# stories (the Anthropic IPO = 10, the Nvidia CEO spy probe = 9), and in the 2026-11 shadow run every follow-up,
+# explainer and colour piece on them copied that 9-10 (89 of 211 items scored 8+ were Huang follow-ups). Nor was
+# there a hard-news anchor between 4 and 7, so ordinary launches and policy actions collapsed to 4 and Top
+# (minimum 6) ran out of fresh news.
+IMPORTANCE = """10 industry-defining. 8-9 frontier model from a top lab, >= $500M \
+funding, a breach or outage hitting millions, major regulation, a top tech CEO ousted. 6-7 $25-500M funding (or \
+>= $15M in India), a notable launch or regulatory action by a well-known company, earnings of a major company. \
+4-5 smaller launches, open source releases, policy proposals, strong analysis. 1-3 how-to, reviews, explainers, \
+promos, minor updates. A notable launch or regulatory action from a well-known company is 6, not 4.
+  Follow-ups: when the story is already a candidate event below, or the article is a reaction, explainer, live \
+blog, profile or colour piece on a known story, score only the new fact it adds (usually 4-6). 8 or more only \
+for a new major development (a resignation, a ruling, a new deal).
+  Calibration examples (invented stories, for the scale only):
+  "Orbitly files for IPO targeting a $900B valuation, the largest tech listing ever" = 10, news
+  "Kestrel AI releases Kestrel 5, topping every major coding and reasoning benchmark" = 9, launch
+  "Hackers steal 80 million customer records from telecom giant Varnet" = 8, security_incident
+  "Novacloud beats on revenue and lifts full-year guidance" = 7, earnings
+  "Brightloop raises $80M Series B for warehouse robots" = 6, funding
+  "Zentra releases a 1T-parameter open model for coding agents" = 6, launch
+  "Markets regulator issues rules for AI use by stock brokers" = 5, policy
+  "Novacloud CEO's first interview since the outage: what we learned" = 5, interview
+  "Pundit says Orbitly's growth could justify a record-breaking IPO" = 4, opinion
+  "Lumen CLI 0.36" (a tool's release notes) = 3, release_notes
+  "How a law firm rethinks contracts with AI" (a vendor's story about a customer) = 2, customer_story
+  "How long do Blu-ray discs last?" = 1, explainer"""
+PROMPT = PROMPT.replace("<<importance>>", IMPORTANCE)
+REWRITE_PROMPT = REWRITE_PROMPT.replace("<<importance>>", IMPORTANCE)
 
 REWRITE_MEMBERS = 4
 REWRITE_WORDS = 300

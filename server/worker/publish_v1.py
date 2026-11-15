@@ -16,6 +16,7 @@ The file is written to a temp name, checked by tools/check_edition.py (the 1.2 d
 renamed into place; a failed check keeps the previous edition and alerts.
 """
 import hashlib
+import itertools
 import json
 import logging
 import os
@@ -27,12 +28,15 @@ from urllib.parse import quote
 
 from . import (degraded as degraded_mod, editorial as editorial_mod, embed as embed_mod, images as images_mod,
                importance as importance_mod, rank, sources as sources_mod)
+from .cluster import entity_keys
 from .db import from_iso, iso
 from .llm import LLMError
 
 log = logging.getLogger("techgist")
 
 V1_CATEGORY = {"ai": "AI", "startups": "Startups", "dev": "Dev", "reads": "Blogs"}
+# The tab an event's main topic (its first) belongs in, preferred over the relative-rank rule in v1_category.
+PRIMARY_TAB = {"ai": "ai", "startups_funding": "startups", "dev_tools": "dev"}
 V1_CATEGORIES = ("Top", "AI", "Startups", "Dev", "Blogs")
 URL_SAFE = ":/?#[]@!$&'()*+,;=%~-._"
 MAX_WINDOW = timedelta(days=14)
@@ -52,7 +56,7 @@ def _words(s):
 
 MEMBER_SQL = """
 SELECT i.url_canonical, i.url, i.source_id, i.title, i.feed_text, i.image, i.og_image, i.published_at,
-       i.first_seen_at, w.status, w.text
+       i.first_seen_at, w.status, w.text, w.entities
 FROM event_members em JOIN items i ON i.url_canonical = em.url_canonical
 LEFT JOIN writes w ON w.url_canonical = em.url_canonical
 WHERE em.event_id = ?
@@ -137,7 +141,8 @@ def event_candidate(ctx, ev):
         lead_source=lead["source_id"], lead_publisher=ctx.v1_name(lead["source_id"]),
         lead_reads=bool(lead_src and lead_src.reads), lead_tier1=lead_tier1, ai_text=ai_text,
         classified=ev["type"] is not None, boost=ctx.editorial.boost.get(ev["id"], 1.0),
-        pin=frozenset(ctx.editorial.pins.get(ev["id"], ())))
+        pin=frozenset(ctx.editorial.pins.get(ev["id"], ())),
+        keys=frozenset().union(*(entity_keys(json.loads(m["entities"] or "{}")) for m in members)))
     c.data = {"lead": lead, "members": members, "publishers": publishers, "headline": headline, "summary": summary,
               "hn": hn, "parent_id": ev["parent_id"], "title_words": _words(lead["title"]),
               "first_seen_at": min(m["first_seen_at"] for m in members),
@@ -286,24 +291,59 @@ def headline_vectors(db, embedder, cands, now, limit=60):
     return len(todo)
 
 
-def suppress_duplicates(cands, threshold):
-    """One card per event across the whole edition: when two events' headlines are within T_join (a clustering
-    miss, e.g. a single-source ET Tech report of the Ring drone launch that four other outlets ran as one event),
-    only the better-covered one stays, in every tab. Without this the weaker copy can reach a tab the real event
-    doesn't qualify for. A follow-up and its parent are both kept: the follow-up is the new fact (spec 2.9)."""
+def suppress_duplicates(cands, dedup):
+    """One card per event across the whole edition: when two events' headlines are one story by the calibrated
+    headline rule (rank.Dedup; a clustering miss, e.g. a single-source ET Tech report of the Ring drone launch that
+    four other outlets ran as one event), only the better-covered one stays, in every tab. Without this the weaker
+    copy can reach a tab the real event doesn't qualify for. A follow-up and its parent are both kept: the
+    follow-up is the new fact (spec 2.9). The pairs are recorded as twins on publish, and the next clustering pass
+    merges each twin into its primary (cluster.merge_twins), so a twin never ships later as a "new" card.
+
+    The guard used to compare headline query vectors at T_join (0.47), a threshold calibrated for passage vectors
+    plus a shared entity; short same-domain headlines clear it easily ("Workday outage locks millions out" vs
+    "Microsoft Outlook hit by new outage" = 0.54), so distinct stories vanished."""
+    if not isinstance(dedup, rank.Dedup):
+        dedup = rank.Dedup(dedup)
     order = sorted(cands, key=lambda c: (-c.n_publishers, -c.importance, c.published_at, c.id))
     kept, dropped = [], []
     for c in order:
-        v = c.headline_vec
-        twin = None if v is None else next(
-            (k for k in kept if k.headline_vec is not None and float(v @ k.headline_vec) >= threshold
-             and c.data.get("parent_id") != k.id and k.data.get("parent_id") != c.id), None)
+        twin = next((k for k in kept if dedup.duplicate(c, k)
+                     and c.data.get("parent_id") != k.id and k.data.get("parent_id") != c.id), None)
         if twin is None:
             kept.append(c)
         else:
             dropped.append((c.id, twin.id))
     keep = {c.id for c in kept}
     return [c for c in cands if c.id in keep], dropped
+
+
+def storylines(cands, dedup, threshold):
+    """Groups cards into storylines for rank.STORYLINE_CAP: a follow-up with its parent, and cards whose headlines
+    are close (cosine >= `threshold`) and share a non-org entity (the Huang resignation, the investors' letter and
+    the supply-chain worries). Sets each candidate's `storyline` to its group's id."""
+    root = {c.id: c.id for c in cands}
+
+    def find(x):
+        while root[x] != x:
+            root[x] = root[root[x]]
+            x = root[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            root[max(ra, rb)] = min(ra, rb)
+    for c in cands:
+        p = c.data.get("parent_id")
+        if p in root:
+            union(c.id, p)
+    for a, b in itertools.combinations(cands, 2):
+        cos = dedup.cosine(a, b)
+        if cos is not None and cos >= threshold and a.keys & b.keys:
+            union(a.id, b.id)
+    for c in cands:
+        c.storyline = find(c.id)
+    return cands
 
 
 def title_duplicates(tabs):
@@ -324,7 +364,14 @@ def title_duplicates(tabs):
 # v1 mapping
 
 def v1_category(c, placements, in_top):
-    """`placements` is [(tab id, rank, tab length)] for the non-Top tabs the event made."""
+    """`placements` is [(tab id, rank, tab length)] for the non-Top tabs the event made. The tab of the event's
+    main topic wins when the event made it (a funding round under Startups, not under Dev because Dev was a long
+    tab with weak competition); otherwise the tab where it ranks best relative to the tab's length."""
+    main = PRIMARY_TAB.get((c.topics or [None])[0])
+    if c.type in ("funding", "acquisition") and "startups_funding" in (c.topics or []):
+        main = "startups"
+    if main and any(tid == main for tid, _, _ in placements):
+        return V1_CATEGORY[main]
     options = []
     for tid, r, n in placements:
         if tid == "india":
@@ -373,7 +420,9 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
     live = [c for c in cands if any(rank.eligible(c, tab_specs[t], now) is None or t in c.pin for t in rank.TAB_ORDER)]
     live.sort(key=lambda c: -rank.cand_score(c, tab_specs["top"], now, degraded))
     headline_vectors(ctx.db, embedder, live, now)
-    live, twins = suppress_duplicates(live, ctx.cfg["cluster"]["t_join"])
+    dedup = rank.Dedup.from_cfg(ctx.cfg)
+    live, twins = suppress_duplicates(live, dedup)
+    storylines(live, dedup, (ctx.cfg.get("dedup") or {}).get("t_storyline", ctx.cfg["cluster"]["t_join"]))
     pictures = {}
     if image_store is not None:
         need_page = [c.data["lead"] for c in live[:120] if c.data["lead"]["og_image"] is None]
@@ -391,7 +440,7 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
             row = pictures.get(c.id)
             c.image_hash = row["dhash"] if row else None
     stats = {}
-    tabs = rank.build_tabs(live, now, degraded, ctx.cfg["cluster"]["t_join"], stats, tab_specs)
+    tabs = rank.build_tabs(live, now, degraded, dedup, stats, tab_specs)
     tabs = title_duplicates(tabs)
 
     base = (ctx.cfg.get("publish") or {}).get("base_url", "").rstrip("/") + "/"
@@ -420,7 +469,7 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
     edition = {"publishedAt": iso(now), "articles": articles, "degraded": ctx.outage or False}
     report = {
         "degraded": ctx.outage, "candidates": len(cands), "held": held, "leftOut": left_out,
-        "duplicatesSuppressed": len(twins),
+        "duplicatesSuppressed": len(twins), "twins": twins,
         "degradedCards": sum(not a["aiText"] for a in articles), "articles": len(articles),
         "tabs": {tid: _tab_report(ranked, now) for tid, ranked in tabs.items()},
         "filtered": stats, "topScores": [round(scores[c.id], 4) for c, _ in tabs["top"][:5]],
@@ -471,6 +520,8 @@ def write(ctx, edition, report, used_images, out_dir, check=True, tabs=None):
         ctx.db.conn.execute(
             "INSERT INTO shipped VALUES (?,?,?,?,?) ON CONFLICT(event_id) DO UPDATE SET last_at = excluded.last_at",
             (a["eventId"], a["publishedAt"], iso(ctx.now), iso(ctx.now), _first_seen(tabs, a["eventId"])))
+    for twin, primary in report.get("twins") or ():
+        ctx.db.conn.execute("INSERT OR IGNORE INTO twins VALUES (?,?,?,?)", (twin, primary, None, iso(ctx.now)))
     images_mod.prune(out_dir, used_images)
     return True, None
 

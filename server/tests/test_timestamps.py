@@ -126,7 +126,7 @@ def test_drops_are_logged_once_with_rule(db):
     poll(db, NEWS, ok(NEWS, "feed_news.xml"), NOW + timedelta(minutes=3))
     counts = db.prefilter_counts(NOW - timedelta(hours=24))
     assert counts == {"title_question": 1, "url_deals": 1}
-    h = health.build(db, SourceList([NEWS], []))
+    h = health.build(db, SourceList([NEWS], []), now=NOW + timedelta(minutes=3))
     assert h["prefilter"]["byRule"] == counts and h["prefilter"]["total"] == 2
 
 
@@ -244,7 +244,7 @@ def test_failed_check_removes_tier1(db):
     assert sources_mod.effective_tier(NEWS, None) == 2   # never checked: not tier-1 yet
     assert sources_mod.effective_tier(HN, False) == "signal"
     db.update_source(NEWS.id, check_ok=0, check_detail="HTTP 403")
-    h = health.build(db, SourceList([NEWS], []))
+    h = health.build(db, SourceList([NEWS], []), now=NOW + timedelta(minutes=3))
     assert h["sourceCheck"]["failed"] == ["example"] and h["sources"][0]["tier"] == 2
 
 

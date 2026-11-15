@@ -40,9 +40,10 @@ fetch (conditional GET) → prefilter → timestamps → article text → embed 
 - **Ranking** (`rank.py`, spec 2.11): `score = I × C × A × F` (importance, coverage, authority, freshness). Freshness
   decays from the publisher's own timestamp, so an old post re-fetched after downtime never looks new.
 - **Tabs** (spec 2.12): Top, AI, Startups, India, Dev and Reads, each with its own types, minimum importance, window
-  and cap; at most 2 cards from one publisher in the first 10 (4 per tab); never padded. A duplicate guard drops
-  a card whose headline embedding is within the clustering threshold (`T_join`) of a higher-ranked card's, and
-  a repeated picture in a tab's top 10.
+  and cap; at most 2 cards from one publisher in the first 10 (4 per tab) and 2 per storyline; never padded. A
+  duplicate guard drops a card whose headline is the same story as a better-covered card's (headline query
+  cosine >= `dedup.t_headline` with a shared entity, or >= `dedup.t_headline_alone`), and the next clustering pass
+  merges the two events; also a repeated picture in a tab's top 10.
 - **v1 output** (`publish_v1.py`, spec 2.13): one article per event, in the exact shape the 1.2 app decodes.
   Categories are 1.2's five (`Top`, `AI`, `Startups`, `Dev`, `Blogs`); Reads files under Blogs, India under
   Startups (funding/acquisition) or Top. Top is "every article with a `topRank`" in 1.2.
@@ -107,12 +108,14 @@ to `publish.sh` and is not read by the worker.)
     counts, median age and most cards per publisher;
   - **freshness**: publisher→app lag p50/p95 (`event_published_at` → first edition);
   - **pipeline**: per-source status and check results, prefilter drops by rule, LLM calls/latency/429s,
-    validation pass rate and skip reasons;
+    validation pass rate per item on its first run (and the eventual rate after hold retries), skip reasons;
   - **content**: events, raw vs clamped importance histogram.
 - **Alerts** (ntfy, at most once per condition per 6 h; logged as `ALERT …` when `NTFY_TOPIC` is unset): no
-  publish for 20 min, Top under 12, validation pass rate under 80% over 1 h, more than 20 LLM 429s an hour or any
-  401/403, the 1.2 decoder check failing, a source failing 6 polls in a row, more than 10% of raw importance ≥ 8,
-  and the systemd unit failing (`techgist-alert@.service`).
+  publish for 20 min, Top under 12, first-run validation pass rate under 80% over 1 h (at least 10 new items),
+  more than 20 LLM 429s an hour or any 401/403, 10+ LLM timeouts/5xx an hour, the 1.2 decoder check failing, a
+  source failing 6 polls in a row, more than 10% of stories (events) at raw importance ≥ 8, and the systemd unit
+  failing (`techgist-alert@.service`). A low pass rate is an alert only, never degraded mode; an endpoint that
+  times out more than it answers for 15 min is (`degraded.py`).
 
 ### Cutover (WP5, owner)
 

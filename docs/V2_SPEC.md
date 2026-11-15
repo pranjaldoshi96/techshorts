@@ -140,6 +140,7 @@ Fields per source: `id, name, v1_name, url, tier (1|2|signal), authority (0.5–
 - **Sentences:** `s1` says who and what, with the key number. `s2` gives the most important detail or context. `s3` gives the concrete consequence for builders, investors or operators. Each sentence is about 18 words.
 - **`notif_line`** is ≤ 110 characters and is one complete sentence of new information that does not repeat the headline.
 - **Importance anchors** come with 8 few-shot examples from the 2026-11-11 edition: Anthropic IPO = 10; Huang spy probe = 9; CoreWeave earnings = 7; Daylight $80M Series B = 6; Cramer on Anthropic = 4, opinion; llm-gemini 0.36 = 3, release_notes; OpenAI Gilbert + Tobin = 2, customer_story; Engadget Blu-ray lifespan = 1, explainer.
+  - *Changed after the R1 shadow run (2026-11-15):* the anchors are now invented stories of each tier, with hard-news anchors at 5 and 6 and a follow-up rule (`llm.IMPORTANCE`). Real live stories as anchors made every follow-up on them copy their 9-10, and with no news anchor between 4 and 7 ordinary launches collapsed to 4.
   - 10: industry-defining.
   - 8–9: frontier model from a top lab, ≥ $500M funding, a breach or outage hitting millions, major regulation.
   - 6–7: $25–500M funding, or ≥ $15M in India; notable launch or earnings.
@@ -291,6 +292,7 @@ An event may appear in several tabs with the same id.
 
 ### 2.14 Degraded mode
 **LLM outage** (401, 403, 429 storm, or a pass rate below 50% for 30 min):
+- *Changed after the R1 shadow run:* the pass-rate condition is replaced by an endpoint condition (timeouts/5xx outnumbering answers over 15 min). A failed validation is a text problem that already publishes degraded per event; as an outage it flagged 24 editions degraded with at most 3 cards lacking AI text.
 - Events with ≥ 2 publishers, or a tier-1 lead, publish with the publisher title and a feed excerpt trimmed to ≤ 55 words at a sentence boundary, with `aiText: false`.
 - Previously validated text is reused.
 - Ranking uses coverage × authority × F with importance fixed at 6.

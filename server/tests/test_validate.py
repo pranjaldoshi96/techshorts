@@ -397,6 +397,11 @@ class FakeClient:
     def drain(self):
         return []
 
+    circuit_open = False
+
+    def reset_breaker(self):
+        pass
+
 
 CFG = {"llm": {"model": "primary", "fallback_model": "fallback", "max_items_per_tick": 50, "concurrency": 4,
                "daily_budget": 0},

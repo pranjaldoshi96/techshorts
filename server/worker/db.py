@@ -88,8 +88,10 @@ CREATE TABLE IF NOT EXISTS writes (
 );
 
 -- One row per LLM call (kind write|entail|triage) and per item outcome (kind item), for health.json.
+-- attempt is the item's ladder run (1 first, 2-3 hold retries), so the pass rate counts each item once.
 CREATE TABLE IF NOT EXISTS write_log (
-  at TEXT NOT NULL, url_canonical TEXT, kind TEXT NOT NULL, model TEXT, outcome TEXT, reason TEXT, ms INTEGER
+  at TEXT NOT NULL, url_canonical TEXT, kind TEXT NOT NULL, model TEXT, outcome TEXT, reason TEXT, ms INTEGER,
+  attempt INTEGER
 );
 CREATE INDEX IF NOT EXISTS write_log_at ON write_log(at);
 
@@ -150,6 +152,11 @@ CREATE TABLE IF NOT EXISTS publishes (
 CREATE INDEX IF NOT EXISTS publishes_at ON publishes(at);
 
 -- Techmeme / HN sightings attached to an event (exact URL or cosine >= T_signal).
+-- Two live events the edition-wide duplicate guard found to be one story (publish_v1.suppress_duplicates). The
+-- next clustering pass merges the twin into the primary (cluster.merge_twins), so the twin can't ship later as a
+-- "new" card once the primary leaves the edition.
+CREATE TABLE IF NOT EXISTS twins (twin_id TEXT PRIMARY KEY, primary_id TEXT NOT NULL, cosine REAL, at TEXT NOT NULL);
+
 CREATE TABLE IF NOT EXISTS event_signals (
   event_id TEXT NOT NULL, url_canonical TEXT NOT NULL, source_id TEXT NOT NULL, how TEXT, points INTEGER,
   comments INTEGER, hn_url TEXT, at TEXT NOT NULL,
@@ -158,11 +165,24 @@ CREATE TABLE IF NOT EXISTS event_signals (
 """
 
 # Columns added after a table first shipped; added in place so an existing state.db keeps working.
-MIGRATIONS = {"items": [("hold_reason", "TEXT"), ("og_image", "TEXT")]}
+MIGRATIONS = {"items": [("hold_reason", "TEXT"), ("og_image", "TEXT")], "write_log": [("attempt", "INTEGER")]}
+# Run once, right after a migration adds the column.
+BACKFILL = {("write_log", "attempt"): (
+    "UPDATE write_log SET attempt = (SELECT COUNT(*) FROM write_log w2 WHERE w2.kind = 'item'"
+    " AND w2.url_canonical = write_log.url_canonical AND w2.rowid <= write_log.rowid) WHERE kind = 'item'")}
 
 
-# Held items retry at +30 min and +2 h, then drop (spec 2.5 and 2.8).
+# Held items retry at +30 min and +2 h, then drop (spec 2.5 and 2.8). That schedule is for transient failures (no
+# text yet, an LLM error, unparseable JSON), where waiting is what helps. A content failure (the text failed
+# validation after the feedback retry) gets one more ladder run that continues from the last answer and its
+# feedback, then drops: in the 2026-11 shadow run a third identical run passed 21% of the time, 2 h late.
 HOLD_RETRIES = (timedelta(minutes=30), timedelta(hours=2))
+CONTENT_RETRIES = (timedelta(minutes=30),)
+TRANSIENT_REASONS = ("no_text", "llm_error", "bad_json", "model_gone")
+
+
+def transient(reason):
+    return (reason or "no_text") in TRANSIENT_REASONS
 
 
 def iso(dt):
@@ -189,6 +209,8 @@ class DB:
             for name, decl in cols:
                 if name not in have:
                     self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+                    if (table, name) in BACKFILL:
+                        self.conn.execute(BACKFILL[(table, name)])
         self.conn.commit()
 
     def close(self):
@@ -277,17 +299,19 @@ class DB:
 
     def hold(self, url_canonical, reason, now):
         """Holds an item for a retry at +30 min, then +2 h; the third failure drops it. Never a permanent skip
-        on the first failure, so a page that was briefly down or a model hiccup gets another chance."""
+        on the first failure, so a page that was briefly down or a model hiccup gets another chance. A content
+        failure gets only the +30 min retry (see CONTENT_RETRIES)."""
         row = self.item(url_canonical)
         attempts = (row["attempts"] or 0) + 1
-        if attempts > len(HOLD_RETRIES):
+        schedule = HOLD_RETRIES if transient(reason) else CONTENT_RETRIES
+        if attempts > len(schedule):
             self.conn.execute("UPDATE items SET status = 'dropped', drop_rule = ?, attempts = ?, retry_at = NULL,"
                               " hold_reason = ? WHERE url_canonical = ?",
                               (f"held_out:{reason}", attempts, reason, url_canonical))
             return "dropped"
         self.conn.execute("UPDATE items SET status = 'held', attempts = ?, retry_at = ?, hold_reason = ?"
                           " WHERE url_canonical = ?",
-                          (attempts, iso(now + HOLD_RETRIES[attempts - 1]), reason, url_canonical))
+                          (attempts, iso(now + schedule[attempts - 1]), reason, url_canonical))
         return "held"
 
     def mark_written(self, url_canonical):
@@ -324,9 +348,10 @@ class DB:
     def write_row(self, url_canonical):
         return self.one("SELECT * FROM writes WHERE url_canonical = ?", url_canonical)
 
-    def log_write(self, at, url_canonical, kind, model, outcome, reason=None, ms=None):
-        self.conn.execute("INSERT INTO write_log VALUES (?,?,?,?,?,?,?)",
-                          (iso(at), url_canonical, kind, model, outcome, reason, ms))
+    def log_write(self, at, url_canonical, kind, model, outcome, reason=None, ms=None, attempt=None):
+        self.conn.execute("INSERT INTO write_log (at, url_canonical, kind, model, outcome, reason, ms, attempt)"
+                          " VALUES (?,?,?,?,?,?,?,?)", (iso(at), url_canonical, kind, model, outcome, reason, ms,
+                                                        attempt))
 
     def llm_calls_since(self, since):
         return self.one("SELECT COUNT(*) n FROM write_log WHERE at >= ? AND kind != 'item'", iso(since))["n"]

@@ -104,6 +104,7 @@ def tick(db, cfg, poll_all=False, client=None, embedder=None, out_dir=None, star
     maybe_check_sources(db, srcs, cfg)
     counts = fetch_due(db, srcs, cfg, poll_all)
     if client is not None:
+        client.reset_breaker()          # the circuit is per tick: each tick tries the endpoint again
         degraded.key_check(db, cfg, client.key, utcnow())
     # A revoked key (401/403) would fail every call; the LLM stages wait for a probe to see it work again.
     if client is not None and degraded.llm_outage(db, utcnow()) == "auth":
@@ -162,6 +163,8 @@ def main():
     ap.add_argument("--no-publish", action="store_true", help="fetch, write and cluster only")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    # trafilatura logs "discarding data: None" at WARNING for every empty extraction (54 in 4 days), burying real ones.
+    logging.getLogger("trafilatura").setLevel(logging.ERROR)
     cfg = config.load()
     db = DB(config.state_path(cfg, "state.db"))
     out_dir = None if args.no_publish else os.path.expanduser(

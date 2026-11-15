@@ -370,6 +370,31 @@ def merge_pass(store):
         merged += 1
 
 
+def merge_twins(store):
+    """Merges each twin the edition-wide duplicate guard found (table `twins`, written on publish) into its primary.
+    Fragments older than the 6 h merge window used to stay two live events: the guard hid the twin while the primary
+    was in the edition, and the twin shipped as a "new" card the moment the primary left (in the 2026-11 shadow run
+    "Anthropic targets valuation of up to $1.4tn" shipped 3 min after its twin dropped out, 40 h after it was first
+    seen). A twin member that reported a material update carries that update over, so a fresh development of an
+    old story refreshes the surviving card instead of vanishing behind it."""
+    merged = 0
+    for r in store.db.q("SELECT twin_id, primary_id FROM twins ORDER BY at"):
+        src = store.events.get(store.resolve(r["twin_id"]))
+        dst = store.events.get(store.resolve(r["primary_id"]))
+        if src is None or dst is None or src is dst:
+            continue
+        if src.row.get("parent_id") == dst.id or dst.row.get("parent_id") == src.id:
+            continue
+        updates = [m.published_at for m in src.members if m.material_update and m.hard]
+        merge(store, src, dst)
+        for at in updates:
+            _set_material(dst, at)
+        if updates:
+            dst.dirty.add("material_update")
+        merged += 1
+    return merged
+
+
 def merge(store, src, dst):
     db, now = store.db, iso(store.now)
     db.conn.execute("UPDATE event_members SET event_id = ? WHERE event_id = ?", (dst.id, src.id))
@@ -631,6 +656,7 @@ def run(db, cfg, srcs, now, embedder=None, rewriter=None):
         stats[how] += 1
     stats["signals_attached"] = attach_signals(store)
     stats["merged"] = merge_pass(store)
+    stats["twins_merged"] = merge_twins(store)
     tier1_ok = db.check_ok
     # Signals may have changed any event's coverage, so every live event in the window is refreshed; it is cheap.
     for ev in list(store.events.values()):
@@ -647,6 +673,7 @@ def run(db, cfg, srcs, now, embedder=None, rewriter=None):
             stats["rewritten" if done else "rewrite_failed"] += 1
             refresh(store, ev, tier1_ok)
     db.conn.execute("DELETE FROM event_alias WHERE at < ?", (iso(now - timedelta(days=s.alias_days)),))
+    db.conn.execute("DELETE FROM twins WHERE at < ?", (iso(now - timedelta(days=s.alias_days)),))
     db.commit()
     return stats
 
