@@ -106,7 +106,8 @@ def main():
             db.conn.execute("UPDATE writes SET importance = ?, topics = ?, type = ? WHERE url_canonical = ?",
                             (res.importance, json.dumps(res.topics), new_type(r, res), r["url_canonical"]))
             db.commit()
-            after.append({**r, "importance": res.importance, "topics": json.dumps(res.topics), "type": new_type(r, res)})
+            after.append({**r, "importance": res.importance, "topics": json.dumps(res.topics),
+                          "type": new_type(r, res)})
             done += 1
             if done % 50 == 0:
                 print(f"  {done}/{len(rows)}", flush=True)

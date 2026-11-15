@@ -155,6 +155,18 @@ def test_a_claim_in_the_source_title_must_stay_attributed():
     assert validate.title_claim_dropped("Daylight will triple output", "Daylight says it will triple output") is None
 
 
+def test_a_column_is_analysis_whatever_the_model_says():
+    from worker import attribution
+    o = out(HUANG)
+    attribution.apply(o, None, "https://www.theverge.com/column/1033943/jensen-huang-nvidia-scandal")
+    assert o.type == "analysis"
+    validate.select(o)
+    assert o.headline.startswith("Analysis: ")
+    o = out(HUANG)
+    attribution.apply(o, None, "https://www.theverge.com/news/1033943/jensen-huang-nvidia-scandal")
+    assert o.type == "news"
+
+
 # Repetition
 
 def test_s1_must_not_restate_the_headline():

@@ -74,10 +74,20 @@ def detect(url, title, author=None, source_id=None):
     return None
 
 
-def apply(output, attribution):
+# A column or opinion section with no named columnist rule: the piece is commentary whatever the model says (the
+# shadow run's "An overview of Jensen Huang's messy days", a Verge /column/ piece, came back type news, importance 9,
+# and led Top). As analysis it carries the "Analysis:" label and reaches Top only at importance >= 8.
+COLUMN_PATH = re.compile(r"/(column|columns|opinion|opinions|commentary|op-ed|oped|perspective|perspectives)/")
+# importance.HARD_NEWS; importing it here would be circular.
+HARD_NEWS = ("news", "launch", "funding", "acquisition", "earnings", "policy", "security_incident")
+
+
+def apply(output, attribution, url=None):
     """Forces the type; the prefix is checked in validate.py so a missing one retries with feedback."""
     if attribution is not None:
         output.type = "opinion"
+    elif url and output.type in HARD_NEWS and COLUMN_PATH.search(urlsplit(url).path.lower()):
+        output.type = "analysis"
     return output
 
 

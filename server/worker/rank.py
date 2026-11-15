@@ -202,8 +202,8 @@ def hamming(a, b):
 
 
 def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None):
-    """Filter → drop below 25% of the median → sort → duplicate guard → diversity → storyline → image dedupe →
-    cap. Never pads. Returns [(candidate, score)] in rank order. `dup_threshold` is a Dedup, or a bare cosine."""
+    """Filter → drop below 25% of the median → sort → duplicate guard → diversity → storyline → image
+    dedupe → cap. Never pads. Returns [(candidate, score)] in rank order. `dup_threshold` is a Dedup, or a bare cosine."""
     dedup = dup_threshold if isinstance(dup_threshold, Dedup) or dup_threshold is None else Dedup(dup_threshold)
     pool = []
     for c in cands:

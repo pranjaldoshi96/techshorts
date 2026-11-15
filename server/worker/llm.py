@@ -286,8 +286,8 @@ PROMPT = """Return this JSON object:
 Classification:
 - is_news: true when it reports something that happened or was announced; false for evergreen how-tos, \
 explainers, reviews, essays without news, promos.
-- type, one of: news (reporting a new fact; the default), launch (a product, model or feature release), funding (a startup \
-raise or a new VC fund), acquisition, earnings, policy (law, regulation, government action), security_incident \
+- type, one of: news (reporting a new fact; the default), launch (a product, model or feature release), \
+funding (a startup raise or a new VC fund), acquisition, earnings, policy (law, regulation, government action), security_incident \
 (breach, hack, outage, exploited vulnerability), analysis (reported analysis or commentary on news), opinion \
 (a columnist's or pundit's view), interview, review (a product review), tutorial, explainer (evergreen background), \
 release_notes (version notes for a library, tool or app), customer_story (a vendor's story about a customer using \
@@ -461,7 +461,7 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
             feedback = [str(e)]
             steps.append(Step(rung, model, "bad_json", "bad_json", feedback))
             continue
-        attribution_mod.apply(out, attribution)
+        attribution_mod.apply(out, attribution, item["url"])
         validate.select(out, attribution, hedge_source=hedge_scope)
         last_out = out
         v = validate.check(out, text.text, item["title"], source_name, attribution, author, text.lead())
@@ -509,7 +509,7 @@ def triage_thin(client, cfg, item, source_name, text, attribution=None, candidat
         raise
     except (LLMError, BadOutput) as e:
         return WriteResult("thin_failed", reason="no_text", steps=[Step(1, model, "llm_error", str(e))])
-    attribution_mod.apply(out, attribution)
+    attribution_mod.apply(out, attribution, item["url"])
     return WriteResult("thin", out, reason="no_text", model=model, steps=[Step(1, model, "ok")])
 
 
