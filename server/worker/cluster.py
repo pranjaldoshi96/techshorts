@@ -36,7 +36,7 @@ LEAD_MIN_WORDS = 120
 # are different events, and a launch and the funding round behind it usually are.
 NEVER_JOIN = {frozenset(("earnings", "security_incident"))}
 JOIN_ONLY_IF_PICKED = {frozenset(("launch", "funding"))}
-# An item on a story more than this many hours old (the event's, or its parent's, first report) adds a follow-up,
+# An item on an event more than this many hours old (the event's first report) adds a follow-up,
 # and scores at most FOLLOWUP_CAP for the event's importance unless it carries a material update. The model rates
 # per-item coverage of a week-long mega-story 8 whatever the anchors say (the 2026-11 shadow: hard-news 8s 58 -> 119
 # after the follow-up anchors), and one inflated member lifts the event median.
@@ -512,7 +512,7 @@ def refresh(store, ev, tier1_ok):
     _apply_signals(store, ev)
 
     region = row.get("region") or "global"
-    start = story_start(store, row)
+    start = story_start(row)
     imembers = []
     for m in members:
         src = store.by_id.get(m.source_id)
@@ -532,14 +532,9 @@ def refresh(store, ev, tier1_ok):
     save(store.db, row)
 
 
-def story_start(store, row):
-    """When the story began: the parent's first report for a follow-up event, else the event's own."""
-    pid = row.get("parent_id")
-    if pid:
-        parent = store.events.get(pid)
-        prow = parent.row if parent is not None else store.db.one("SELECT published_at FROM events WHERE id = ?", pid)
-        if prow is not None and prow["published_at"]:
-            return from_iso(prow["published_at"])
+def story_start(row):
+    """When the event began (its first report). A follow-up event starts its own clock: the outlets reporting
+    "Huang resigns" are coverage of the resignation, not late coverage of the probe it follows."""
     return from_iso(row.get("published_at"))
 
 

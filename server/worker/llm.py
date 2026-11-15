@@ -757,8 +757,16 @@ def rewrite_event(client, cfg, store, ev):
     lead = next((m for m in ev.members if m.url == row.get("lead_url")), None)
     if lead is None or not lead.text:
         return False
-    picked = [lead] + [m for m in representative(ev.members) if m is not lead][:REWRITE_MEMBERS - 1]
-    reports = "\n\n".join(
+    # The newest material update goes in as REPORT 2: the representative members are the most central ones, so the
+    # report that the "upcoming" IPO had listed was left out and the rewrite kept saying "upcoming".
+    newest = sorted((m for m in ev.members if m is not lead and m.material_update and m.hard and not m.thin
+                     and m.text), key=lambda m: m.published_at, reverse=True)[:1]
+    picked = [lead] + newest + [m for m in representative(ev.members)
+                                if m is not lead and all(m is not n for n in newest)]
+    picked = picked[:REWRITE_MEMBERS]
+    note = (f"REPORT 2 is the newest development ({cluster.iso(newest[0].published_at)}); lead with it.\n\n"
+            if newest else "")
+    reports = note + "\n\n".join(
         f"REPORT {i}: {store.by_id[m.source_id].name if m.source_id in store.by_id else m.source_id}\n"
         f"Title: {m.title}\nText: {text_mod.cap_words(m.text, REWRITE_WORDS)}" for i, m in enumerate(picked, 1))
     base = [{"role": "system", "content": SYSTEM},

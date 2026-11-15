@@ -239,7 +239,7 @@ The required prefix is `Name:` (for example `Cramer: Anthropic growth could just
   3. ≥ 8 requires ≥ 2 tier-1 publishers (tier-1 as defined for the event's region), or 1 tier-1 plus Techmeme.
   4. `release_notes`/`tutorial` cap at 4.
   5. Parsed funding ≥ $500M sets a floor of 8, but only when clamp 3 already holds.
-- **Follow-up cap (2026-11 shadow):** a member published more than 24 h after the story began (the event's first report, or its parent's for a follow-up event) counts at most 6 in the base value unless it is hard news with `material_update`. A member that reports done what the event's headline describes as coming ("set to … upcoming IPO" → "IPO lands") is a material update even when the model said otherwise.
+- **Follow-up cap (2026-11 shadow):** a member published more than 24 h after the event's first report (a follow-up event starts its own clock) counts at most 6 in the base value unless it is hard news with `material_update`. A member that reports done what the event's headline describes as coming ("set to … upcoming IPO" → "IPO lands") is a material update even when the model said otherwise, and the event rewrite gets the newest material update as REPORT 2.
 - **Drift check:** `health.json` publishes the 24 h histogram of raw LLM importance against clamped importance. ntfy alerts when more than 10% of items score raw ≥ 8.
 
 ### 2.11 Scoring (server, region-neutral)

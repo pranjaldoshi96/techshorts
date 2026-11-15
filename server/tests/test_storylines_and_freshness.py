@@ -195,6 +195,52 @@ def test_a_late_member_without_a_material_update_is_capped_for_event_importance(
     assert raw(True) == 9
 
 
+def test_a_follow_up_event_starts_its_own_clock():
+    # "Huang resigns" (a follow-up of the 3-day-old probe) and the outlets that joined it: not capped.
+    db = tc.new_db()
+    parent = tc._item("https://g/0", [0, 1, 0], source_id="guardian", people=["Huang"], imp=8,
+                      pub=NOW - timedelta(hours=72))
+    first = tc._item("https://g/1", [1, 0, 0], source_id="guardian", people=["Huang"], imp=9, material=True,
+                     pub=NOW - timedelta(hours=10))
+    more = tc._item("https://t/2", [1, 0, 0], source_id="techcrunch", people=["Huang"], imp=9)
+    tc._db_items(db, [parent, first, more])
+    store = tc._store_with(db, [parent])
+    cluster.create(store, first, parent_id=cluster.event_id(parent.url), how="followup_material")
+    e = store.events[cluster.event_id(first.url)]
+    cluster.join(store, e, more, 1.0, "cosine")
+    cluster.refresh(store, e, lambda s: True)
+    assert e.row["importance_raw"] == 9
+
+
+def test_the_rewrite_gets_the_newest_material_update():
+    class FakeClient:
+        def __init__(self):
+            self.prompts = []
+
+        def chat(self, model, messages, **kw):
+            self.prompts.append(messages[-1]["content"])
+            raise llm.LLMError("stop")
+    db = tc.new_db()
+    lead = tc._item("https://g/1", [1, 0, 0], source_id="guardian", people=["Amodei"], pub=NOW - timedelta(hours=20))
+    others = [tc._item(f"https://o/{i}", [1, 0.01 * i, 0], source_id="techcrunch", people=["Amodei"],
+                       pub=NOW - timedelta(hours=19 - i)) for i in range(5)]
+    landed = tc._item("https://c/9", [0.6, 0.8, 0], source_id="cnbc", people=["Amodei"], material=True)
+    for m in [lead, *others, landed]:
+        m.text = "word " * 200
+    landed.title = "Anthropic's IPO lands"
+    tc._db_items(db, [lead, *others, landed])
+    store = tc._store_with(db, [lead])
+    e = store.events[cluster.event_id(lead.url)]
+    for m in [*others, landed]:
+        cluster.join(store, e, m, 1.0, "cosine")
+    e.row["lead_url"] = lead.url
+    client = FakeClient()
+    assert llm.rewrite_event(client, tc.CFG, store, e) is False
+    prompt = client.prompts[0]
+    assert "REPORT 2 is the newest development" in prompt
+    assert prompt.index("REPORT 2: ") < prompt.index("Title: Anthropic's IPO lands") < prompt.index("REPORT 3: ")
+
+
 # Writing
 
 class _Out:
