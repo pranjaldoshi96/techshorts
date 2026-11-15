@@ -777,6 +777,12 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
         return WriteResult("ok", out, v.full, v.short, None, entailed, rung, model, steps, by_backup=by_backup)
     # The classification of a failed write is still kept (type, relevance...), but never its text.
     content = [s for s in steps if s.outcome in ("invalid", "entail_fail")]
+    if content and last_out is not None and text.words < SHORT_TEXT_WORDS and any(
+            s.reason == validate.TEASER for s in content):
+        # A title with no report under it (validate.TEASER): the item is classified, not written, like any item
+        # with too little text. It can back an event up, and start one that gets a brief if the story has
+        # traction (cluster.thin_can_seed), instead of shipping a card of scene-setting.
+        return WriteResult("thin", last_out, reason="no_text", model=writer, steps=steps)
     if content:
         # A timeout on the feedback retry doesn't hide that the text failed validation first.
         return WriteResult("failed", output=last_out, reason=content[-1].reason, steps=steps, by_backup=by_backup)
@@ -891,6 +897,9 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
     hot = {r["url_canonical"] for r in rows
            if r["url_canonical"] in techmeme_urls or json.loads(r["extra"] or "{}").get("via")}
     triaged = {r["url_canonical"] for r in db.q("SELECT url_canonical FROM writes WHERE status = 'thin'")}
+    teasers = {r["url_canonical"]: r["text_words"] for r in db.q(
+        "SELECT url_canonical, text_words FROM writes WHERE status = 'thin' AND steps LIKE ?",
+        f"%{validate.TEASER}%")}
     # A thin item can only ever join an event, and its event often didn't exist yet at its first triage. So a retry
     # of a thin item that is still in no event asks again when there are candidates now (one call, no writing).
     clustered = {r["url_canonical"] for r in db.q("SELECT url_canonical FROM event_members")}
@@ -933,8 +942,12 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
         try:
             if client.circuit_open:
                 return row, None, attr, "circuit"
+            url = row["url_canonical"]
+            if not text.thin and teasers.get(url) == text.words:
+                # Classified on an earlier run as a teaser (validate.TEASER) and its text has not changed: only
+                # another text would change that, so the ladder is not run again.
+                return row, text, attr, WriteResult("thin", reason="no_text")
             if text.thin:
-                url = row["url_canonical"]
                 if url in triaged and (url in clustered or not c):
                     return row, text, attr, WriteResult("thin", reason="no_text")   # only the text is retried
                 return row, text, attr, triage_thin(client, cfg, item, source_name, text, attr, c)

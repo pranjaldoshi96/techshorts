@@ -49,6 +49,10 @@ out who is alleging it.
 10. Is scene-setting or colour instead of a fact about the story: what hung on a wall, where the writer was \
 sitting or how he felt, an app-store ranking or a biography line that is not what the story reports ("Framed \
 art by rock legends hung on the wall"; "Writing from the airport, he describes himself as grouchy").
+11. The summary does not report the headline's news. Read S1 to S3 together: at least one of them must state a \
+fact about what the headline announces (who did it, how much, when, how, what follows). A headline "VC firm has \
+a $7B stake in Anthropic" over sentences about a meeting in 2023, what was discussed and what hung on the wall \
+fails, even though each sentence is true to the source: name the line "summary".
 
 Reply with only JSON: {"entailed": "yes" or "no", "line": "which line fails, or empty", \
 "unsupported": "the unsupported claim and what the source actually says, in one sentence, or empty"}

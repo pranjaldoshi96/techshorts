@@ -6,7 +6,7 @@ from datetime import timedelta
 
 import pytest
 
-from worker import cluster, embed, fetch, health, llm, newsdate, publish_v1, rank, text, validate  # noqa: F401
+from worker import cluster, embed, entail, fetch, health, llm, newsdate, publish_v1, rank, text, validate  # noqa: F401,E501
 from worker.db import from_iso, iso
 from worker import editorial, images
 import test_cluster as tc
@@ -637,3 +637,60 @@ def test_the_lag_counts_from_the_first_report_not_from_the_time_the_card_shows(t
     db.conn.execute("INSERT INTO story_first_report VALUES (?,?) ON CONFLICT(event_id) DO UPDATE SET"
                     " at = MIN(at, excluded.at)", (eid, iso(NOW)))
     assert db.one("SELECT at FROM story_first_report WHERE event_id = ?", eid)["at"] == iso(first.published_at)
+
+
+# 8. A summary that is scene-setting, under a headline taken from the title
+
+MADONNA_TITLE = "VC Firm Run by Madonna’s Manager Has $7 Billion Anthropic Stake"
+MADONNA_TEXT = ("Dario Amodei was arguably one of the least famous people in the Beverly Hills home he visited in "
+                "2023. The Anthropic PBC chief executive officer sat across from actor-turned-venture capitalist "
+                "Ashton Kutcher, and Guy Oseary, the legendary music manager and industry broker who owned the "
+                "house. Oseary’s framed art by rock legends like John Lennon and David Bowie hung on the wall "
+                "behind them. The group spent hours discussing AI safety, the global race to build better "
+                "artificial intelligence models and what the technology would mean for the world.")
+MADONNA = dict(
+    is_news=True, type="news", relevance=3, importance=5, spice=7, region="global", topics=["ai", "startups_funding"],
+    headline="Madonna manager's VC firm has $7B stake in Anthropic",
+    s1="In 2023, Dario Amodei met Ashton Kutcher and music manager Guy Oseary at the Beverly Hills home Oseary "
+       "owned.",
+    s2="The group spent hours discussing AI safety and the global race to build better artificial intelligence "
+       "models.",
+    notif_title="Madonna manager's Anthropic stake",
+    notif_line="Guy Oseary hosted Dario Amodei and Ashton Kutcher at his Beverly Hills home in 2023.")
+
+
+def test_a_title_with_no_report_under_it_is_not_written_as_a_card():
+    """ev_b24410c214 "Madonna manager's VC firm has $7B stake in Anthropic" (Top rank 29): three sentences about
+    a 2023 meeting and the art on the wall, each true to Bloomberg's 80-word opening, none about the stake."""
+    assert validate.teaser_text(MADONNA["headline"], MADONNA_TEXT) == "$7B"
+    assert validate.teaser_text("Amodei met Kutcher and Oseary in Beverly Hills in 2023", MADONNA_TEXT) is None
+    # The body carrying the figure and the names is a report, however short.
+    report = MADONNA_TEXT + (" Sound Ventures, the VC firm that Madonna's manager runs with Kutcher, holds a "
+                             "$7 billion stake.")
+    assert validate.teaser_text(MADONNA["headline"], report) is None
+    body = text.choose([], MADONNA_TEXT)
+    assert body.words < llm.SHORT_TEXT_WORDS and not body.thin
+    o = out(MADONNA)
+    v = validate.check(o, body.text, MADONNA_TITLE, "Bloomberg", None, None, body.lead(), short_card=True)
+    assert not v.ok and validate.TEASER in v.reasons
+    assert "only in the title" in next(f for f in v.feedback if "headline's news" in f)
+    # A full-length article is not held to it (its headline is checked against the whole text as before).
+    assert validate.TEASER not in validate.check(o, body.text, MADONNA_TITLE, "Bloomberg", None, None,
+                                                 body.lead()).reasons
+    # The fact-checker is told the same thing in its own terms (prompt change, untested against a live model).
+    assert "11. The summary does not report the headline's news" in entail.PROMPT
+
+    item = {"url": "https://www.bloomberg.com/news/x", "url_canonical": "https://www.bloomberg.com/news/x",
+            "source_id": "bloomberg", "title": MADONNA_TITLE, "feed_text": MADONNA_TEXT,
+            "published_at": "2026-11-11T03:00:00Z"}
+    db, now = _db_with([item])
+    fetch_text = lambda i, s: text.choose([], i["feed_text"])      # noqa: E731
+    client = FakeClient([MADONNA, MADONNA, MADONNA])
+    stats = llm.write_pending(db, _sources(), WRITE_CFG, client, fetch_text=fetch_text, now=now)
+    w = db.write_row(item["url_canonical"])
+    # Classified, not written: no card text is kept, and the item waits like any item with too little text.
+    assert stats["thin"] == 1 and w["status"] == "thin" and w["headline"] is None and w["type"] == "news"
+    assert db.item(item["url_canonical"])["hold_reason"] == "no_text"
+    calls = len(client.calls)
+    llm.write_pending(db, _sources(), WRITE_CFG, client, fetch_text=fetch_text, now=now + timedelta(minutes=31))
+    assert len(client.calls) == calls                               # the same short text is not written again

@@ -721,6 +721,31 @@ def names_outlet(text, outlets):
     return False
 
 
+# A card written from a short text (a paywall's opening, a feed blurb) whose text does not itself report the news
+# in its title. Bloomberg's "VC Firm Run by Madonna's Manager Has $7 Billion Anthropic Stake" came with 80 words
+# of scene ("Dario Amodei was arguably one of the least famous people in the Beverly Hills home he visited in
+# 2023 ..."): the card took its headline from the title and filled three sentences with the scene, every one of
+# them true to the text and none about the stake. The text must carry the headline: each figure in it, and at
+# least half of its names. Otherwise the item is a title with no report under it, and is handled like one
+# (llm.write_item: classification only; a brief if the story has traction).
+TEASER = "teaser_text"
+
+
+def teaser_text(headline, body, allowed=()):
+    """The first figure or name of `headline` that `body` (the item's text without its title) does not carry,
+    when the body does not carry the headline's news; None when it does."""
+    h = PREFIX.sub("", headline or "", count=1)
+    have = numbers(body)
+    for n in numbers(h):
+        if not number_grounded(n, have):
+            return n.text
+    hay = re.sub(r"\.", "", (body or "").lower().replace("’", "'"))
+    allow = {a.lower() for a in allowed}
+    names = [w for w in capitalized(h) if any(ch.isalpha() for ch in w) and w.lower() not in allow]
+    missing = [w for w in names if not _in_source(w, hay)]
+    return missing[0] if names and len(missing) > len(names) / 2 else None
+
+
 def headline_problems(headline):
     out = []
     h = (headline or "").strip()
@@ -794,6 +819,11 @@ def check(out, source_text, title, source_name, attribution=None, author=None, l
         full = short
         for code, msg in problems:
             v.fail(code, msg)
+        missing = teaser_text(out.headline, source_text, [*re.findall(r"[\w']+", source_name or ""),
+                                                           *attribution_mod.LABELS])
+        if missing:
+            v.fail(TEASER, f"The text does not report the headline's news ('{missing}' is only in the title): "
+                           f"write the headline and both sentences from what the text itself states.")
     else:
         full, short, problems = trim(out.s1, out.s2, out.s3)
         for code, msg in problems:
