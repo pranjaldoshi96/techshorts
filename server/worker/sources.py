@@ -10,11 +10,12 @@ from . import config
 
 POLL_SECONDS = {"3m": 180, "10m": 600}
 TIERS = {1, 2, "signal"}
-FORMATS = {"rss", "hn_algolia", "lobsters", "github_trending"}
+FORMATS = {"rss", "hn_algolia", "lobsters"}
 # The catch-all publisher for an article imported from a signal's link whose host no source lists; the card shows
 # the host name (items.extra.publisher).
 WEB_ID = "web"
 REGIONS = {"in", "us", "global"}
+DESKS = {"", "dev"}
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,11 @@ class Source:
     # essays (Reads shows 14 days) and developer or lab posts (Dev shows 7 days) are sparse, so a source seeded with
     # 36 hours of them adds nothing to its tab for a week.
     seed_days: float = None
+    # The desk a source writes for, when it has one: "dev" for developer outlets and engineering blogs. A story
+    # they lead is Dev news with dev_tools anywhere among its topics (rank.eligible), not only first: the model
+    # files most of what they write about coding agents and AI tooling under "ai" first, so the Dev tab of the
+    # third review's edition had three cards under a day old while InfoQ and JetBrains pieces sat in AI or nowhere.
+    desk: str = ""
 
     @property
     def poll_seconds(self):
@@ -107,8 +113,8 @@ def load(path=None):
             raise ValueError(f"bad tier/region/poll for {src.id}")
         if not 0.5 <= float(src.authority) <= 1.2 or src.images not in ("source", "generated"):
             raise ValueError(f"bad authority/images for {src.id}")
-        if src.format not in FORMATS or (src.is_signal and not src.polled):
-            raise ValueError(f"bad format/url for {src.id}")
+        if src.format not in FORMATS or (src.is_signal and not src.polled) or src.desk not in DESKS:
+            raise ValueError(f"bad format/url/desk for {src.id}")
         seen.add(src.id)
         out.append(src)
     blocklist = [d.lower().lstrip(".") for d in raw.get("domain_blocklist") or []]

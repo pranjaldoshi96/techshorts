@@ -52,6 +52,8 @@ JOIN_ONLY_IF_PICKED = {frozenset(("launch", "funding"))}
 # after the follow-up anchors), and one inflated member lifts the event median.
 FOLLOWUP_AFTER_H = 24
 FOLLOWUP_CAP = 6
+# A hard-news member this much newer than the lead goes into the rewrite as its newest report (llm.rewrite_event).
+NEWER_REPORT = timedelta(hours=3)
 # A planned event that happened: the event's headline is about what is coming ("set to become billionaires in
 # upcoming IPO") and a new hard-news member reports it done ("Anthropic's IPO prices", "Acme ships X"). Ambiguous
 # verbs are left out: CNBC's "Anthropic's IPO lands as the AI trade looks for a bright spot" meant the IPO week had
@@ -74,6 +76,50 @@ def realizes(event_headline, item_title):
         return False
     return bool(PROSPECTIVE.search(event_headline)) and bool(REALIZED.search(item_title)) \
         and not PROSPECTIVE.search(item_title)
+
+
+# A later report that overtakes an earlier card: the outcome that makes it wrong or out of date. In the third
+# review's edition "ULA launches Vulcan with 40 Amazon internet satellites" (rank 21) sat beside "ULA reportedly
+# sees first total failure, losing 40 Amazon satellites" (rank 2): the failure was ruled a follow-up, rightly a
+# new development, and the launch card stayed. The judge can now rule "supersedes" (llm.JUDGE_PROMPT); this word
+# rule is the backstop for a follow-up it rules plain "followup": a reversal in the new title that the old one
+# lacks, on titles that are plainly about the same thing.
+REVERSAL = re.compile(
+    r"\b(fail(?:s|ed|ure|ures)?|lost|loses?|loss of|destroy(?:s|ed|ing)?|explod(?:es|ed)|blows? up|blew up|"
+    r"crash(?:es|ed)?|abort(?:s|ed)?|scrub(?:s|bed)?|cancel(?:s|led|ed)?|calls? off|called off|collaps(?:es|ed)|"
+    r"falls? through|fell through|withdraw(?:s|n)?|withdrew|pulls? out|pulled out|retract(?:s|ed)?|"
+    r"revers(?:es|ed)|rescind(?:s|ed)?|overturn(?:s|ed)|postpon(?:es|ed)|delay(?:s|ed))\b", re.I)
+OVERTAKE_SHARED = 3
+OVERTAKE_SHARE = 0.4
+
+
+def overtakes(old_title, new_title):
+    """True when `new_title` reports a reversal of what `old_title` reports: see REVERSAL."""
+    if not old_title or not new_title or not REVERSAL.search(new_title) or REVERSAL.search(old_title):
+        return False
+    old, new = _title_words(old_title), _title_words(new_title)
+    shared = old & new
+    return len(shared) >= OVERTAKE_SHARED and len(shared) >= OVERTAKE_SHARE * len(old)
+
+
+def overtaken(members):
+    """The members whose report a later hard-news member of the same event has overtaken: it reports done what
+    they describe as coming ("says he will sign" -> "signs petition", validate.realized_by), or a reversal of it
+    (`overtakes`). The event's card must not be written from them: "Musk says he will sign petition" led a
+    4-publisher event in which two members reported that he had signed."""
+    return set(_overtaken_by(members))
+
+
+def _overtaken_by(members):
+    """{overtaken member's url: [the later members that overtook it]}."""
+    out = {}
+    hard = [m for m in members if m.hard and not m.thin]
+    for m in members:
+        newer = [n for n in hard if n is not m and n.published_at > m.published_at and (
+            validate.realized_by(m.title, n.title) or overtakes(m.title, n.title))]
+        if newer:
+            out[m.url] = newer
+    return out
 
 
 def event_id(url_canonical):
@@ -140,6 +186,10 @@ def entity_keys(entities):
 
 # Items
 
+NO_TEXT_DROP = "held_out:no_text"
+LOST_TEXT_H = 48
+
+
 @dataclass
 class Item:
     url: str
@@ -172,6 +222,8 @@ class Item:
     publisher: str = None       # items.extra.publisher: the outlet of an item imported from a signal's link
     feed_text: str = None
     via: str = None             # items.extra.via: the signal source whose link this article was imported from
+    news_at: object = None      # when its news happened, if days before the article (newsdate.py)
+    signals: dict = field(default_factory=dict)    # items.extra.signals: {signal source id: {points, ...}}
     keys: set = field(default_factory=set)
 
     @property
@@ -183,6 +235,11 @@ class Item:
         return self.status == "thin"
 
     @property
+    def happened_at(self):
+        """When the news this item reports happened: its own time, or earlier for a late write-up."""
+        return self.news_at or self.published_at
+
+    @property
     def can_lead(self):
         return self.hard and not self.thin and self.text_words >= LEAD_MIN_WORDS
 
@@ -191,7 +248,7 @@ ITEM_SQL = """
 SELECT i.url_canonical, i.source_id, i.title, i.published_at, w.status, w.type, w.is_news, w.relevance,
        w.importance, w.breaking, w.sensitive, w.region, w.topics, w.entities, w.event, w.material_update,
        w.text_words, w.headline, w.summary, w.summary_short, w.notif_line, w.s1, w.entailed, w.text, e.vec,
-       w.spice, w.notif_title, i.extra, i.feed_text
+       w.spice, w.notif_title, i.extra, i.feed_text, w.news_at
 FROM items i JOIN writes w ON w.url_canonical = i.url_canonical
 JOIN embeddings e ON e.url_canonical = i.url_canonical AND e.kind = 'passage'
 """
@@ -209,7 +266,8 @@ def _item(r):
               vec=embed_mod.from_blob(r["vec"]), headline=r["headline"], summary=r["summary"],
               summary_short=r["summary_short"], notif_line=r["notif_line"], s1=r["s1"],
               entailed=r["entailed"], text=r["text"], spice=r["spice"], notif_title=r["notif_title"],
-              publisher=extra.get("publisher"), feed_text=r["feed_text"], via=extra.get("via"))
+              publisher=extra.get("publisher"), feed_text=r["feed_text"], via=extra.get("via"),
+              news_at=from_iso(r["news_at"]), signals=extra.get("signals") or {})
     it.keys = entity_keys(ents)
     return it
 
@@ -217,9 +275,14 @@ def _item(r):
 def pending_items(db, now, max_age_days=14):
     """Classified items not yet in an event, oldest publisher time first. Thin items that found no event stay
     pending (they may never start one), so they are retried each tick until they age out."""
-    rows = db.q(ITEM_SQL + " WHERE w.type IS NOT NULL AND i.status != 'dropped' AND i.published_at >= ?"
+    # An item dropped only because its text could not be had ("held_out:no_text": three fetches of an open
+    # site failed, or a paywall) keeps its classification and stays clusterable for LOST_TEXT_H: it can still
+    # back an event up, and one the tech world is sharing can still start one and get a brief (thin_can_seed).
+    rows = db.q(ITEM_SQL + " WHERE w.type IS NOT NULL AND (i.status != 'dropped' OR (i.drop_rule = ?"
+                " AND i.published_at >= ?)) AND i.published_at >= ?"
                 " AND i.url_canonical NOT IN (SELECT url_canonical FROM event_members)"
-                " ORDER BY i.published_at, i.url_canonical", iso(now - timedelta(days=max_age_days)))
+                " ORDER BY i.published_at, i.url_canonical", NO_TEXT_DROP, iso(now - timedelta(hours=LOST_TEXT_H)),
+                iso(now - timedelta(days=max_age_days)))
     return [_item(r) for r in rows]
 
 
@@ -465,12 +528,39 @@ def assign_judged(store, item, ranked, picked):
         # A thin item is classification only: it can back an event up, never start one.
         return None, "thin_unmatched"
     for cos, ev in cands:
-        if rel.get(ev.id) == "followup":
+        if rel.get(ev.id) in ("followup", SUPERSEDES):
             # The parent is the story's first event, so every development of a saga hangs off one root.
-            return create(store, item, parent_id=ev.row.get("parent_id") or ev.id, how="followup_judge")
+            eid, how = create(store, item, parent_id=ev.row.get("parent_id") or ev.id, how="followup_judge")
+            # Every candidate the new report overtakes leaves the edition once this one has a card.
+            for _, old in cands:
+                if item.hard and not item.thin and (rel.get(old.id) == SUPERSEDES or (
+                        rel.get(old.id) == "followup" and _overtakes_event(old, item))):
+                    supersede(store, old, eid)
+                    how = "supersedes_judge"
+            return eid, how
     if too_old is not None and item.material_update and item.importance >= 8:
         return create(store, item, parent_id=too_old.id, how="followup_material")
     return create(store, item, how="thin_seed" if item.thin else "new")
+
+
+SUPERSEDES = "supersedes"
+
+
+def _overtakes_event(old, item):
+    return overtakes(old.row.get("headline"), item.title) or overtakes(old.anchor.title if old.anchor else "",
+                                                                       item.title)
+
+
+def supersede(store, old, new_id):
+    """Marks `old` as overtaken by the event `new_id`: the edition drops it while the newer event has a card
+    (publish_v1.load_candidates). A report about the story, never an analysis or opinion, may do this."""
+    new = store.events.get(new_id)
+    if old.id == new_id or old.row.get("superseded_by") == new_id or (
+            new is not None and new.row.get("superseded_by") == old.id):
+        return
+    old.row["superseded_by"] = new_id
+    store.db.conn.execute("UPDATE events SET superseded_by = ? WHERE id = ?", (new_id, old.id))
+    log.info("superseded: %s by %s", old.id, new_id)
 
 
 # A paywalled outlet's scoop arrives as a title and a sentence. Such an item used to wait for an event to join
@@ -486,7 +576,24 @@ def thin_can_seed(store, item):
     if not item.hard or item.relevance < 2:
         return False
     via = store.by_id.get(item.via) if item.via else None
-    return store.authority(item.source_id) >= SEED_AUTHORITY or (via is not None and via.kind == "techmeme")
+    return (store.authority(item.source_id) >= SEED_AUTHORITY or (via is not None and via.kind == "techmeme")
+            or widely_shared(store, item))
+
+
+# The same bars as rank.STRONG_HN and rank.STRONG_LOBSTERS: a story this widely shared gets a short attributed
+# card from the lines available even when its page cannot be fetched, the way a paywalled scoop does.
+SEED_HN, SEED_LOBSTERS = 300, 100
+
+
+def widely_shared(store, item):
+    """Is the item itself a big Hacker News or Lobsters link (its own points, kept in items.extra.signals)?"""
+    for sid, pts in (item.signals or {}).items():
+        src = store.by_id.get(sid)
+        kind = (src.kind or ("hn" if sid.startswith("hn") else "")) if src else ""
+        points = (pts or {}).get("points") or 0
+        if (kind == "hn" and points >= SEED_HN) or (kind == "lobsters" and points >= SEED_LOBSTERS):
+            return True
+    return False
 
 
 def create(store, item, parent_id=None, how="new"):
@@ -503,6 +610,9 @@ def create(store, item, parent_id=None, how="new"):
     ev = Event(row, [], item)
     store.events[eid] = ev
     _add_member(store, ev, item, 1.0, how)
+    parent = store.events.get(parent_id) if parent_id else None
+    if parent is not None and item.hard and not item.thin and _overtakes_event(parent, item):
+        supersede(store, parent, eid)
     return eid, how
 
 
@@ -525,17 +635,26 @@ def join(store, ev, item, cos, how):
     mark_realized(store, ev, item)
     if item.material_update and item.hard:
         ev.dirty.add("material_update")
-        _set_material(ev, item.published_at)
+        _set_material(ev, item.happened_at)
     return ev.id, how
 
 
 def mark_realized(store, ev, item):
-    """Marks `item` a material update when it reports done what the event's headline describes as coming.
+    """Marks `item` a material update when it reports done what the event's headline describes as coming, on the
+    same verb ("says he will sign petition" -> "signs petition"; validate.realized_by), or a reversal of it
+    (`overtakes`). The rewrite then gets it as the newest report.
 
-    Off: in the shadow run this word-list rule was wrong for 4 of the 6 members it marked, and each wrong mark gave
-    a day-old card a fresh publishedAt. The LLM's own material_update judgement (the write prompt) still applies."""
-    return False
-    if item.material_update or not item.hard or not realizes(ev.row.get("headline"), item.headline or item.title):
+    The first version matched any prospective word in the headline against any "done" word in the title
+    (`realizes`); in the shadow run it was wrong for 4 of the 6 members it marked, each wrong mark giving a
+    day-old card a fresh publishedAt, and it was switched off. This one needs the same verb in both."""
+    if item.material_update or not item.hard or item.thin:
+        return False
+    title = item.title
+    if not any(validate.realized_by(old, title) or overtakes(old, title)
+               for old in (ev.row.get("headline"), ev.anchor.title if ev.anchor and ev.anchor is not item else None)
+               if old):
+        return False
+    if ev.anchor is not None and item.published_at <= ev.anchor.published_at:
         return False
     item.material_update = True
     store.db.conn.execute("UPDATE writes SET material_update = 1 WHERE url_canonical = ?", (item.url,))
@@ -618,7 +737,7 @@ def merge_twins(store):
                 continue
         except LLMError:
             continue
-        updates = [m.published_at for m in src.members if m.material_update and m.hard]
+        updates = [m.happened_at for m in src.members if m.material_update and m.hard]
         merge(store, src, dst)
         for at in updates:
             _set_material(dst, at)
@@ -634,6 +753,13 @@ def merge(store, src, dst):
     db.conn.execute("UPDATE OR IGNORE event_signals SET event_id = ? WHERE event_id = ?", (dst.id, src.id))
     db.conn.execute("DELETE FROM event_signals WHERE event_id = ?", (src.id,))
     db.conn.execute("UPDATE events SET parent_id = ? WHERE parent_id = ?", (dst.id, src.id))
+    db.conn.execute("UPDATE events SET superseded_by = ? WHERE superseded_by = ? AND id != ?",
+                    (dst.id, src.id, dst.id))
+    for ev in store.events.values():
+        if ev.row.get("superseded_by") == src.id and ev is not dst:
+            ev.row["superseded_by"] = dst.id
+    if dst.row.get("superseded_by") == src.id:
+        dst.row["superseded_by"] = None     # the two are one event now
     db.conn.execute("UPDATE event_alias SET id = ? WHERE id = ?", (dst.id, src.id))
     db.conn.execute("INSERT OR REPLACE INTO event_alias VALUES (?,?,?)", (src.id, dst.id, now))
     db.conn.execute("UPDATE events SET status = 'merged', updated_at = ? WHERE id = ?", (now, src.id))
@@ -656,6 +782,18 @@ def choose_lead(store, ev):
     """Hard-news members with >= 120 words, ranked by cosine to the anchor x authority, then earliest; a validated
     write beats a failed one. Opinion, analysis and interview lead only when there is no hard-news member."""
     members = ev.members
+    # The card follows the newest material fact the event holds: a member whose report a later member has
+    # overtaken ("says he will sign" once others report "signs") does not lead while a current one can.
+    stale = _overtaken_by(members)
+    if stale:
+        # First the reports that carry the newer fact, else any report that is not overtaken; an overtaken one
+        # leads only when nothing else has a validated card (a stale card beats no card).
+        newer = [n for ns in stale.values() for n in ns if n.url not in stale]
+        current = [m for m in members if m.url not in stale]
+        for pick in (newer, current):
+            if any(m.hard and not m.thin and m.status == "ok" for m in pick):
+                members = pick
+                break
     pool = [m for m in members if m.can_lead]
     if not any(m.status == "ok" for m in pool):
         # No full-length report validated: a shorter hard-news report that did (NY Post's 114 words on Huang's
@@ -684,7 +822,7 @@ def refresh(store, ev, tier1_ok):
     # A member that joined before the event's headline said "upcoming" (or before this rule) still counts.
     for m in members:
         if mark_realized(store, ev, m):
-            _set_material(ev, m.published_at)
+            _set_material(ev, m.happened_at)
             ev.dirty.add("material_update")
     _set_anchor(ev)
     # The event's clock is its first hard-news report. A profile or explainer that joined does not move it back:
@@ -700,18 +838,34 @@ def refresh(store, ev, tier1_ok):
     if lead is not None and lead.url != prev_lead:
         row["lead_url"] = lead.url
         if prev_lead is not None:
-            _set_material(ev, lead.published_at)
+            _set_material(ev, lead.happened_at)
             _queue_rewrite(row, "lead_change")
+    # The clock is when the news happened, never when a late write-up of it was published or fetched: "Apple
+    # starts selling HomeView" (PYMNTS, Sunday evening, on sales that began on Friday) was shown as 15 minutes old
+    # and queued for a push alert.
+    if lead is not None and lead.news_at is not None and iso(lead.news_at) < row["published_at"]:
+        row["published_at"] = iso(lead.news_at)
     if "material_update" in ev.dirty:
         _queue_rewrite(row, "material_update")
     seen = set(json.loads(row.get("rewrite_publishers") or "[]"))
     if len(set(publishers) - seen) >= 2:
         _queue_rewrite(row, "publishers")
+    # A hard-news report hours newer than the lead, published since the card's text was last written: the card
+    # is rewritten with it as the newest report, so it states the newest account the event holds (see
+    # llm.rewrite_event; the usual 2 h cap applies).
+    if lead is not None:
+        since = max(lead.published_at, from_iso(row.get("rewritten_at")) or lead.published_at)
+        if any(m.hard and not m.thin and m is not lead and m.published_at > since
+               and m.published_at - lead.published_at >= NEWER_REPORT for m in members):
+            _queue_rewrite(row, "newer_report")
 
     if lead is not None:
         row.update(type=lead.type, topics=json.dumps(lead.topics), region=lead.region, relevance=lead.relevance,
                    is_news=int(lead.is_news))
         own = bool(lead.headline and lead.status == "ok")
+        if row.get("text_from") == "rewrite" and not lead.hard:
+            # An earlier rewrite of commentary (see due_rewrite): the lead's own card and score come back.
+            row.update(text_from=None, rewrite_importance=None, rewrite_reason=None)
         if row.get("text_from") == BRIEF and not own and row.get("headline"):
             pass        # the brief stands until a member's own card validates (an open outlet's report)
         elif row.get("text_from") != "rewrite" or prev_lead != lead.url:
@@ -760,6 +914,8 @@ BRIEF = "brief"
 BRIEF_MAX_AGE_H = 24
 BRIEF_RETRY = timedelta(minutes=20)
 BRIEF_MIN_WORDS = 25
+BRIEF_MIN_WORDS_SHARED = 16
+HN_LINE = "Hacker News (discussion, not the source of the report)"
 BRIEF_HN = 150
 BRIEF_SOLO_IMPORTANCE = 7
 MAX_BRIEFS = 3
@@ -788,6 +944,12 @@ def brief_lines(store, ev):
             text = " ".join((r["feed_text"] or "").split()[:90])
             if not any(text[:60].lower() == t[:60].lower() for _, _, t in out):
                 out.append((f"{src.name} (summary of the report)", r["title"].strip(), text))
+    # How widely the link is being discussed is itself a line the card may state: for a page that cannot be
+    # fetched it is often the only fact besides the title.
+    hn = json.loads(ev.row.get("hn") or "null") or {}
+    if (hn.get("points") or 0) >= BRIEF_HN:
+        out.append((HN_LINE, f"The link has {hn['points']} points and {hn.get('comments') or 0} comments on "
+                             f"Hacker News", ""))
     return out
 
 
@@ -809,7 +971,10 @@ def brief_due(store, ev):
     if not (row.get("on_techmeme") or (row.get("n_publishers") or 0) >= 2 or hn >= BRIEF_HN or solo):
         return False
     lines = brief_lines(store, ev)
-    if sum(len(f"{title} {text}".split()) for _, title, text in lines) < BRIEF_MIN_WORDS:
+    # A story Techmeme headlines or Hacker News is discussing at length gets its card from less: the title and
+    # the discussion line are enough for a headline and one attributed sentence.
+    need = BRIEF_MIN_WORDS_SHARED if row.get("on_techmeme") or hn >= SEED_HN else BRIEF_MIN_WORDS
+    if sum(len(f"{title} {text}".split()) for _, title, text in lines) < need:
         return False
     last = from_iso(row.get("rewritten_at"))
     return (last is None or now - last >= BRIEF_RETRY
@@ -896,6 +1061,13 @@ def attach_signals(store):
     db, now = store.db, store.now
     member_of = {r["url_canonical"]: r["event_id"] for r in db.q("SELECT url_canonical, event_id FROM event_members")}
     signal_ids = {s.id for s in store.srcs.sources if s.is_signal}
+    # A Reddit post attaches only through the article it links, never by its title: the title is a reader's own
+    # words. Of 23 Reddit posts attached in the third review's run, 15 were title matches, among them "MAGA turns
+    # on Lutnick amid China spy ..." on the Megaspeed blacklist card and "US aviation shutdown blamed on L3
+    # Harris ..." on the Juniper routers card. Matches made that way before this rule are removed.
+    by_url_only = {s.id for s in store.srcs.sources if s.is_signal and s.kind in URL_ONLY_KINDS}
+    for sid in by_url_only:
+        db.conn.execute("DELETE FROM event_signals WHERE source_id = ? AND how != 'url'", (sid,))
     attached = {(r["url_canonical"], r["source_id"]): (r["event_id"], r["how"])
                 for r in db.q("SELECT event_id, url_canonical, source_id, how FROM event_signals")}
     n = 0
@@ -923,7 +1095,7 @@ def attach_signals(store):
             extra = json.loads(r["extra"] or "{}")
             linked = extra.get("linked_url") or r["url_canonical"]
             if linked in member_of or r["url_canonical"] in member_of or r["vec"] is None \
-                    or (r["url_canonical"], r["source_id"]) in attached:
+                    or (r["url_canonical"], r["source_id"]) in attached or r["source_id"] in by_url_only:
                 continue
             near = _near_events(store, r)
             if near and r["vec_key"] not in asked and any(store.ruling(r["vec_key"], ev.id) is None
@@ -948,7 +1120,7 @@ def attach_signals(store):
             if attached[key][0] in store.events:
                 attach(attached[key][0], r["url_canonical"], r["source_id"], attached[key][1], extra)
             continue
-        if r["vec"] is None:
+        if r["vec"] is None or r["source_id"] in by_url_only:
             continue
         ranked = store.ranked(embed_mod.from_blob(r["vec"]))
         if not ranked or ranked[0][0] < store.s.t_signal:
@@ -970,6 +1142,7 @@ def attach_signals(store):
 
 
 SIGNAL_CANDIDATES = 3
+URL_ONLY_KINDS = ("reddit",)
 
 
 def _near_events(store, r):
@@ -1003,14 +1176,15 @@ def _apply_signals(store, ev):
     best = max(hn, key=lambda r: r["points"] or 0, default=None)
     ev.row["hn"] = json.dumps({"points": best["points"] or 0, "comments": best["comments"] or 0,
                                "url": best["hn_url"] or best["url_canonical"]}) if best else None
-    # Other places a story is being shared (Lobsters today), each with its own capped multiplier in rank.coverage.
+    # Other places a story is being shared, each with its own capped multiplier in rank.coverage: Lobsters by its
+    # points, Reddit by the post's place among the day's top posts (fetch.REDDIT_LISTING; 1 = listed, place
+    # unknown, for rows attached before places were kept).
     social = {}
     for r in rows:
         kind = kinds[r["source_id"]]
-        if kind in ("lobsters", "github") and (r["points"] or 0) > social.get(kind, 0):
-            social[kind] = r["points"]
-        elif kind == "reddit":
-            social["reddit"] = 1        # listed among a subreddit's top posts of the day; the feed has no score
+        points = r["points"] or (1 if kind == "reddit" else 0)
+        if kind in ("lobsters", "reddit") and points > social.get(kind, 0):
+            social[kind] = points
     ev.row["social"] = json.dumps(social) if social else None
 
 
@@ -1228,6 +1402,11 @@ def due_rewrite(row, now, s):
     """A rewrite at most every 2 h, except a hard-news material update, which goes straight through."""
     reasons = set(filter(None, (row.get("rewrite_reason") or "").split(",")))
     if not reasons or (row.get("n_publishers") or 0) < 2:
+        return False
+    # Commentary is each author's own: three analyses of a week-old resignation, rewritten into one card and
+    # re-scored as "the event", shipped as "Analysis: Jensen Huang resigns as Nvidia CEO after reports of
+    # affairs" at importance 9. A rewrite merges reports of one development, so it needs a report to lead it.
+    if row.get("type") not in HARD_NEWS:
         return False
     last = from_iso(row.get("rewritten_at"))
     return "material_update" in reasons or last is None or now - last >= timedelta(hours=s.rewrite_cap_h)

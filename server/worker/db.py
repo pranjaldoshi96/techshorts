@@ -145,6 +145,12 @@ CREATE TABLE IF NOT EXISTS shipped (
   first_seen_at TEXT
 );
 
+-- The earliest report of each shipped story that the engine saw: the earliest publisher time over the event's
+-- members (thin and commentary ones included) and the signals attached to it. health.json counts the
+-- publisher-to-app lag from here; shipped.published_at is the time the card shows, which a lead change or a
+-- material update moves forward.
+CREATE TABLE IF NOT EXISTS story_first_report (event_id TEXT PRIMARY KEY, at TEXT NOT NULL);
+
 -- One row per publish attempt (WP4). ok = 0 when check_edition refused it.
 CREATE TABLE IF NOT EXISTS publishes (
   at TEXT NOT NULL, ok INTEGER NOT NULL, degraded TEXT, articles INTEGER, top INTEGER, sha TEXT, problem TEXT
@@ -175,8 +181,11 @@ MIGRATIONS = {
     "items": [("hold_reason", "TEXT"), ("og_image", "TEXT"), ("triaged", "INTEGER")],
     "write_log": [("attempt", "INTEGER"), ("tok_in", "INTEGER"), ("tok_out", "INTEGER")],
     # Spice and the push alert's title (owner's direction, 2026-11-15); NULL spice on older rows reads as 5.
-    "writes": [("spice", "INTEGER"), ("notif_title", "TEXT")],
-    "events": [("spice", "INTEGER"), ("notif_title", "TEXT"), ("rewrite_spice", "INTEGER"), ("social", "TEXT")],
+    # news_at: when the item's news happened, if days before the article (newsdate.py); NULL = the article's time.
+    "writes": [("spice", "INTEGER"), ("notif_title", "TEXT"), ("news_at", "TEXT")],
+    # superseded_by: the event whose newer report overtook this one's card (cluster.supersede).
+    "events": [("spice", "INTEGER"), ("notif_title", "TEXT"), ("rewrite_spice", "INTEGER"), ("social", "TEXT"),
+               ("superseded_by", "TEXT")],
 }
 # Run once, right after a migration adds the column.
 BACKFILL = {("write_log", "attempt"): (
@@ -351,6 +360,7 @@ class DB:
             passed_at=result.passed_at, reason=result.reason, text_origin=text.origin, text_words=text.words,
             text=text.text, attribution=attribution.prefix if attribution else None,
             entailed=None if result.entailed is None else int(result.entailed),
+            news_at=iso(getattr(result, "news_at", None)),
             steps=json.dumps([s.__dict__ for s in result.steps]))
         if o is not None:
             row.update(

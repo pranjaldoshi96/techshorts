@@ -93,7 +93,10 @@ overhaul revamp tackle curb crack clamp mandate impose levy scrutinise scrutiniz
 detail outline brief renegotiate challenge exit""".split())
 # "X to VERB" only counts at the start of the title (or of a segment after ":" or ";"), with a subject made of
 # names: "Investors urge Nvidia board to keep doors open" is an infinitive after a finite verb, not a plan.
-FUTURE_TO = re.compile(r"^((?:[A-Z0-9][\w&.'’-]*,?\s+|(?:and|of|the|&)\s+){1,5})to\s+([a-z]{2,})\b")
+# Title Case and all-caps titles count too ("Sebi To Issue AI Usage Guidelines", "SEBI TO ISSUE ..."): the first
+# version wanted a lower-case "to" and verb, so the rule never saw the feeds that capitalize every word.
+FUTURE_TO = re.compile(r"^((?:[A-Z0-9][\w&.'’-]*,?\s+|(?:and|of|the|&|And|Of|The)\s+){1,5})[Tt][Oo]\s+"
+                       r"([A-Za-z]{2,})\b")
 NOT_SUBJECT = {"how", "why", "what", "when", "where", "who", "ways", "way", "time", "guide", "introduction",
                "intro", "welcome", "road", "path", "response", "reaction", "back", "return", "thanks", "due", "up",
                "here's", "need", "reasons", "reason", "things", "tips", "steps", "want", "ready", "learn",
@@ -139,10 +142,151 @@ def future_marker(text, pattern=FUTURE_MARK):
     if m:
         return m.group(0)
     for segment in re.split(r"[:;|]\s+|\s[–—-]\s", text or ""):
-        m = FUTURE_TO.match(segment.strip())
-        if m and m.group(2) in FUTURE_VERBS and not (
-                {w.strip(",").lower() for w in m.group(1).split()} & NOT_SUBJECT):
-            return f"to {m.group(2)}"
+        verb = _headline_plan(segment)
+        if verb:
+            return f"to {verb}"
+    return None
+
+
+def _headline_plan(segment):
+    """The verb of headline-ese "X to VERB" at the start of a title segment ("Sebi to issue ..."), or None."""
+    m = FUTURE_TO.match(segment.strip())
+    if m and m.group(2).lower() in FUTURE_VERBS and not (
+            {w.strip(",").lower() for w in m.group(1).split()} & NOT_SUBJECT):
+        return m.group(2).lower()
+    return None
+
+
+# Plan -> done drift on the same verb, wherever the plan is stated. The rule above reads only the source title and
+# is satisfied by any prospective word in the headline; it missed "expected to price at $70 to $78" (in the text,
+# not the title) shipped as "priced at $70 to $78", and "Sebi to issue" shipped as "Sebi issues ... ahead of
+# budget" ("ahead of" counted as keeping the plan). Here every verb the source describes as still to come
+# ("to issue", "will sign", "expected to price", "to be priced") is collected, and a card line that uses that verb
+# as done ("issues", "signed", "priced") fails unless the source itself reports it done somewhere.
+_ADV = r"(?:(?:also|soon|now|still|first|then|not|finally|eventually|formally|officially|[a-z]+ly)\s+)?"
+PLANNED_VERB = re.compile(
+    r"\b(?:will|won't|won’t|shall|set to|plans? to|planning to|poised to|expected to|expects? to|slated to|"
+    r"scheduled to|about to|aims? to|aiming to|intends? to|intending to|prepares? to|preparing to|hopes? to|"
+    r"hoping to|looks? to|looking to|seeks? to|seeking to|due to|likely to|going to|yet to|wants? to|vows? to|"
+    r"pledges? to|promises? to|threatens? to|in talks to)\s+" + _ADV + r"(be\s+|have\s+)?([a-z]{3,})\b", re.I)
+# Too common to say anything: "will make" next to "makes" somewhere else in a card is not drift.
+GENERIC_VERBS = set("""be have do get make take go come see say tell use need want keep let help try continue remain
+work give put look find know think feel seem become stay run turn show move live hold bring begin start include
+allow provide offer face lead follow add set meet mean""".split())
+IRREGULAR_DONE = {"sell": ("sold",), "buy": ("bought",), "pay": ("paid",), "build": ("built",), "win": ("won",),
+                  "lose": ("lost",), "send": ("sent",), "spend": ("spent",), "rise": ("rose", "risen"),
+                  "fall": ("fell", "fallen"), "lay": ("laid",), "leave": ("left",), "speak": ("spoke", "spoken"),
+                  "hear": ("heard",), "cut": ("cut",), "hit": ("hit",), "shut": ("shut",), "quit": ("quit",),
+                  "split": ("split",), "bid": ("bid",), "ban": ("banned",), "drop": ("dropped",),
+                  "scrap": ("scrapped",), "ship": ("shipped",), "step": ("stepped",), "stop": ("stopped",),
+                  "strike": ("struck",), "write": ("wrote", "written"), "withdraw": ("withdrew", "withdrawn"),
+                  "choose": ("chose", "chosen"), "break": ("broke", "broken"), "freeze": ("froze", "frozen")}
+_PARTICIPLE_BASE = {p: b for b, ps in IRREGULAR_DONE.items() for p in ps}
+# Words before a verb form that keep it prospective, conditional or negated ("to be priced", "will be issued",
+# "if approved", "has not signed").
+GOVERNED = re.compile(
+    r"^(to|will|won't|shall|be|could|may|might|would|should|can|must|if|whether|until|unless|before|once|when|"
+    r"expected|expects?|set|plans?|planning|planned|poised|slated|scheduled|due|likely|about|aims?|aiming|"
+    r"intends?|hopes?|hoping|seeks?|seeking|wants?|vows?|pledges?|promises?|threatens?|yet|not|never|"
+    r"didn't|doesn't|hasn't|haven't|upcoming|proposed|potential|possible)$", re.I)
+GOVERN_WINDOW = 4
+
+
+def _bases(word, participle=False):
+    """The base forms a verb token may stand for: itself, and for a participle after "be"/"have" ("priced",
+    "issued", "launched", "sold") the candidates without the ending. A wrong candidate is harmless: it only
+    yields done forms that never occur."""
+    w = word.lower()
+    out = {w}
+    if participle:
+        if w in _PARTICIPLE_BASE:
+            out.add(_PARTICIPLE_BASE[w])
+        if w.endswith("ied"):
+            out.add(w[:-3] + "y")
+        if w.endswith("ed"):
+            out |= {w[:-1], w[:-2]}
+            if len(w) > 5 and w[-3] == w[-4]:
+                out.add(w[:-3])          # "scrapped" -> "scrap"
+    return {b for b in out if len(b) >= 3}
+
+
+def done_forms(base):
+    """The forms that state `base` as done or happening: "issues", "issued" for "issue". Not the base form and
+    not the gerund ("pricing" is a noun in "IPO pricing")."""
+    b = base.lower()
+    out = set(IRREGULAR_DONE.get(b, ()))
+    if b.endswith("e"):
+        out |= {b + "s", b + "d"}
+    elif b.endswith("y") and len(b) > 2 and b[-2] not in "aeiou":
+        out |= {b[:-1] + "ies", b[:-1] + "ied"}
+    elif b.endswith(("s", "x", "z", "ch", "sh")):
+        out |= {b + "es", b + "ed"}
+    else:
+        out |= {b + "s", b + "ed"}
+    return out
+
+
+def planned_verbs(*texts):
+    """{base verb: the source's phrase} for every verb `texts` describe as still to come."""
+    out = {}
+    for text in texts:
+        if not text:
+            continue
+        for m in PLANNED_VERB.finditer(text):
+            for b in _bases(m.group(2), participle=bool(m.group(1))):
+                if b not in GENERIC_VERBS:
+                    out.setdefault(b, " ".join(m.group(0).split()))
+        if len(text) < 300:             # headline-ese "X to VERB" is a title form, not prose
+            for segment in re.split(r"[:;|]\s+|\s[–—-]\s", text):
+                verb = _headline_plan(segment)
+                if verb and verb not in GENERIC_VERBS:
+                    out.setdefault(verb, f"to {verb}")
+    return out
+
+
+def stated_done(text, forms):
+    """The first of `forms` that `text` uses as done: not after "to be", "will", "expected to", "if", "not" and
+    the like within the few words before it in the same sentence. None when there is none."""
+    words = re.findall(r"[A-Za-z][A-Za-z’'-]*|[.;:!?]", text or "")
+    low = [w.lower().replace("’", "'") for w in words]
+    for i, w in enumerate(low):
+        if w not in forms:
+            continue
+        governed = False
+        for prev in reversed(low[max(0, i - GOVERN_WINDOW):i]):
+            if prev in (".", ";", ":", "!", "?"):
+                break               # a marker in the sentence before governs nothing here
+            if GOVERNED.match(prev):
+                governed = True
+                break
+        if not governed:
+            return words[i]
+    return None
+
+
+def done_before_due(line, title, text=""):
+    """(the done form in `line`, the source's plan phrase) when `line` states as done a verb the source (title
+    and text) only describes as planned; None otherwise. The source reporting the same verb as done anywhere
+    ("Sebi issued draft rules in June and will issue final ones") clears it."""
+    if not line:
+        return None
+    source = f"{title or ''}. {text or ''}"
+    for base, phrase in planned_verbs(title, text).items():
+        forms = done_forms(base)
+        used = stated_done(line, forms)
+        if used and not stated_done(source, forms):
+            return used, phrase
+    return None
+
+
+def realized_by(planned_title, later_title):
+    """The verb when `later_title` reports done what `planned_title` describes as coming, on the same verb:
+    "Musk backs petition, says he will sign it" -> "Elon Musk signs petition" / "tech execs sign petition".
+    None otherwise. (cluster.py: an event's card follows the newest material fact its members hold.)"""
+    for base in planned_verbs(planned_title):
+        forms = done_forms(base)
+        if stated_done(later_title, forms | {base}) and not stated_done(planned_title, forms):
+            return base
     return None
 
 
@@ -577,6 +721,31 @@ def names_outlet(text, outlets):
     return False
 
 
+# A card written from a short text (a paywall's opening, a feed blurb) whose text does not itself report the news
+# in its title. Bloomberg's "VC Firm Run by Madonna's Manager Has $7 Billion Anthropic Stake" came with 80 words
+# of scene ("Dario Amodei was arguably one of the least famous people in the Beverly Hills home he visited in
+# 2023 ..."): the card took its headline from the title and filled three sentences with the scene, every one of
+# them true to the text and none about the stake. The text must carry the headline: each figure in it, and at
+# least half of its names. Otherwise the item is a title with no report under it, and is handled like one
+# (llm.write_item: classification only; a brief if the story has traction).
+TEASER = "teaser_text"
+
+
+def teaser_text(headline, body, allowed=()):
+    """The first figure or name of `headline` that `body` (the item's text without its title) does not carry,
+    when the body does not carry the headline's news; None when it does."""
+    h = PREFIX.sub("", headline or "", count=1)
+    have = numbers(body)
+    for n in numbers(h):
+        if not number_grounded(n, have):
+            return n.text
+    hay = re.sub(r"\.", "", (body or "").lower().replace("’", "'"))
+    allow = {a.lower() for a in allowed}
+    names = [w for w in capitalized(h) if any(ch.isalpha() for ch in w) and w.lower() not in allow]
+    missing = [w for w in names if not _in_source(w, hay)]
+    return missing[0] if names and len(missing) > len(names) / 2 else None
+
+
 def headline_problems(headline):
     out = []
     h = (headline or "").strip()
@@ -650,6 +819,11 @@ def check(out, source_text, title, source_name, attribution=None, author=None, l
         full = short
         for code, msg in problems:
             v.fail(code, msg)
+        missing = teaser_text(out.headline, source_text, [*re.findall(r"[\w']+", source_name or ""),
+                                                           *attribution_mod.LABELS])
+        if missing:
+            v.fail(TEASER, f"The text does not report the headline's news ('{missing}' is only in the title): "
+                           f"write the headline and both sentences from what the text itself states.")
     else:
         full, short, problems = trim(out.s1, out.s2, out.s3)
         for code, msg in problems:
@@ -697,6 +871,14 @@ def check(out, source_text, title, source_name, attribution=None, author=None, l
         v.fail("tense_drift", f"Headline states as done what the source says is still to come (the source title "
                               f"says '{mark}': \"{title}\"). Keep the future form: 'to ...', 'will ...', "
                               f"'plans to ...'.")
+    else:
+        for label, line in (("Headline", out.headline), ("The summary", full), ("The alert title", notif_title),
+                            ("The alert", notif)):
+            drift = done_before_due(line, title, source_text)
+            if drift:
+                v.fail("tense_drift", f"{label} says '{drift[0]}', stating as done what the source says is still "
+                                      f"to come (\"{drift[1]}\"). Keep the source's future or expected form.")
+                break
     shown = f"{out.headline or ''} {full} {notif} {notif_title}"
     for phrase in invented(SPECULATION, shown, source):
         v.fail("speculation", f"'{phrase}' is your inference, not in the source text; state only what the text "

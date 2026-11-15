@@ -114,25 +114,75 @@ def files_exist(out_dir, name):
     return all(os.path.exists(os.path.join(out_dir, "img", f"{name}_{v}")) for v in ("std.jpg", "thumb.webp"))
 
 
-def generated(out_dir, topic):
-    """The no-photo image for a topic: a diagonal gradient with a faint ring glyph and no text. One file per topic,
-    made once. (The spec's source logo is left out: there are no licensed logos to draw.)"""
+# The no-photo picture comes in GEN_VARIANTS looks per topic, so cards without a photo do not all show the same
+# one: in the third review's edition twelve cards shared two pictures (one per topic). A variant differs in the
+# gradient's direction, its tint, and the faint glyph (rings, bars, dots or arcs) and where it sits.
+GEN_VARIANTS = 24
+_GEN_ANGLES = (32, 148, 68, -68, 0, 90)
+_GEN_SPOTS = ((0.72, 0.42), (0.28, 0.60), (0.55, 0.30))
+_GEN_GLYPHS = ("rings", "bars", "dots", "arcs")
+
+
+def _tint(color, k):
+    """A small, muted shift of `color` for variant k (the topic stays recognisable)."""
+    shift = ((k * 7) % 5 - 2) * 4, ((k * 3) % 5 - 2) * 4, ((k * 2) % 5 - 2) * 4
+    return tuple(max(0, min(255, v + d)) for v, d in zip(color, shift))
+
+
+def _gradient(w, h, degrees):
+    """An 8-bit ramp across a w x h image along `degrees` (0 = left to right, 90 = top to bottom)."""
+    import numpy as np
+    Image, _, _ = _pil()
+    t = np.radians(degrees)
+    x, y = np.meshgrid(np.linspace(-0.5, 0.5, w), np.linspace(-0.5, 0.5, h))
+    ramp = x * np.cos(t) + y * np.sin(t)
+    ramp = (ramp - ramp.min()) / (ramp.max() - ramp.min())
+    return Image.fromarray((ramp * 255).astype("uint8"), "L")
+
+
+def generated(out_dir, topic, variant=0):
+    """The no-photo image for a topic: a gradient with a faint glyph and no text, in one of GEN_VARIANTS looks.
+    One file per topic and variant, made once. (The spec's source logo is left out: there are no licensed logos
+    to draw.)"""
     topic = topic if topic in TOPIC_COLORS else "default"
-    name = f"gen_{topic}"
+    k = int(variant) % GEN_VARIANTS
+    name = f"gen_{topic}_{k:02d}"
     if files_exist(out_dir, name):
         return name
     Image, ImageDraw, _ = _pil()
-    a, b = TOPIC_COLORS.get(topic, DEFAULT_COLORS)
+    a, b = (_tint(c, k) for c in TOPIC_COLORS.get(topic, DEFAULT_COLORS))
     w, h = 1280, 800
-    grad = Image.linear_gradient("L").rotate(-32, expand=True).resize((w, h))
-    img = Image.composite(Image.new("RGB", (w, h), b), Image.new("RGB", (w, h), a), grad)
+    img = Image.composite(Image.new("RGB", (w, h), b), Image.new("RGB", (w, h), a),
+                          _gradient(w, h, _GEN_ANGLES[k // 4]))
     d = ImageDraw.Draw(img)
-    cx, cy = int(w * 0.72), int(h * 0.42)
-    for i, r in enumerate((120, 200, 280)):
+    fx, fy = _GEN_SPOTS[(k // 4) % len(_GEN_SPOTS)]
+    cx, cy = int(w * fx), int(h * fy)
+    glyph = _GEN_GLYPHS[k % 4]
+    for i in range(3):
         shade = tuple(min(255, v + 22 - 6 * i) for v in b)
-        d.ellipse((cx - r, cy - r, cx + r, cy + r), outline=shade, width=6)
+        r = 120 + 80 * i
+        if glyph == "rings":
+            d.ellipse((cx - r, cy - r, cx + r, cy + r), outline=shade, width=6)
+        elif glyph == "bars":
+            x = cx - 220 + 150 * i
+            d.polygon([(x, cy + 260), (x + 70, cy + 260), (x + 250, cy - 260), (x + 180, cy - 260)], fill=shade)
+        elif glyph == "dots":
+            for j in range(5):
+                x, y = cx - 240 + 120 * j, cy - 120 + 120 * i
+                d.ellipse((x - 22, y - 22, x + 22, y + 22), fill=shade)
+        else:
+            d.arc((cx - r, cy - r, cx + r, cy + r), start=200 + 25 * i, end=340 + 25 * i, fill=shade, width=10)
     derive(img, out_dir, name)
     return name
+
+
+def pick_variant(key, taken):
+    """The variant for the card `key` (an event id): its own by hash, or the next one that `taken` (the variants
+    already on cards of the same topic in this edition, with how often) uses least. Stable for a card from one
+    publish to the next unless a neighbour took its look first."""
+    start = int(hashlib.sha1(key.encode()).hexdigest(), 16) % GEN_VARIANTS
+    order = [(start + i) % GEN_VARIANTS for i in range(GEN_VARIANTS)]
+    return min(order, key=lambda k: (taken.get(k, 0), order.index(k)))
 
 
 class Images:

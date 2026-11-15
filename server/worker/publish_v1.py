@@ -40,7 +40,9 @@ log = logging.getLogger("techgist")
 
 V1_CATEGORY = {"ai": "AI", "startups": "Startups", "dev": "Dev", "reads": "Blogs"}
 # The tab an event's main topic (its first) belongs in, preferred over the relative-rank rule in v1_category.
-PRIMARY_TAB = {"ai": "ai", "startups_funding": "startups", "dev_tools": "dev"}
+# A security incident that made Dev (rank.dev_security: it has a developer angle) is filed there, not under
+# whichever other tab it also reached.
+PRIMARY_TAB = {"ai": "ai", "startups_funding": "startups", "dev_tools": "dev", "security": "dev"}
 V1_CATEGORIES = ("Top", "AI", "Startups", "Dev", "Blogs")
 URL_SAFE = ":/?#[]@!$&'()*+,;=%~-._"
 MAX_WINDOW = timedelta(days=14)
@@ -61,7 +63,7 @@ def _words(s):
 
 MEMBER_SQL = """
 SELECT i.url_canonical, i.url, i.source_id, i.title, i.feed_text, i.image, i.og_image, i.published_at,
-       i.first_seen_at, i.extra, w.status, w.text, w.entities, w.type
+       i.first_seen_at, i.feed_published_at, i.extra, w.status, w.text, w.entities, w.type
 FROM event_members em JOIN items i ON i.url_canonical = em.url_canonical
 LEFT JOIN writes w ON w.url_canonical = em.url_canonical
 WHERE em.event_id = ?
@@ -165,22 +167,45 @@ def event_candidate(ctx, ev):
         published_at=from_iso(ev["published_at"]), material_at=from_iso(ev["last_material_update_at"]),
         lead_source=lead["source_id"], lead_publisher=ctx.pub(lead),
         lead_reads=bool(lead_src and lead_src.reads), lead_tier1=lead_tier1, ai_text=ai_text,
+        lead_dev=bool(lead_src and lead_src.desk == "dev"),
         classified=ev["type"] is not None, boost=ctx.editorial.boost.get(ev["id"], 1.0),
         pin=frozenset(ctx.editorial.pins.get(ev["id"], ())), title=headline or lead["title"] or "",
         spice=_col(ev, "spice") or rank.SPICE_NEUTRAL,
-        lobsters_points=social.get("lobsters") or 0, on_reddit=bool(social.get("reddit")),
-        github_stars=social.get("github") or 0,
+        lobsters_points=social.get("lobsters") or 0, on_reddit=reddit_top(social.get("reddit")),
         unvetted=lead["source_id"] == sources_mod.WEB_ID,
         keys=frozenset().union(*(entity_keys(json.loads(m["entities"] or "{}")) for m in members)))
     c.data = {"lead": lead, "members": members, "publishers": publishers, "headline": headline, "summary": summary,
               "hn": hn, "parent_id": ev["parent_id"], "title_words": _words(lead["title"]),
               "first_seen_at": min(m["first_seen_at"] for m in members),
+              "first_report_at": first_report(ctx.db, ev["id"], members),
               "images": image_sources(ctx, lead, members), "orgs": primary_orgs(members),
               # An owner's override replaces the card's text, so the alert written for the old text is dropped.
               "people": people(members),
+              # No publisher's date at all (none in the feed, none on the page): the lead is dated by when the
+              # worker first fetched it, which says nothing about when the news happened.
+              "undated": lead["feed_published_at"] is None and lead["published_at"] == lead["first_seen_at"],
               "notif_title": None if over else _col(ev, "notif_title"),
               "notif_line": None if over else ev["notif_line"]}
     return c, None
+
+
+def first_report(db, eid, members):
+    """The earliest report of the story the engine saw (ISO): the earliest publisher time among the event's
+    members, whatever their type or length, and the signal posts attached to it (a Techmeme headline is often
+    the first sight of a story)."""
+    times = [m["published_at"] for m in members]
+    row = db.one("SELECT MIN(i.published_at) at FROM event_signals s JOIN items i ON i.url_canonical = s.url_canonical"
+                 " WHERE s.event_id = ?", eid)
+    if row is not None and row["at"]:
+        times.append(row["at"])
+    return min(times)
+
+
+def reddit_top(points):
+    """Is the event's Reddit post among the day's first rank.REDDIT_TOP? `points` is its place in the listing
+    counted down from the top (fetch.REDDIT_LISTING for the first post)."""
+    from .fetch import REDDIT_LISTING
+    return (points or 0) > REDDIT_LISTING - rank.REDDIT_TOP
 
 
 def _col(row, name):
@@ -350,9 +375,34 @@ def load_candidates(ctx):
             held[why] = held.get(why, 0) + 1
         else:
             out.append(c)
+    out, dropped = drop_superseded(ctx, out)
+    if dropped:
+        held["superseded"] = dropped
     if ctx.outage:
         out += outage_singletons(ctx, out)
     return out, held
+
+
+def drop_superseded(ctx, cands):
+    """Leaves out a card that a later development of its story has overtaken (cluster.supersede: the judge's
+    "supersedes" ruling, or a reversal such as "launches" -> "fails, payload lost"), as long as the newer event
+    has a written card in this edition. "ULA launches Vulcan with 40 Amazon internet satellites" sat at rank 21
+    beside the card reporting the rocket lost. Returns (kept candidates, number dropped)."""
+    rows = {r["id"]: r["superseded_by"] for r in ctx.db.q(
+        "SELECT id, superseded_by FROM events WHERE superseded_by IS NOT NULL")}
+    if not rows:
+        return cands, 0
+    written = {c.id for c in cands if c.ai_text}
+
+    def overtaken(eid, seen=()):
+        """Some later event in the chain eid -> superseded_by -> ... has a written card that is itself kept."""
+        if eid not in rows or eid in seen:
+            return False
+        nxt = _resolve(ctx.db, rows[eid])
+        later = overtaken(nxt, (*seen, eid))
+        return later or nxt in written
+    kept = [c for c in cands if not overtaken(c.id) or c.pin]
+    return kept, len(cands) - len(kept)
 
 
 # Headline vectors for the duplicate guard
@@ -474,6 +524,8 @@ def v1_category(c, placements, in_top):
     main topic wins when the event made it (a funding round under Startups, not under Dev because Dev was a long
     tab with weak competition); otherwise the tab where it ranks best relative to the tab's length."""
     main = PRIMARY_TAB.get((c.topics or [None])[0])
+    if c.lead_dev:
+        main = "dev"        # a developer outlet's story that made Dev is filed there, whatever topic came first
     if c.type in ("funding", "acquisition") and "startups_funding" in (c.topics or []):
         main = "startups"
     if main and any(tid == main for tid, _, _ in placements):
@@ -593,6 +645,8 @@ def notification_candidates(tabs, now):
             note = notification(c)
             if c.id in seen or note is None or c.age_eff(now) > NOTIFY_MAX_AGE_H or not rank.notifiable(c):
                 continue
+            if c.data.get("undated"):
+                continue        # an alert says "this just happened"; a fetch time cannot vouch for that
             seen.add(c.id)
             out.append({"eventId": c.id, "score": round(rank.notification_score(c, now), 4), "spice": int(c.spice),
                         "importance": int(c.importance), "publishers": int(c.n_publishers),
@@ -652,6 +706,7 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
     by_id = {c.id: c for ranked in tabs.values() for c, _ in ranked}
     scores = {c.id: s for c, s in tabs["top"]}
     articles, used_images, left_out = [], set(), 0
+    gen_taken = {}          # topic -> {variant: cards showing it}, so no two cards share a generated picture
     order = [c.id for c, _ in tabs["top"]] + [eid for eid in by_id if eid not in top_rank]
     for eid in order:
         c = by_id[eid]
@@ -662,7 +717,16 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
         image_url = None
         if out_dir is not None:
             row = pictures.get(eid)
-            name = row["sha8"] if row else images_mod.generated(out_dir, (c.topics or ["default"])[0])
+            if row:
+                name = row["sha8"]
+            else:
+                # In rank order (Top first, then each tab), each card takes a look no earlier card of its topic
+                # has: with 24 looks a topic, the first screen of any tab never shows one twice.
+                topic = (c.topics or ["default"])[0]
+                taken = gen_taken.setdefault(topic if topic in images_mod.TOPIC_COLORS else "default", {})
+                k = images_mod.pick_variant(eid, taken)
+                taken[k] = taken.get(k, 0) + 1
+                name = images_mod.generated(out_dir, topic, k)
             used_images.add(name)
             image_url = f"{base}img/{name}_std.jpg"
         articles.append(article(c, cat, top_rank.get(eid), image_url))
@@ -726,6 +790,10 @@ def write(ctx, edition, report, used_images, out_dir, check=True, tabs=None):
         ctx.db.conn.execute(
             "INSERT INTO shipped VALUES (?,?,?,?,?) ON CONFLICT(event_id) DO UPDATE SET last_at = excluded.last_at",
             (a["eventId"], a["publishedAt"], iso(ctx.now), iso(ctx.now), _first_seen(tabs, a["eventId"])))
+        first = _first_seen(tabs, a["eventId"], "first_report_at")
+        if first:
+            ctx.db.conn.execute("INSERT INTO story_first_report VALUES (?,?) ON CONFLICT(event_id) DO UPDATE SET"
+                                " at = MIN(at, excluded.at)", (a["eventId"], first))
     # The cards ranked for push alerts, next to the edition (the next app release's sender reads it).
     notes = final[:-len("edition.json")] + "notifications.json"
     with open(notes + ".tmp", "w") as f:
@@ -738,11 +806,11 @@ def write(ctx, edition, report, used_images, out_dir, check=True, tabs=None):
     return True, None
 
 
-def _first_seen(tabs, eid):
+def _first_seen(tabs, eid, key="first_seen_at"):
     for ranked in (tabs or {}).values():
         for c, _ in ranked:
             if c.id == eid:
-                return c.data.get("first_seen_at")
+                return c.data.get(key)
     return None
 
 

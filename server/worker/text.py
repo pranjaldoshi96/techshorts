@@ -12,6 +12,7 @@ import re
 import time
 import threading
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 from urllib import robotparser
 from urllib.parse import urljoin, urlsplit
@@ -58,6 +59,7 @@ class ArticleText:
     origin: str                 # page | feed | og+feed | none
     paragraphs: list = field(default_factory=list)
     og_image: str = None        # the page's og:image, when the page was fetched (images.py uses it first)
+    page_published_at: object = None    # the page's own publication time (page_published), when it states one
 
     @property
     def words(self):
@@ -244,10 +246,42 @@ class Robots:
         return rp
 
 
-def fetch_page(url, source, user_agent, robots, session=None, timeout=15, with_image=False):
-    """Returns (paragraphs, og_description), plus og_image when `with_image`. Paragraphs only for fetch_page
-    sources; paywalled ones (fetch_page: false) still give their og tags."""
-    empty = ([], None, None) if with_image else ([], None)
+_PUBLISHED = [re.compile(rx, re.I | re.S) for rx in (
+    r'<meta[^>]+(?:property|name|itemprop)=["\'](?:article:published_time|og:article:published_time|'
+    r'datePublished|parsely-pub-date|sailthru\.date|dc\.date\.issued)["\'][^>]*content=["\']([^"\']+)["\']',
+    r'<meta[^>]+content=["\']([^"\']+)["\'][^>]*(?:property|name|itemprop)=["\'](?:article:published_time|'
+    r'og:article:published_time|datePublished)["\']',
+    r'"datePublished"\s*:\s*"([^"]+)"',
+)]
+_ISO_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$")
+
+
+def page_published(page_html):
+    """The page's own publication time (article:published_time, or datePublished in its metadata), as a UTC
+    datetime. Only a full timestamp with a time zone counts: a bare date would read as midnight and make a
+    story look hours older than it is. None when the page states none."""
+    head = (page_html or "")[:400_000]
+    for rx in _PUBLISHED:
+        m = rx.search(head)
+        value = html_mod.unescape(m.group(1)).strip() if m else ""
+        if value and _ISO_TIME.match(value):
+            value = re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", value.replace("Z", "+00:00"))
+            try:
+                at = datetime.fromisoformat(value)
+            except ValueError:
+                continue
+            if (at.hour, at.minute, at.second) == (0, 0, 0):
+                continue        # midnight on the dot is a date wearing a timestamp ("2026-11-10T00:00:00Z")
+            return at.astimezone(timezone.utc).replace(microsecond=0)
+    return None
+
+
+def fetch_page(url, source, user_agent, robots, session=None, timeout=15, with_image=False, with_date=False):
+    """Returns (paragraphs, og_description), plus og_image when `with_image`, plus the page's publication time
+    when `with_date`. Paragraphs only for fetch_page sources; paywalled ones (fetch_page: false) still give
+    their og tags."""
+    extra = (None,) * (bool(with_image) + bool(with_date))
+    empty = ([], None) + extra
     if not robots.allowed(url):
         return empty
     try:
@@ -258,11 +292,17 @@ def fetch_page(url, source, user_agent, robots, session=None, timeout=15, with_i
         return empty
     page = r.text
     out = ((extract_paragraphs(page) if source.fetch_page else []), og_description(page))
-    return out + (og_image(page, r.url),) if with_image else out
+    if with_image:
+        out += (og_image(page, r.url),)
+    if with_date:
+        out += (page_published(page),)
+    return out
 
 
 def article_text(item, source, user_agent, robots, session=None):
-    paragraphs, og, image = fetch_page(item["url"], source, user_agent, robots, session, with_image=True)
+    paragraphs, og, image, published = fetch_page(item["url"], source, user_agent, robots, session,
+                                                  with_image=True, with_date=True)
     t = choose(paragraphs, item.get("feed_text") or "", og)
     t.og_image = image or ""        # "" = looked, none found; None = never looked
+    t.page_published_at = published
     return t

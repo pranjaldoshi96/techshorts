@@ -65,7 +65,10 @@ and traction floors → score → tabs → images → v1 edition.json + notifica
   is still to come ("Sebi to issue" must not become "Sebi issues"), an inference or superlative the source doesn't
   contain ("may have contributed to", "record"), and a card that drops the source's unnamed sourcing. A second
   model then fact-checks every line of the card (headline, three sentences, alert) against the whole text
-  (`entail.py`). A card that fails is retried with the reason, then held, never shipped.
+  (`entail.py`). A card that fails is retried with the reason, then held, never shipped. The tense rule holds for every verb the
+  title or text describes as still to come ("expected to price" must not become "priced"), in any capitalization.
+  A short text that does not itself report its title's news (a paywall's scene-setting opening) is classified,
+  not written (`validate.teaser_text`).
 - **Models** (`config.yaml` `llm`): cards are written by GPT and fact-checked by Gemini on the inference hub;
   screening and the clustering judge use the smaller Gemini; the NVIDIA endpoint serves embeddings and the backup
   chat models (`llm.backup_models`, the large Nemotron first), which take over call by call when the hub fails
@@ -79,13 +82,28 @@ and traction floors → score → tabs → images → v1 edition.json + notifica
   endpoint fails, written items get a placeholder vector and cluster by title words (`cluster.embed_fallback`),
   so a card still ships; real vectors replace the placeholders when it answers, and `embeddings_down` alerts
   after 5 failed ticks.
-- **Signals**: Techmeme, Mediagazer, Hacker News (Algolia API), Lobsters, Reddit (the top posts of the day in
-  r/technology and r/programming, one RSS request) and GitHub trending. A signal attaches to the event it is about (by
-  URL, or by title when the judge agrees) and adds to its traction, each platform with its own capped
-  multiplier; points are refreshed on every poll. A Techmeme pick, or an HN/Lobsters link past a points bar,
+- **Signals**: Techmeme, Mediagazer, Hacker News (Algolia API), Lobsters and Reddit (the top posts of the day in
+  r/technology and r/programming, one RSS request). A signal attaches to the event it is about (by URL, or by
+  title when the judge agrees; a Reddit post only through the article it links) and adds to its traction, each
+  platform with its own capped multiplier; points are refreshed on every poll. Reddit's feed has no score but is
+  sorted by it, so a post's place is kept as its points and only the day's first ten count. A Techmeme pick, or an HN/Lobsters link past a points bar,
   whose article no source carries is imported and written like any item (`fetch.promote_signals`); when such an
   import cannot be written (a company page, a paywall) its points still attach to the event its title matches.
-  A Techmeme pick also overrules a feed's category filter and the screening call's "off-topic" or "dull".
+  A Techmeme pick also overrules a feed's category filter and the screening call's "off-topic" or "dull", and so
+  does a Hacker News or Lobsters link past the import bar (`fetch.revive_shared`); when the screening prompt
+  changes, the last 36 h of its drops are screened again. An item whose text could not be fetched stays
+  clusterable for 48 h, and one that is itself a big Hacker News or Lobsters link (300+ / 100+) may start an
+  event and get a brief, like a paywalled scoop.
+- **When the news happened** (`newsdate.py`): a late write-up of older news ("Apple began selling its HomeView
+  Friday", published on Sunday) is dated by the news: the writer's `news_date` when the text carries that day,
+  else a plain statement in the first sentence. The event's clock, the card's date, its freshness and the 12 h
+  alert window follow. The page's own publication time moves an item back when the feed carried a later one or
+  none; a lead with no publisher's date at all is never an alert candidate.
+- **Overtaken cards**: the judge may rule that a report *supersedes* a card (the outcome of what it reports as
+  under way, a correction, a newer official account), and a follow-up whose title reports a reversal of its
+  parent's does so by rule; the older event is left out while the newer one has a written card. Inside one event,
+  a member a later member has overtaken ("says he will sign" once others report "signs") no longer leads, and
+  the rewrite is given each report's time and told that the newest account stands.
 
 - **One card per development.** Reports of the same development cluster into one event (`cluster.py`); its card
   is the lead article's validated headline and summary, or a rewrite from several members. A judge call rules
@@ -101,8 +119,11 @@ and traction floors → score → tabs → images → v1 edition.json + notifica
   News at 300/600 points a 5/6.
 - **Tabs** (spec 2.12): Top (60), AI (40), Startups (40), India (30), Dev (30) and Reads (25), each with its own
   types, minimum importance and window; at most 2 cards from one publisher in the first 10 (4 per tab, an eighth
-  of a long tab) and 3 per storyline in a tab's first 12 ranks (past them a development with its own traction
-  still gets a rank, up to 8); never padded. Spice 7+ or traction (Techmeme, HN 300+, 4 publishers) lets a story
+  of a long tab) and 3 per storyline in a tab's first 12 ranks (past them a development worth a rank of its own,
+  up to 8 or a sixth of the tab); when the cap must cut, the storyline keeps its best cards by spice x importance
+  x traction (`rank.storyline_cut`), not its freshest; never padded. Routine news (spice 3-4) from one outlet with
+  no traction needs importance 7 for Top. A developer outlet's story (`desk: dev` in `sources.yaml`) is Dev news
+  with `dev_tools` anywhere among its topics. Spice 7+ or traction (Techmeme, HN 300+, 4 publishers) lets a story
   in up to two importance points under a tab's minimum. A widely shared essay reaches Reads whoever published it,
   and Top from importance 5. Hard news from a site imported under the catch-all `web` source needs a second
   outlet or a Techmeme pick for Top. A
@@ -119,7 +140,8 @@ and traction floors → score → tabs → images → v1 edition.json + notifica
   edition stays and an alert fires.
 - **Images** (`images.py`, spec 3): og:image, then feed media; pictures under 600 px wide, outside a 1.2–2.2
   aspect or under 8 KB are rejected. Each becomes `img/<hash>_std.jpg` (720×450 progressive JPEG, what 1.2 shows)
-  and `img/<hash>_thumb.webp` (360×225). Otherwise a generated topic gradient. Files are kept 14 days.
+  and `img/<hash>_thumb.webp` (360×225). Otherwise a generated topic gradient, in 24 looks a topic so that no two
+  cards of an edition share one. Files are kept 14 days.
 - **Degraded mode** (`degraded.py`, spec 2.14): if the LLM is out (401/403, a 429 storm, or under 50% of items
   passing for 30 min) the edition still publishes. Validated text is reused; events with 2 or more publishers,
   or a tier-1 lead, show the publisher's title and a 55-word excerpt with `aiText: false` (1.2 then shows no AI
@@ -179,7 +201,8 @@ to `publish.sh` and is not read by the worker.)
 - `<state_dir>/health.json` every tick, and a copy next to `edition.json` on every publish:
   - **edition**: `editionAgeMin`, Top count, degraded state, rejected publishes; the last publish's per-tab
     counts, median age and most cards per publisher;
-  - **freshness**: publisher→app lag p50/p95 (`event_published_at` → first edition);
+  - **freshness**: publisher→app lag p50/p95, counted from the earliest report of the story the engine saw
+    (`story_first_report`: the earliest member or attached signal) to the first edition with its card;
   - **pipeline**: per-source status and check results, prefilter drops by rule, LLM calls/latency/429s,
     validation pass rate per item on its first run (and the eventual rate after hold retries), skip reasons;
   - **content**: events, raw vs clamped importance histogram; **spice**: its histogram per item and event, the

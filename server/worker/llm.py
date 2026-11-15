@@ -21,8 +21,9 @@ from urllib.parse import urlsplit
 import requests
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from . import attribution as attribution_mod, entail, health, sources as sources_mod, text as text_mod, validate
-from .db import from_iso, utcnow
+from . import (attribution as attribution_mod, entail, health, newsdate, sources as sources_mod, text as text_mod,
+               validate)
+from .db import from_iso, iso, utcnow
 
 log = logging.getLogger("techgist")
 
@@ -77,6 +78,9 @@ class WriteOutput(BaseModel):
     entities: Entities = Entities()
     event: str = "new"
     material_update: bool = False
+    # The day the reported news happened when the text shows it is older than the article (YYYY-MM-DD), else "".
+    # Used only when the text itself carries that date (newsdate.news_at).
+    news_date: str = ""
     headline: str
     s1: str
     s2: str
@@ -95,6 +99,12 @@ class WriteOutput(BaseModel):
     s1_long: str = ""
     s2_long: str = ""
     s3_long: str = ""
+
+    @field_validator("news_date", mode="before")
+    @classmethod
+    def day_or_empty(cls, v):
+        # A malformed or missing date is no date; it never costs a retry.
+        return v.strip() if isinstance(v, str) and newsdate.parse_day(v) else ""
 
     @field_validator("topics", mode="before")
     @classmethod
@@ -465,7 +475,7 @@ PROMPT = """Return this JSON object:
 {"is_news": true, "type": "...", "relevance": 0-3, "importance": 1-10, "spice": 1-10, "breaking": false,
  "sensitive": false, "topics": [...], "region": "in|us|global",
  "entities": {"orgs": [], "people": [], "products": [], "amounts": []},
- "event": "new", "material_update": false,
+ "event": "new", "material_update": false, "news_date": "",
  "headline": "...", "headline_alt": "...", "headline_short": "...",
  "s1": "...", "s1_alt": "...", "s2": "...", "s2_alt": "...", "s3": "...", "s3_alt": "...",
  "notif_title": "...", "notif_line": "..."}
@@ -476,10 +486,13 @@ explainers, reviews, essays without news, promos.
 - type, one of: news (reporting a new fact; the default), launch (a product, model or feature release), \
 funding (a startup raise or a new VC fund), acquisition, earnings, policy (law, regulation, court or government \
 action), security_incident (breach, hack, outage, exploited vulnerability), analysis (reported analysis or \
-commentary on news), opinion (a columnist's or pundit's view), interview, review (a product review), tutorial, \
+commentary on news), opinion (a columnist's or pundit's view), interview, review (a hands-on review of a product \
+for buyers; a benchmark, test or study that reports what it found is news or analysis, not review), tutorial, \
 explainer (evergreen background), release_notes (version notes for a library, tool or app), customer_story (a \
-vendor's story about a customer using its product), podcast, promo, deal (a shopping deal), roundup (a digest or \
-newsletter issue that lists several unrelated stories), other. A profile ("Who is ..."), timeline, "what we \
+vendor's story about a customer using its product), podcast (an episode page or its show notes; an article that \
+reports what someone said or what a project released is news or interview even if a recording is attached), \
+promo, deal (a shopping deal), roundup (a digest or newsletter issue that lists several unrelated stories), \
+other. A profile ("Who is ..."), timeline, "what we \
 know" or "what happens next" piece, live blog or round-up of reactions to a known story is explainer or analysis, \
 not news, even when it is current.
 - relevance, does the story have a tech angle: 3 = tech is the story (a tech company, product, founder, \
@@ -509,6 +522,11 @@ material_update: true when it adds a major new fact to that event, above all whe
 headline describes as coming has now happened (an IPO that was "upcoming" has priced or listed, a planned launch \
 has shipped, a deal "in talks" is signed, a resignation has taken effect, a vote or ruling has been made). \
 False for reactions, analysis, background and smaller details.
+- news_date: when the news itself happened, if the text shows that was before the article's Published date \
+("began selling on Friday", "announced on Tuesday", "on Nov. 13", "last week"): that day as YYYY-MM-DD, worked \
+out from the Published date. A late write-up of older news is common; date the news, not the article. Empty \
+when the text presents the news as new (today or yesterday) or gives no day, and never the date of mere \
+background ("founded in 2019", "resigned on Thursday" in a story about what followed).
 
 Writing. The card must make a tech reader want to tap, using only what the article states:
 - headline: 50 to 70 characters. Lead with the story's most striking true fact: the conflict, the name, the \
@@ -650,6 +668,8 @@ class WriteResult:
     steps: list = field(default_factory=list)
     # A backup model answered a write or fact-check call of this run (the primary's endpoint was failing).
     by_backup: bool = False
+    # When the news happened, if days before the article (newsdate.news_at); set by write_pending.
+    news_at: object = None
 
 
 # Extra feedback retries for a card being written by a backup model (write_item).
@@ -760,6 +780,12 @@ def write_item(client, cfg, item, source_name, text, attribution=None, author=No
         return WriteResult("ok", out, v.full, v.short, None, entailed, rung, model, steps, by_backup=by_backup)
     # The classification of a failed write is still kept (type, relevance...), but never its text.
     content = [s for s in steps if s.outcome in ("invalid", "entail_fail")]
+    if content and last_out is not None and text.words < SHORT_TEXT_WORDS and any(
+            s.reason == validate.TEASER for s in content):
+        # A title with no report under it (validate.TEASER): the item is classified, not written, like any item
+        # with too little text. It can back an event up, and start one that gets a brief if the story has
+        # traction (cluster.thin_can_seed), instead of shipping a card of scene-setting.
+        return WriteResult("thin", last_out, reason="no_text", model=writer, steps=steps)
     if content:
         # A timeout on the feedback retry doesn't hide that the text failed validation first.
         return WriteResult("failed", output=last_out, reason=content[-1].reason, steps=steps, by_backup=by_backup)
@@ -842,6 +868,9 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
     rows = priority(rows, srcs, db)
     # One cheap screening call for the tick's unseen items, before any of them costs a full write: the wide source
     # list (business press, gossip, gaming, crypto, regulators) carries much that has no tech angle at all.
+    if llm_cfg.get("triage") and rescreen_on_prompt_change(db, now):
+        rows = priority([r for r in db.pending_writes(now)
+                         if r["source_id"] in by_id and not by_id[r["source_id"]].is_signal], srcs, db)
     if llm_cfg.get("triage") and rows:
         vetted = _techmeme_linked(db)
         fresh = [r for r in rows if r["status"] == "new" and not r["triaged"] and r["url_canonical"] not in vetted
@@ -871,6 +900,9 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
     hot = {r["url_canonical"] for r in rows
            if r["url_canonical"] in techmeme_urls or json.loads(r["extra"] or "{}").get("via")}
     triaged = {r["url_canonical"] for r in db.q("SELECT url_canonical FROM writes WHERE status = 'thin'")}
+    teasers = {r["url_canonical"]: r["text_words"] for r in db.q(
+        "SELECT url_canonical, text_words FROM writes WHERE status = 'thin' AND steps LIKE ?",
+        f"%{validate.TEASER}%")}
     # A thin item can only ever join an event, and its event often didn't exist yet at its first triage. So a retry
     # of a thin item that is still in no event asks again when there are candidates now (one call, no writing).
     clustered = {r["url_canonical"] for r in db.q("SELECT url_canonical FROM event_members")}
@@ -913,8 +945,12 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
         try:
             if client.circuit_open:
                 return row, None, attr, "circuit"
+            url = row["url_canonical"]
+            if not text.thin and teasers.get(url) == text.words:
+                # Classified on an earlier run as a teaser (validate.TEASER) and its text has not changed: only
+                # another text would change that, so the ladder is not run again.
+                return row, text, attr, WriteResult("thin", reason="no_text")
             if text.thin:
-                url = row["url_canonical"]
                 if url in triaged and (url in clustered or not c):
                     return row, text, attr, WriteResult("thin", reason="no_text")   # only the text is retried
                 return row, text, attr, triage_thin(client, cfg, item, source_name, text, attr, c)
@@ -940,6 +976,9 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
         if text is not None and text.og_image is not None:
             db.conn.execute("UPDATE items SET og_image = ? WHERE url_canonical = ?", (text.og_image, url))
         attempt = (row["attempts"] or 0) + 1
+        published = backdate(db, row, text)
+        if result.status == "ok":
+            result.news_at = newsdate.news_at(result.output.news_date, published, row["title"], text.text)
         if result.output is not None or result.status == "failed":
             db.save_write(url, now, result, text, attr)
         if result.status == "ok":
@@ -971,12 +1010,31 @@ def write_pending(db, srcs, cfg, client, fetch_text=None, now=None, candidates_f
 
 
 BACKUP_FAILED = "backup_failed"
+PAGE_DATE_SLACK = timedelta(hours=1)
+PAGE_DATE_MAX = timedelta(days=30)
+
+
+def backdate(db, row, text):
+    """The item's publisher time, moved back to the page's own publication time when the page states an earlier
+    one: a feed that dates an entry by its last update, or carries no date at all (the item was then dated by
+    when the worker first fetched it, and a days-old post read as minutes old). Never forward. Returns the
+    item's published_at after any change."""
+    published = from_iso(row["published_at"])
+    page_at = getattr(text, "page_published_at", None) if text is not None else None
+    if page_at is None or page_at >= published or published - page_at > PAGE_DATE_MAX:
+        return published
+    if row["feed_published_at"] is not None and published - page_at < PAGE_DATE_SLACK:
+        return published           # the feed's own date, within an hour of the page's: the feed's stands
+    db.conn.execute("UPDATE items SET published_at = ? WHERE url_canonical = ?", (iso(page_at), row["url_canonical"]))
+    return page_at
 
 
 # Briefs: a short attributed card for a story with traction and no full text (cluster.brief_due)
 
-BRIEF_PROMPT = """A story is breaking and only short reports of it are available: paywalled outlets' headlines \
-and opening lines, and Techmeme's summary of the report. Write a short card from these LINES and nothing else.
+BRIEF_PROMPT = """A story is breaking and only short reports of it are available: outlets' headlines and \
+opening lines (a paywall, or a page that could not be read), and Techmeme's summary of the report. Write a short \
+card from these LINES and nothing else. A HACKER NEWS line, when there is one, says how widely the link is being \
+discussed: the card may state that as a fact about the discussion, but Hacker News is never whose reporting it is.
 
 Return this JSON object:
 {"spice": 1-10, "headline": "...", "headline_alt": "...", "headline_short": "...", "s1": "...", "s2": "...",
@@ -1018,7 +1076,10 @@ def brief_event(client, cfg, store, ev):
         return False
     row["rewritten_at"] = cluster.iso(now)
     row["rewrite_publishers"] = row.get("publishers")
-    outlets = [name for name, _, _ in lines]
+    # Whose reporting it is: the outlets, never the place it is being discussed.
+    outlets = [name for name, _, _ in lines if name != cluster.HN_LINE]
+    if not outlets:
+        return False
     block = "\n".join(f"{name.upper()}: {title}" + (f" | {text}" if text else "") for name, title, text in lines)
     source_text = "\n".join(f"{name}: {title}. {text}" for name, title, text in lines)
     base = [{"role": "system", "content": SYSTEM},
@@ -1093,7 +1154,11 @@ context), s3 15-19 words (one more fact from the reports: what happens next, a r
 own inference); _alt versions 11-14 words (headline_alt at most 55 characters, headline_short at most 40); \
 notif_title at most 40 characters (who or what, and the gist); notif_line one sentence of at most 110 characters \
 written to be tapped: the most striking concrete fact, worded differently from the headline.
-- Lead with the newest material fact.
+- Lead with the newest material fact. Each report carries its publication time. Where reports give different \
+accounts of the same thing (a cause, a status, a count, whether something planned has happened), the newest \
+report's account is the one the card states, attributed to whoever gives it; an older account is left out or \
+given as what was said earlier ("after first blaming ..."). Never state as still to come what a newer report \
+says has happened.
 - Numbers: use a number only if REPORT 1 states it or at least two reports state it. When reports disagree, use \
 REPORT 1's value with "up to" or "about", or leave the number out. A number keeps the meaning the reports give it.
 - Tense and certainty match the reports: planned, expected, proposed or reported-to-be-coming stays that way; \
@@ -1139,6 +1204,7 @@ on a known story is 4 to 5.
   "Novacloud beats on revenue and lifts full-year guidance" = 7, earnings
   "Regulator sues Varnet over hidden fees charged to 12 million customers" = 7, policy
   "Brightloop co-founder and CTO quits to start a rival" = 7, news
+  "Emberfall releases Starfall 2, the most awaited game in a decade" = 7, launch (topics: consumer)
   "Orbitly shares fall 6% a day after its CEO's exit" (a market reaction) = 5, news
   "Brightloop raises $80M Series B for warehouse robots" = 6, funding
   "Zentra releases a 1T-parameter open model for coding agents" = 6, launch
@@ -1160,12 +1226,15 @@ the story's own facts (never on how it could be worded) and separately from impo
 titans; a hack or outage everyone felt; a shocking leak. 7-8 drama, conflict, big money or a real surprise: \
 lawsuits, firings and resignations, layoffs, leaks, bans and government fights, fraud claims, giant valuations \
 or pay packages, embarrassing failures, viral moments, a big-name product reveal, a surprising scientific \
-result. 5-6 solid news with a hook: a notable launch, a round with a twist, a policy move many people will feel. \
+result, a crime, arrest or violence at a tech or games company, and whatever surrounds the year's most awaited \
+game or gadget. 5-6 solid news with a hook: a notable launch, a round with a twist, a policy move many people will feel. \
 3-4 routine: an ordinary funding round, a feature update, earnings in line, a partnership. 1-2 dry: a minor \
 version bump, a press release, a how-to, a conference agenda.
   Examples (invented): "Orbitly board fires founder-CEO over undisclosed relationship with a supplier" = 10; \
 "Leaked memo: Novacloud CEO calls remote staff 'tourists'" = 8 (importance 5); "Varnet sues its former CTO for \
 taking source code to a rival" = 8; "Kestrel AI's chatbot told users to eat rocks, screenshots show" = 7; \
+"Police arrest a suspect after shots are fired at game studio Emberfall's campus" = 8 (importance 5); \
+"Starfall 2 boxes ship without the download code, buyers say" = 7 (importance 4); \
 "Brightloop raises $80M Series B" = 4; "Novacloud prices $2B bond offering" = 3 (importance 7); "Lumen CLI \
 0.36" = 1."""
 PROMPT = PROMPT.replace("<<importance>>", IMPORTANCE).replace("<<spice>>", SPICE)
@@ -1210,20 +1279,34 @@ def rewrite_event(client, cfg, store, ev):
         return False
     # The newest material update goes in as REPORT 2: the representative members are the most central ones, so the
     # report that the "upcoming" IPO had listed was left out and the rewrite kept saying "upcoming".
-    newest = sorted((m for m in ev.members if m is not lead and m.material_update and m.hard and not m.thin
-                     and m.text), key=lambda m: m.published_at, reverse=True)[:1]
+    # Failing that, the newest hard-news report when it is hours newer than the lead: the FAA outage card kept the
+    # first day's cause ("routine maintenance on a copper line") while a member from the next day reported the
+    # secretary blaming a router, and two follow-up cards gave two more causes.
+    hard = [m for m in ev.members if m is not lead and m.hard and not m.thin and m.text]
+    newest = sorted((m for m in hard if m.material_update), key=lambda m: m.published_at, reverse=True)[:1]
+    material = bool(newest)
+    if not newest:
+        newest = sorted((m for m in hard if m.published_at - lead.published_at >= cluster.NEWER_REPORT),
+                        key=lambda m: m.published_at, reverse=True)[:1]
     picked = [lead] + newest + [m for m in representative(ev.members)
                                 if m is not lead and all(m is not n for n in newest)]
     picked = picked[:REWRITE_MEMBERS]
-    note = (f"REPORT 2 is the newest development ({cluster.iso(newest[0].published_at)}); lead with it.\n\n"
-            if newest else "")
+    note = ""
+    if newest:
+        note = (f"REPORT 2 is the newest {'development' if material else 'report'} "
+                f"({cluster.iso(newest[0].published_at)}); lead with {'it' if material else 'what it adds'}.\n\n")
     reports = note + "\n\n".join(
         f"REPORT {i}: {store.by_id[m.source_id].name if m.source_id in store.by_id else m.source_id}\n"
+        f"Published: {cluster.iso(m.published_at)}\n"
         f"Title: {m.title}\nText: {text_mod.cap_words(m.text, REWRITE_WORDS)}" for i, m in enumerate(picked, 1))
     base = [{"role": "system", "content": SYSTEM},
             {"role": "user", "content": entail.fill(REWRITE_PROMPT, reports=reports)}]
     model = role_model(cfg, "write")
-    source_text = "\n".join(m.text for m in picked)
+    # The titles are part of what the card may state (a member's title often carries the newest fact), and the
+    # tense rule reads the newest report's title: the lead's "says he will sign" must not bind a card whose
+    # newest report says he signed.
+    source_text = "\n".join(f"{m.title}. {m.text}" for m in picked)
+    tense_title = newest[0].title if newest else lead.title
     feedback, reply = None, None
     now = store.now
     row["rewritten_at"] = cluster.iso(now)
@@ -1249,7 +1332,7 @@ def rewrite_event(client, cfg, store, ev):
             log.info("rewrite %s: %s", ev.id, type(e).__name__)
             return False
         validate.select(out)
-        v = validate.check(out, source_text, lead.title, "", None, None, " ".join(lead.text.split()[:200]))
+        v = validate.check(out, source_text, tense_title, "", None, None, " ".join(lead.text.split()[:200]))
         bad = rewrite_numbers_ok(out, lead.text, [m.text for m in picked])
         if bad:
             v.fail("ungrounded", f"'{bad}' is not in REPORT 1 or in two reports; use REPORT 1's figure or drop it.")
@@ -1302,6 +1385,24 @@ Items:
 <<items>>"""
 TRIAGE_BATCH = 40
 TRIAGE_RULES = ("offtopic", "shopping", "dull")
+RESCREEN_WINDOW = timedelta(hours=36)
+
+
+def rescreen_on_prompt_change(db, now):
+    """Puts the last day and a half of screening drops back in the queue when the screening prompt has changed
+    since they were judged (or was never recorded): a drop is the prompt's judgement, and it should not outlive
+    the prompt. The SNL sketch about the tech tycoons was dropped as off-topic an hour before the prompt learned
+    that a culture moment about tech people is a keep, and never came back. Returns the number requeued."""
+    import hashlib
+    sha = hashlib.sha1(TRIAGE_PROMPT.encode()).hexdigest()[:12]
+    if db.get_meta("triage_prompt_sha") == sha:
+        return 0
+    db.set_meta("triage_prompt_sha", sha)
+    cur = db.conn.execute("UPDATE items SET status = 'new', drop_rule = NULL, triaged = NULL WHERE status = 'dropped'"
+                          " AND drop_rule LIKE 'triage_%' AND published_at >= ?", (iso(now - RESCREEN_WINDOW),))
+    if cur.rowcount:
+        log.info("screening prompt changed: %d dropped items go back to screening", cur.rowcount)
+    return cur.rowcount
 
 
 def triage_batch(client, cfg, rows, by_id):
@@ -1341,12 +1442,18 @@ already in the feed.
 statement, deal, incident, ruling or leak, perhaps from another outlet, with another angle or more detail.
 - "followup": the same ongoing story, but a different development: a new statement, a new revelation, a new \
 actor reacting, a consequence, a next step. Also an overview, analysis, profile or opinion piece about the story.
+- "supersedes": a followup whose news makes the event's card wrong or out of date, so that showing both would \
+mislead: the outcome of what the event reports as under way or planned (a rocket reported launched is now \
+reported lost; a deal reported agreed is called off), a correction or retraction, or a newer official account \
+that replaces the one the event gives (a different stated cause, toll or status of the same incident). Only a \
+news report can supersede, never an analysis or opinion piece. When the event's card is still true as far as it \
+goes, the answer is "followup".
 - "different": another story, even if it shares a company or person.
 Two reports about the same company or the same scandal are "same" only when they report the same development. \
 "Investors urge the board to bring the CEO back" and "A minister urges the company to hire an outside CEO" are \
 followups of one story, not the same development.
 
-Reply with only JSON: {"relations": {"<event id>": "same" | "followup" | "different"}}
+Reply with only JSON: {"relations": {"<event id>": "same" | "followup" | "supersedes" | "different"}}
 
 NEW ARTICLE
 Title: <<title>>
@@ -1354,7 +1461,7 @@ Text: <<text>>
 
 EVENTS
 <<events>>"""
-RELATIONS = ("same", "followup", "different")
+RELATIONS = ("same", "followup", "supersedes", "different")
 
 
 def judge_events(client, cfg, title, text, events):

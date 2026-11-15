@@ -37,6 +37,7 @@ IMAGE_HAMMING = 6       # dHash distance at or under which two images count as t
 STORYLINE_CAP = 3
 STORYLINE_HEAD = 12
 STORYLINE_MAX = 8
+STORYLINE_SHARE = 6     # ... or a sixth of the tab when that is more (storyline_limit)
 STORYLINE_MAJOR = 7     # a development of this importance also counts ("Huang agrees to testify", one outlet)
 # The story's own main event is never the card the cap cuts: with eight fresher developments of the saga in Top,
 # "Jensen Huang resigns as Nvidia CEO" (importance 9, spice 10, a day old) was the one left out.
@@ -44,6 +45,11 @@ STORYLINE_EVENT = 8
 STRONG_PUBLISHERS = 3
 STRONG_HN = 300
 STRONG_LOBSTERS = 100
+# Reddit counts as traction for a story whose article is among the first REDDIT_TOP of the day's top posts in
+# r/technology and r/programming (the feed's order is its only score; fetch.REDDIT_LISTING). Being listed at all
+# used to count, for all 50 posts and for posts matched by title. GitHub trending is gone: in the third review's
+# run it attached to no event and moved no rank, and a repository's star count says nothing about a news story.
+REDDIT_TOP = 10
 # Spice (see the module docstring). An unscored card (written before spice existed, or unwritten) is neutral.
 SPICE_NEUTRAL = 5
 SPICY = 7               # at or above: may enter a tab below its importance minimum
@@ -51,6 +57,12 @@ SPICY_IMPORTANCE_GAP = 2
 SPICY_MAX_H = 36
 DRY = 2                 # at or below: not Top material unless importance >= DRY_TOP_IMPORTANCE
 DRY_TOP_IMPORTANCE = 8
+# Routine news (spice 3-4: "an ordinary funding round, a feature update, earnings in line") that one outlet
+# carries and nobody is sharing is not Top material below importance 7; it keeps its place in its own tab. The
+# third review's Top had "EaseMyTrip cuts Q2 net loss" and an Urban Company shareholder vote (both spice 4,
+# importance 6, one outlet) while spicier stories of importance 5 were cut for room.
+ROUTINE = 4
+ROUTINE_TOP_IMPORTANCE = 7
 # Words that mark a publisher title as tech, for the one case with no classification at all (an LLM outage).
 TECH_TITLE = re.compile(
     r"\b(ai|a\.i\.|openai|anthropic|nvidia|google|apple|microsoft|meta|amazon|tesla|spacex|chatgpt|gemini|claude|"
@@ -69,13 +81,28 @@ DEV_LABELLED_MIN = 5
 # Workday outage, a consumer scam explainer, an airline blocking AI agents and a weapons platform, all typed
 # security_incident with the "security" topic.
 DEV_SECURITY = re.compile(
-    r"\b(vulnerab\w*|cves?|cve-[\d-]+|zero-days?|0-days?|exploit\w*|patch\w*|npm|pypi|crates\.io|packages?|"
+    r"\b(vulnerab\w*|cves?|cve-[\d-]+|zero-days?|0-days?|exploit\w*|patch\w*|npm|pypi|crates\.io|"
     r"supply[- ]chain|github|gitlab|bitbucket|ci/cd|repos?|repositor\w+|source code|codebase|apis?|api keys?|sdks?|"
-    r"secrets|credentials|aws|azure|gcp|cloud|kubernetes|docker|containers?|linux|kernel|open[- ]source|"
-    r"developers?|coding|devops|post-?mortem|backdoor\w*|firmware)\b", re.I)
+    r"kubernetes|docker|containers?|linux|kernel|open[- ]source|developers?|coding|devops|post-?mortem|"
+    r"backdoor\w*|firmware|supabase|firebase|databases?|vibe[- ]cod\w+|app builders?|coding agents?|"
+    r"prompt injection)\b", re.I)
+# Words that make a breach developer news only when it is not, at heart, a leak of people's records: the third
+# review's Dev tab carried "TSMC confirms employee data leak tied to cloud service provider" (an HR data leak,
+# matched on "cloud"), one of its three cards under a day old.
+DEV_SECURITY_WEAK = re.compile(r"\b(packages?|secrets|credentials|aws|azure|gcp|cloud)\b", re.I)
+PEOPLE_DATA = re.compile(
+    r"\b(employees?|staff|workers?|hr|payroll|customers?|patients?|passengers?|drivers?|students?|users?|members?)"
+    r"['’]?s?\s+(data|records|details|information|info|files)\b", re.I)
+# In the card's summary only the unmistakable terms count: "Lovable apps expose passport details, investigation
+# finds" (HN 969) names no developer term in its headline; its summary is about Supabase databases.
+DEV_SECURITY_BODY = re.compile(
+    r"\b(vulnerabilit\w+|cve-[\d-]+|zero-days?|npm|pypi|crates\.io|supply[- ]chain|github|gitlab|repositor\w+|"
+    r"source code|api keys?|sdks?|kubernetes|docker|open[- ]source|supabase|firebase|prompt injection)\b", re.I)
 # Startups is for startups: a big company buying one, or a big company's earnings, is not startup news unless the
 # model put startups_funding first ("Samsung in talks to acquire Modine Manufacturing" was [bigtech, startups_funding]).
-STARTUP_STRICT_TYPES = ("acquisition", "earnings")
+# Nor is a breach or outage that merely involves a startup ("Lovable apps expose passport details", topics
+# [security, ai, startups_funding], was filed under Startups).
+STARTUP_STRICT_TYPES = ("acquisition", "earnings", "security_incident")
 # A card with no validated text is a raw publisher title and a feed excerpt. Outside an LLM outage it never takes a
 # Top rank (the 2026-11 shadow led Top with a Verge column whose write failed, excerpt "...follow Terrence O'Brien.
 # Opt in for The Stepback here") and scores at most this importance elsewhere, so a written card on the same story wins.
@@ -197,6 +224,7 @@ class Candidate:
     lead_publisher: str = None      # v1_name, for the diversity caps
     lead_reads: bool = False
     lead_tier1: bool = False
+    lead_dev: bool = False          # the lead's source writes for developers (sources.yaml `desk: dev`)
     ai_text: bool = True            # validated headline + summary exist
     classified: bool = True
     image_hash: str = None          # dHash hex of the real (not generated) image
@@ -206,8 +234,7 @@ class Candidate:
     title: str = ""                 # the headline the card shows (or the lead's title), for text rules
     spice: int = SPICE_NEUTRAL      # 1-10, how tap-worthy the story is (the writer's score)
     lobsters_points: int = 0
-    on_reddit: bool = False
-    github_stars: int = 0
+    on_reddit: bool = False         # among the first REDDIT_TOP of a subreddit's top posts of the day
     # The lead is an article imported from a Hacker News or Lobsters link under the catch-all source: nobody
     # chose the site (publish_v1.event_candidate).
     unvetted: bool = False
@@ -225,21 +252,20 @@ class Candidate:
         return max(0.0, a)
 
 
-def coverage(n_publishers, on_techmeme=False, hn_points=0, lobsters_points=0, on_reddit=False, github_stars=0):
+def coverage(n_publishers, on_techmeme=False, hn_points=0, lobsters_points=0, on_reddit=False):
     """Traction: how widely the story is covered and shared. Each platform has its own capped multiplier, so no
     single one decides the order."""
     c = min(2.2, 1 + 0.5 * math.log2(max(1, n_publishers)))
     c *= 1.25 if on_techmeme else 1
     c *= min(1.3, 1 + 0.15 * math.log2(max(1, (hn_points or 0) / 100)))
     c *= min(1.15, 1 + 0.075 * math.log2(max(1, (lobsters_points or 0) / 25)))
-    c *= 1.1 if on_reddit else 1            # among a subreddit's top posts of the day
-    c *= min(1.1, 1 + 0.05 * math.log2(max(1, (github_stars or 0) / 100)))     # stars today on GitHub trending
+    c *= 1.1 if on_reddit else 1            # among the day's first REDDIT_TOP posts of a subreddit
     return c
 
 
 def traction(c):
     """coverage() of a candidate, with every signal it carries."""
-    return coverage(c.n_publishers, c.on_techmeme, c.hn_points, c.lobsters_points, c.on_reddit, c.github_stars)
+    return coverage(c.n_publishers, c.on_techmeme, c.hn_points, c.lobsters_points, c.on_reddit)
 
 
 def spice_factor(spice):
@@ -248,10 +274,10 @@ def spice_factor(spice):
 
 
 def score(importance, n_publishers, on_techmeme, hn_points, authority, age_eff_h, tau_h, spice=SPICE_NEUTRAL,
-          lobsters_points=0, on_reddit=False, github_stars=0):
+          lobsters_points=0, on_reddit=False):
     i = (importance / 10) ** 1.5
-    return (i * spice_factor(spice) * coverage(n_publishers, on_techmeme, hn_points, lobsters_points, on_reddit,
-                                               github_stars) * authority * math.exp(-age_eff_h / tau_h))
+    return (i * spice_factor(spice) * coverage(n_publishers, on_techmeme, hn_points, lobsters_points, on_reddit)
+            * authority * math.exp(-age_eff_h / tau_h))
 
 
 def staying_power(c):
@@ -266,7 +292,7 @@ def cand_score(c, tab, now, degraded=False):
     spice = SPICE_NEUTRAL if degraded or not c.classified else c.spice
     age = c.age_eff(now)
     base = score(imp, c.n_publishers, c.on_techmeme, c.hn_points, c.authority, 0, tab.tau_h, spice,
-                 c.lobsters_points, c.on_reddit, c.github_stars) * c.boost
+                 c.lobsters_points, c.on_reddit) * c.boost
     return base * max(math.exp(-age / tab.tau_h), STAY_TAIL * math.exp(-age / (tab.tau_h * staying_power(c))))
 
 
@@ -318,6 +344,17 @@ def corroborated(c):
     return c.n_publishers >= 2 or c.on_techmeme
 
 
+# A report from a site nobody chose may take a Top rank without a second outlet once Hacker News has made it one
+# of the day's biggest threads. The bar is importance.py's upper one: the second review found sites taking Top
+# on a link of a few hundred points (the test case had 448), the third found "Lovable apps expose passport
+# details" (969 points, spice 8) kept out of Top altogether. A push alert still needs a second outlet.
+UNVETTED_TOP_HN = 600
+
+
+def vetted_for_top(c):
+    return corroborated(c) or c.hn_points >= UNVETTED_TOP_HN
+
+
 def traction_pass(c, tab, now):
     """A story the tech world is plainly following may sit up to two importance points under a tab's minimum
     (see TRACTION_PUBLISHERS): Techmeme's headline of the hour scored importance 4-5 was in no tab."""
@@ -359,7 +396,13 @@ def top_fresh(c, now):
 
 
 def dev_security(c):
-    return "dev_tools" in c.topics or bool(DEV_SECURITY.search(c.title or ""))
+    """Is this security incident developer news? See DEV_SECURITY and the two lists after it."""
+    title = c.title or ""
+    if "dev_tools" in c.topics or DEV_SECURITY.search(title):
+        return True
+    if DEV_SECURITY_WEAK.search(title) and not PEOPLE_DATA.search(title):
+        return True
+    return bool(DEV_SECURITY_BODY.search(c.data.get("summary") or ""))
 
 
 def eligible(c, tab, now, degraded=False):
@@ -395,10 +438,12 @@ def eligible(c, tab, now, degraded=False):
     # A hard-news report from a site nobody chose (imported from a Hacker News or Lobsters link) needs a second
     # outlet or a Techmeme pick before it can take a Top rank: the fact-check reads the card against the page, not
     # the page's reliability. An essay is its author's view and is labelled as such.
-    if tab.id == "top" and c.unvetted and c.type not in LABELLED and not corroborated(c):
+    if tab.id == "top" and c.unvetted and c.type not in LABELLED and not vetted_for_top(c):
         return "unvetted"
     if tab.id == "top" and c.spice <= DRY and c.importance < DRY_TOP_IMPORTANCE:
         return "dry"
+    if tab.id == "top" and c.spice <= ROUTINE and c.importance < ROUTINE_TOP_IMPORTANCE and not has_traction(c):
+        return "routine"
     if c.relevance < tab.min_relevance:
         return "relevance"
     topics = set(c.topics)
@@ -415,7 +460,7 @@ def eligible(c, tab, now, degraded=False):
     # round) and to consumer AI apps, so it must be the main topic, or come second on release notes or a tutorial.
     if tab.id == "dev":
         dev = ("dev_tools" in topics and c.type not in NOT_DEV_TYPES
-               and (c.topics[0] == "dev_tools" or c.type in ("release_notes", "tutorial")))
+               and (c.topics[0] == "dev_tools" or c.type in ("release_notes", "tutorial") or c.lead_dev))
         sec = "security" in topics and c.type == "security_incident" and dev_security(c)
         if not (dev or sec):
             return "topic"
@@ -424,6 +469,45 @@ def eligible(c, tab, now, degraded=False):
     if tab.id == "reads" and not (c.lead_reads or (widely_shared(c) and c.ai_text)):
         return "not_reads"
     return None
+
+
+def storyline_worth(c, now):
+    """What a card is worth to its storyline when the cap must choose: spice x importance x traction, recency
+    counted (notification_score). Commentary on the story counts half: the cap is there to show developments."""
+    return notification_score(c, now) * (0.5 if c.type in LABELLED else 1)
+
+
+def storyline_limit(tab):
+    """The most cards one storyline may take in `tab`: STORYLINE_MAX, a sixth of a long tab (10 of Top's 60)."""
+    return max(STORYLINE_MAX, tab.max // STORYLINE_SHARE)
+
+
+def storyline_cut(cands, tab, now):
+    """The ids the storyline cap cuts from `tab`, decided before any rank is given.
+
+    A storyline with more than STORYLINE_CAP eligible cards keeps its best by spice x importance x traction
+    (notification_score, the owner's ranking, with its recency term): the best STORYLINE_CAP whatever they are,
+    the story's main event always, and further cards that are worth a rank of their own (traction, a major
+    development, or spice) up to storyline_limit. The cap used to take cards in the tab's score order, which is
+    mostly freshness, and stop: in the third review's Top the Nvidia saga's eight places went to the eight
+    freshest developments while "Huang told Nvidia exec 'I hope you die,' Post reports" (spice 8, Techmeme) and
+    the resignation report itself (spice 9, 4 publishers) were cut."""
+    groups = {}
+    for c in cands:
+        if c.storyline:
+            groups.setdefault(c.storyline, []).append(c)
+    limit, cut = storyline_limit(tab), set()
+    for members in groups.values():
+        if len(members) <= STORYLINE_CAP:
+            continue
+        kept = 0
+        for i, c in enumerate(sorted(members, key=lambda c: (-storyline_worth(c, now), c.id))):
+            if i < STORYLINE_CAP or c.importance >= STORYLINE_EVENT or (kept < limit and (
+                    strong_traction(c) or c.importance >= STORYLINE_MAJOR or c.spice >= SPICY)):
+                kept += 1
+            else:
+                cut.add(c.id)
+    return cut
 
 
 def hamming(a, b):
@@ -476,9 +560,9 @@ def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None, ru
         if per_pub.get(pub, 0) >= cap:
             return "diversity"
         n_story = per_story.get(c.storyline, 0) if c.storyline else 0
-        if n_story >= STORYLINE_CAP and not (len(out) >= STORYLINE_HEAD and (
-                c.importance >= STORYLINE_EVENT or (n_story < STORYLINE_MAX and (
-                    strong_traction(c) or c.importance >= STORYLINE_MAJOR)))):
+        # The cap's cut (story_cut, decided up front by spice x importance x traction), and its head rule: at
+        # most STORYLINE_CAP of a storyline's kept cards in the tab's first ranks; the others wait for a later one.
+        if c.id in story_cut or (n_story >= STORYLINE_CAP and len(out) < STORYLINE_HEAD):
             return "storyline"
         if n_story and c.age_eff(now) > (STORYLINE_SECOND_STRONG_H if strong_traction(c)
                                          else STORYLINE_SECOND_MAX_H):
@@ -490,11 +574,17 @@ def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None, ru
             return "image_duplicate"
         return None
 
+    story_cut = storyline_cut([c for c, _ in pool], tab, now)
+
     # Greedy, one rank at a time: a card held back by the top-10 caps (publisher, tutorial, repeated picture) waits
     # for a later rank instead of being dropped. If only capped cards are left before rank 10, the 2-per-publisher
     # rule yields to the 4-per-tab one rather than ending the tab early.
     remaining = list(pool)
     while remaining and len(out) < tab.max:
+        if story_cut and all(c.id in story_cut or is_duplicate(c) or blocked(c, True) for c, _ in remaining):
+            # Nothing else can take a rank and the tab has room: the cap exists to leave room for other stories,
+            # so with none left waiting its cut cards take the remaining places, after everything else.
+            story_cut = set()
         pick = None
         for relax in (False, True):
             for i, (c, s) in enumerate(remaining):

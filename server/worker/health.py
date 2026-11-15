@@ -212,9 +212,14 @@ def freshness(db, since):
     saw it (a Reads item after downtime) counts in the first only for what it is: old."""
     # A twin (the same story as an event that already shipped) isn't a first ship; it is merged away now (cluster.
     # merge_twins), but older rows still count it 1-2 days late.
-    rows = db.q("SELECT s.published_at, s.first_at, s.first_seen_at, i.source_id FROM shipped s"
-                " LEFT JOIN events e ON e.id = s.event_id LEFT JOIN items i ON i.url_canonical = e.lead_url"
-                " WHERE s.first_at >= ? AND s.event_id NOT IN (SELECT twin_id FROM twins)", iso(since))
+    # The lag counts from the earliest report of the story the engine saw (story_first_report), not from the
+    # time the card shows: the lead's timestamp moves forward on a lead change or a material update, and the
+    # ULA failure, first reported 113 min before it shipped, read as 5.8 min.
+    rows = [dict(r) for r in db.q(
+        "SELECT MIN(s.published_at, COALESCE(fr.at, s.published_at)) published_at, s.first_at, s.first_seen_at,"
+        " i.source_id FROM shipped s LEFT JOIN story_first_report fr ON fr.event_id = s.event_id"
+        " LEFT JOIN events e ON e.id = s.event_id LEFT JOIN items i ON i.url_canonical = e.lead_url"
+        " WHERE s.first_at >= ? AND s.event_id NOT IN (SELECT twin_id FROM twins)", iso(since))]
     pub = sorted((from_iso(r["first_at"]) - from_iso(r["published_at"])).total_seconds() / 60 for r in rows)
     seen = sorted((from_iso(r["first_at"]) - from_iso(r["first_seen_at"])).total_seconds() / 60
                   for r in rows if r["first_seen_at"])

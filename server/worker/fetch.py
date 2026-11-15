@@ -182,36 +182,18 @@ def parse_json_entries(body, source, limit):
     return out[:limit], _JsonFeed(False)
 
 
-_TRENDING_ROW = re.compile(r'<article class="Box-row">(.*?)</article>', re.S)
-
-
-def parse_github_trending(body, limit):
-    """GitHub's trending page (HTML; there is no feed): one entry per repository, "owner/repo: description", with
-    the stars it gained today as points. The page has no dates, so entries are dated at first sight."""
-    page = body.decode("utf-8", "replace") if isinstance(body, bytes) else body
-    out = []
-    for row in _TRENDING_ROW.findall(page):
-        m = re.search(r'<h2[^>]*>\s*<a[^>]*href="/([\w.-]+/[\w.-]+)"', row, re.S)
-        if not m:
-            continue
-        repo = m.group(1)
-        desc = re.search(r'<p class="col-9[^"]*"[^>]*>(.*?)</p>', row, re.S)
-        stars = re.search(r"([\d,]+)\s+stars today", row)
-        url = f"https://github.com/{repo}"
-        out.append(Entry(url=url, url_canonical=canonical_url(url),
-                         title=f"{repo}: {plain(desc.group(1))}" if desc else repo,
-                         extra={"points": int(stars.group(1).replace(",", "")) if stars else 0}))
-    return out[:limit], _JsonFeed(not out)
+# Reddit's RSS of a subreddit's top posts of the day carries no score, but it is sorted by it: a post's place in
+# the listing is the signal. Stored as points, REDDIT_LISTING for the first post down to 1, so they refresh on
+# every poll like Hacker News points (rank.REDDIT_TOP is the bar that counts as traction).
+REDDIT_LISTING = 50
 
 
 def parse_entries(body, source, limit):
-    if source.format == "github_trending":
-        return parse_github_trending(body, limit)
     if source.format != "rss":
         return parse_json_entries(body, source, limit)
     feed = feedparser.parse(body)
     out = []
-    for e in feed.entries:
+    for place, e in enumerate(feed.entries):
         link = (e.get("link") or "").strip()
         title = plain(e.get("title"))
         if not title or not link.startswith(("http://", "https://")):
@@ -231,6 +213,8 @@ def parse_entries(body, source, limit):
                 {"author": plain(e.get("author"))} if e.get("author") else {}),
             tags=tuple(t.get("term") for t in e.get("tags") or () if t.get("term")),
         ))
+        if source.kind == "reddit":
+            out[-1].extra["points"] = max(1, REDDIT_LISTING - place)
     # Archive feeds (OpenAI lists 1,300+ posts) are not always newest-first; keep the newest `limit`.
     epoch = datetime.min.replace(tzinfo=timezone.utc)
     out.sort(key=lambda x: x.feed_published_at or epoch, reverse=True)
@@ -299,9 +283,7 @@ def classify(entry, source, sources, now, first_seen, first_run, cfg, vetted=Fal
         return "stale", None, published
     # On a source's first poll, anything older than 36 h (or undated, so of unknown age) already existed. A source
     # may reach further back (seed_days), capped at the age limit above.
-    # (GitHub's trending page has no dates at all: its entries are current by definition.)
-    if first_run and source.format != "github_trending" and (
-            entry.feed_published_at is None or now - published > seed_horizon(source, cfg)):
+    if first_run and (entry.feed_published_at is None or now - published > seed_horizon(source, cfg)):
         return "seen", None, published
     if sources.blocked(entry.url):
         return "dropped", "domain_blocklist", published
@@ -478,17 +460,44 @@ def promote_signals(db, srcs, cfg, now):
                 db.add_sighting(target, r["source_id"], r["title"], from_iso(r["feed_published_at"]), now)
                 done("item")
             made += 1
-        elif existing["status"] == "dropped" and existing["drop_rule"] in REVIVABLE and kind == "techmeme":
+        elif existing["status"] == "dropped" and existing["drop_rule"] in REVIVABLE:
             # The feed's category filter or the screening call dropped it as off-topic or dull, and Techmeme's
-            # editors then picked it: their judgement wins, and the item is written after all.
-            keep = json.loads(existing["extra"] or "{}")
-            db.conn.execute("UPDATE items SET status = 'new', drop_rule = NULL, triaged = 1, extra = ?"
-                            " WHERE url_canonical = ?", (json.dumps({**keep, "via": r["source_id"]}), target))
+            # editors then picked it (or it passed the points bar on Hacker News or Lobsters): that judgement
+            # wins, and the item is written after all.
+            revive(db, existing, r["source_id"])
             done("revived")
             made += 1
         else:
             done("known")       # a news source already carries the linked article
-    return made
+    return made + revive_shared(db, by_id, bars, since)
+
+
+def revive(db, existing, via):
+    keep = json.loads(existing["extra"] or "{}")
+    db.conn.execute("UPDATE items SET status = 'new', drop_rule = NULL, triaged = 1, attempts = 0, retry_at = NULL,"
+                    " extra = ? WHERE url_canonical = ?",
+                    (json.dumps({**keep, "via": via}), existing["url_canonical"]))
+
+
+def revive_shared(db, by_id, bars, since):
+    """A screening drop is not final: an item a news source listed, dropped as off-topic or dull, that Hacker
+    News or Lobsters then carries past the import bar is written after all. Such a link has no signal row of its
+    own (the URL is the news item's; its points live in the item's extra.signals), so promote_signals' loop over
+    signal rows never saw it: TechCrunch's "SNL gathers all the tech tycoons for a lesson in dating and spycraft"
+    was dropped as off-topic and stayed dropped whatever followed. Returns the number revived."""
+    marks = ",".join("?" * len(REVIVABLE))
+    n = 0
+    for r in db.q(f"SELECT * FROM items WHERE status = 'dropped' AND drop_rule IN ({marks})"
+                  " AND extra LIKE '%\"signals\"%' AND published_at >= ?", *REVIVABLE, since):
+        for sid, pts in (json.loads(r["extra"] or "{}").get("signals") or {}).items():
+            source = by_id.get(sid)
+            kind = (source.kind or ("hn" if sid.startswith("hn") else sid)) if source else None
+            bar = bars.get(kind) if kind in ("hn", "lobsters") else None
+            if bar is not None and (pts.get("points") or 0) >= bar:
+                revive(db, r, sid)
+                n += 1
+                break
+    return n
 
 
 def record(db, source, sources, res, now, cfg):

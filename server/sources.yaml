@@ -5,9 +5,10 @@
 # Fields: id, name, v1_name (exact 1.2 FeedSource name, or `name` for new sources), url,
 # tier (1 | 2 | signal), authority (0.5-1.2), reads, region (in | us | global), poll (3m | 10m),
 # fetch_page, images (source | generated). Optional: include_tags (keep only entries with one of these
-# feed categories, for site-wide feeds); format (rss | hn_algolia | lobsters | github_trending); kind (techmeme | hn | lobsters | reddit | github,
+# feed categories, for site-wide feeds); format (rss | hn_algolia | lobsters); kind (techmeme | hn | lobsters | reddit,
 # what a signal source is); seed_days (how far back the first poll reaches, for essays and developer posts;
-# default fetch.first_run_skip_hours); domains (hosts whose articles are this publisher's, for an article imported from a
+# default fetch.first_run_skip_hours); desk (dev: a developer outlet, whose stories are Dev news with
+# dev_tools anywhere among their topics); domains (hosts whose articles are this publisher's, for an article imported from a
 # Techmeme or Hacker News link). A source with domains and no url is never polled: it only names the publisher.
 #
 # Scope (the owner's direction, 2026-11-15): anything with a tech angle that makes a good headline, so the list
@@ -19,6 +20,10 @@
 # Polling: 3m for the outlets that break news (a story published at :01 on a 10-minute feed was seen at :06-:16,
 # and Engadget items 14-22 min after publication), 10m for blogs, essays and company posts. Every poll is a
 # conditional GET.
+#
+# Removed after the third review (2026-11-16): Changelog News (the feed's newest entry was 200 days old) and
+# Tech in Asia (its feed gives 12 words an item and its pages no text, so none of its 36 items a week could
+# be a card).
 #
 # Left out because they fail from the server today: Moneycontrol Tech (403 to a non-browser UA),
 # ETtech's own site (tech.economictimes.indiatimes.com times out; the ET Tech section feed below works),
@@ -130,7 +135,6 @@ sources:
   - {id: ht_tech, name: Hindustan Times, v1_name: Hindustan Times, url: "https://www.hindustantimes.com/feeds/rss/technology/rssfeed.xml", region: in, authority: 0.8, domains: [hindustantimes.com], poll: 3m}
   - {id: indiatoday_tech, name: India Today, v1_name: India Today, url: "https://www.indiatoday.in/rss/1206688", region: in, authority: 0.8, domains: [indiatoday.in], poll: 3m}
   - {id: aim, name: Analytics India Magazine, v1_name: Analytics India Magazine, url: "https://analyticsindiamag.com/feed/", region: in, authority: 0.9, domains: [analyticsindiamag.com]}
-  - {id: techinasia, name: Tech in Asia, v1_name: Tech in Asia, url: "https://www.techinasia.com/feed", authority: 0.9, domains: [techinasia.com], poll: 3m}
 
   # Startups and venture.
   - {id: crunchbase, name: Crunchbase News, v1_name: Crunchbase News, url: "https://news.crunchbase.com/feed/", domains: [news.crunchbase.com], poll: 3m}
@@ -147,24 +151,23 @@ sources:
   - {id: newcomer, name: Newcomer, v1_name: Newcomer, url: "https://www.newcomer.co/feed", reads: true, authority: 0.9, domains: [newcomer.co], seed_days: 14}
 
   # Developers.
-  - {id: infoq, name: InfoQ, v1_name: InfoQ, url: "https://feed.infoq.com/", domains: [infoq.com], seed_days: 7}
-  - {id: thenewstack, name: The New Stack, v1_name: The New Stack, url: "https://thenewstack.io/feed/", domains: [thenewstack.io], seed_days: 7}
-  - {id: devclass, name: DevClass, v1_name: DevClass, url: "https://devclass.com/feed/", authority: 0.9, domains: [devclass.com], seed_days: 7}
-  - {id: lwn, name: LWN, v1_name: LWN, url: "https://lwn.net/headlines/rss", domains: [lwn.net], seed_days: 7}
-  - {id: phoronix, name: Phoronix, v1_name: Phoronix, url: "https://www.phoronix.com/rss.php", authority: 0.9, domains: [phoronix.com], seed_days: 7}
-  - {id: changelog, name: Changelog News, v1_name: Changelog News, url: "https://changelog.com/news/feed", authority: 0.9, domains: [changelog.com], seed_days: 7}
-  - {id: stackoverflow, name: Stack Overflow Blog, v1_name: Stack Overflow Blog, url: "https://stackoverflow.blog/feed/", authority: 0.9, domains: [stackoverflow.blog], seed_days: 7}
-  - {id: github_changelog, name: GitHub Changelog, v1_name: GitHub Blog, url: "https://github.blog/changelog/feed/", seed_days: 7}
-  - {id: rust_blog, name: Rust Blog, v1_name: Rust Blog, url: "https://blog.rust-lang.org/feed.xml", domains: [blog.rust-lang.org], seed_days: 7}
-  - {id: go_blog, name: Go Blog, v1_name: Go Blog, url: "https://go.dev/blog/feed.atom", domains: [go.dev], seed_days: 7}
-  - {id: python_insider, name: Python Insider, v1_name: Python Insider, url: "https://blog.python.org/feeds/posts/default", domains: [blog.python.org], seed_days: 7}
-  - {id: infoworld, name: InfoWorld, v1_name: InfoWorld, url: "https://www.infoworld.com/feed/", authority: 0.9, domains: [infoworld.com], seed_days: 7}
-  - {id: sdtimes, name: SD Times, v1_name: SD Times, url: "https://sdtimes.com/feed/", authority: 0.9, domains: [sdtimes.com], seed_days: 7}
-  - {id: jetbrains, name: JetBrains Blog, v1_name: JetBrains Blog, url: "https://blog.jetbrains.com/feed/", authority: 0.9, domains: [blog.jetbrains.com], seed_days: 7}
-  - {id: socket, name: Socket, v1_name: Socket, url: "https://socket.dev/api/blog/feed.atom", authority: 0.9, domains: [socket.dev], seed_days: 7}
-  - {id: aws_news, name: AWS News Blog, v1_name: AWS News Blog, url: "https://aws.amazon.com/blogs/aws/feed/", authority: 0.9, seed_days: 7}
-  - {id: ms_devblogs, name: Microsoft DevBlogs, v1_name: Microsoft DevBlogs, url: "https://devblogs.microsoft.com/feed/", authority: 0.9, domains: [devblogs.microsoft.com], seed_days: 7}
-  - {id: k8s, name: Kubernetes Blog, v1_name: Kubernetes Blog, url: "https://kubernetes.io/feed.xml", domains: [kubernetes.io], seed_days: 7}
+  - {id: infoq, name: InfoQ, v1_name: InfoQ, url: "https://feed.infoq.com/", domains: [infoq.com], seed_days: 7, desk: dev}
+  - {id: thenewstack, name: The New Stack, v1_name: The New Stack, url: "https://thenewstack.io/feed/", domains: [thenewstack.io], seed_days: 7, desk: dev}
+  - {id: devclass, name: DevClass, v1_name: DevClass, url: "https://devclass.com/feed/", authority: 0.9, domains: [devclass.com], seed_days: 7, desk: dev}
+  - {id: lwn, name: LWN, v1_name: LWN, url: "https://lwn.net/headlines/rss", domains: [lwn.net], seed_days: 7, desk: dev}
+  - {id: phoronix, name: Phoronix, v1_name: Phoronix, url: "https://www.phoronix.com/rss.php", authority: 0.9, domains: [phoronix.com], seed_days: 7, desk: dev}
+  - {id: stackoverflow, name: Stack Overflow Blog, v1_name: Stack Overflow Blog, url: "https://stackoverflow.blog/feed/", authority: 0.9, domains: [stackoverflow.blog], seed_days: 7, desk: dev}
+  - {id: github_changelog, name: GitHub Changelog, v1_name: GitHub Blog, url: "https://github.blog/changelog/feed/", seed_days: 7, desk: dev}
+  - {id: rust_blog, name: Rust Blog, v1_name: Rust Blog, url: "https://blog.rust-lang.org/feed.xml", domains: [blog.rust-lang.org], seed_days: 7, desk: dev}
+  - {id: go_blog, name: Go Blog, v1_name: Go Blog, url: "https://go.dev/blog/feed.atom", domains: [go.dev], seed_days: 7, desk: dev}
+  - {id: python_insider, name: Python Insider, v1_name: Python Insider, url: "https://blog.python.org/feeds/posts/default", domains: [blog.python.org], seed_days: 7, desk: dev}
+  - {id: infoworld, name: InfoWorld, v1_name: InfoWorld, url: "https://www.infoworld.com/feed/", authority: 0.9, domains: [infoworld.com], seed_days: 7, desk: dev}
+  - {id: sdtimes, name: SD Times, v1_name: SD Times, url: "https://sdtimes.com/feed/", authority: 0.9, domains: [sdtimes.com], seed_days: 7, desk: dev}
+  - {id: jetbrains, name: JetBrains Blog, v1_name: JetBrains Blog, url: "https://blog.jetbrains.com/feed/", authority: 0.9, domains: [blog.jetbrains.com], seed_days: 7, desk: dev}
+  - {id: socket, name: Socket, v1_name: Socket, url: "https://socket.dev/api/blog/feed.atom", authority: 0.9, domains: [socket.dev], seed_days: 7, desk: dev}
+  - {id: aws_news, name: AWS News Blog, v1_name: AWS News Blog, url: "https://aws.amazon.com/blogs/aws/feed/", authority: 0.9, seed_days: 7, desk: dev}
+  - {id: ms_devblogs, name: Microsoft DevBlogs, v1_name: Microsoft DevBlogs, url: "https://devblogs.microsoft.com/feed/", authority: 0.9, domains: [devblogs.microsoft.com], seed_days: 7, desk: dev}
+  - {id: k8s, name: Kubernetes Blog, v1_name: Kubernetes Blog, url: "https://kubernetes.io/feed.xml", domains: [kubernetes.io], seed_days: 7, desk: dev}
 
   # Lab and company blogs, 10 min poll.
   - {id: openai, name: OpenAI, v1_name: OpenAI, url: "https://openai.com/news/rss.xml", domains: [openai.com], seed_days: 7}
@@ -173,8 +176,8 @@ sources:
   # Community-built feed of anthropic.com/news (github.com/Olshansk/rss-feeds); Anthropic publishes none.
   - {id: anthropic, name: Anthropic, v1_name: Anthropic, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_news.xml", domains: [anthropic.com], seed_days: 7}
   - {id: huggingface, name: Hugging Face, v1_name: Hugging Face, url: "https://huggingface.co/blog/feed.xml", seed_days: 7}
-  - {id: github, name: GitHub Blog, v1_name: GitHub Blog, url: "https://github.blog/feed/", domains: [github.blog], seed_days: 7}
-  - {id: cloudflare, name: Cloudflare, v1_name: Cloudflare, url: "https://blog.cloudflare.com/rss/", domains: [blog.cloudflare.com], seed_days: 7}
+  - {id: github, name: GitHub Blog, v1_name: GitHub Blog, url: "https://github.blog/feed/", domains: [github.blog], seed_days: 7, desk: dev}
+  - {id: cloudflare, name: Cloudflare, v1_name: Cloudflare, url: "https://blog.cloudflare.com/rss/", domains: [blog.cloudflare.com], seed_days: 7, desk: dev}
   - {id: nvidia_blog, name: Nvidia Blog, v1_name: Nvidia Blog, url: "https://blogs.nvidia.com/feed/", domains: [blogs.nvidia.com], seed_days: 7}
   - {id: mistral, name: Mistral AI, v1_name: Mistral AI, url: "https://mistral.ai/rss.xml", domains: [mistral.ai], seed_days: 7}
 
@@ -214,10 +217,10 @@ sources:
   # Hacker News through the Algolia API (points and comments on every poll; hnrss.org timed out from the VPS).
   - {id: hn, name: Hacker News, v1_name: Hacker News, url: "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=60", tier: signal, kind: hn, format: hn_algolia, authority: 0.8, poll: 3m, fetch_page: false}
   - {id: hn_100, name: Hacker News, v1_name: Hacker News, url: "https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=points%3E100&hitsPerPage=80", tier: signal, kind: hn, format: hn_algolia, authority: 0.8, poll: 3m, fetch_page: false}
-  # Reddit's top posts of the day (the RSS route; the entries carry no score, so being listed is the signal) and
-  # GitHub's trending repositories (stars today as points). Neither is imported as an article: they add to the
-  # traction of the event they are about (rank.coverage), each with its own capped multiplier.
+  # Reddit's top posts of the day (the RSS route: the entries carry no score, but the listing is sorted by it, so
+  # a post's place is the signal; the first ten count as traction, rank.REDDIT_TOP). A post attaches only to the
+  # event of the article it links, never by its title, and is never imported as an article.
   # One request for both subreddits: two feeds polled in the same tick got a 429 for the second.
+  # GitHub trending was a signal here until the third review: it attached to no event and moved no rank.
   - {id: reddit_technology, name: Reddit, v1_name: Reddit, url: "https://www.reddit.com/r/technology+programming/top/.rss?t=day&limit=50", tier: signal, kind: reddit, authority: 0.8, poll: 10m, fetch_page: false}
-  - {id: github_trending, name: GitHub Trending, v1_name: GitHub Trending, url: "https://github.com/trending?since=daily", tier: signal, kind: github, format: github_trending, authority: 0.8, poll: 10m, fetch_page: false}
   - {id: lobsters, name: Lobsters, v1_name: Lobsters, url: "https://lobste.rs/hottest.json", tier: signal, kind: lobsters, format: lobsters, authority: 0.8, poll: 10m, fetch_page: false}
