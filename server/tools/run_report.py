@@ -41,7 +41,7 @@ def card_line(c, now, score=None):
     hn = c.data["hn"].get("points") or 0
     sig = f"{c.n_publishers} pub" + (" +Techmeme" if c.on_techmeme else "") + (f" +HN {hn}" if hn else "")
     head = f"{score:.3f} " if score is not None else ""
-    return (f"{head}I{c.importance} {fmt_age(c.age_h(now))} [{sig}] {c.lead_publisher}: {c.title[:110]}")
+    return (f"{head}I{c.importance} S{c.spice} {fmt_age(c.age_h(now))} [{sig}] {c.lead_publisher}: {c.title[:110]}")
 
 
 def main():
@@ -76,6 +76,36 @@ def main():
         out.append("\n== Top ==")
         for i, (c, s) in enumerate(tabs["top"]):
             out.append(f"{i + 1:2}. {card_line(c, now, s)}")
+
+        out.append("\n== Spice ==")
+        sp = report.get("spice") or {}
+        out.append(f"edition cards: median {sp.get('median')}, at 7+: {sp.get('atLeast7')} of {sp.get('cards')}, "
+                   f"Top median {sp.get('topMedian')}; histogram {sp.get('histogram')}")
+        hs = health.spice_stats(db, now - timedelta(hours=24))
+        out.append(f"written items (24h): {hs['items']}; share at 7+ {hs['itemShareAtLeast7']}, at 2 or less "
+                   f"{hs['itemShareAtMost2']}")
+        imp = health.importance_drift(db, now - timedelta(hours=24))
+        out.append(f"importance, raw items: {imp['rawItems']}; events: {imp['clampedEvents']}")
+
+        out.append("\n== Push alert candidates (spice x importance x traction, cards under 12 h) ==")
+        for n in (report.get("notifications") or [])[:12]:
+            out.append(f"{n['score']:.3f} S{n['spice']} I{n['importance']} {n['publishers']} pub {n['ageH']:4.1f}h  "
+                       f"{n['title']} | {n['body']}")
+
+        out.append("\n== Events ==")
+        sizes = [r["n"] for r in db.q("SELECT COUNT(*) n FROM event_members m JOIN events e ON e.id = m.event_id"
+                                      " WHERE e.status = 'live' GROUP BY m.event_id")]
+        how = {r["how"]: r["n"] for r in db.q("SELECT how, COUNT(*) n FROM event_members GROUP BY how")}
+        sig = {r["k"]: r["n"] for r in db.q("SELECT source_id || '/' || how k, COUNT(*) n FROM event_signals GROUP BY 1")}
+        dup = db.one("SELECT COUNT(*) n FROM (SELECT url_canonical, source_id FROM event_signals GROUP BY 1, 2"
+                     " HAVING COUNT(*) > 1)")["n"]
+        out.append(f"{len(sizes)} live events; members per event: max {max(sizes or [0])}, with 2+: "
+                   f"{sum(s > 1 for s in sizes)}, with 5+: {sum(s >= 5 for s in sizes)}; follow-up events: "
+                   f"{db.one("SELECT COUNT(*) n FROM events WHERE status = 'live' AND parent_id IS NOT NULL")['n']}")
+        out.append(f"joins by rule: {how}; signals attached: {sig}; signals on two events: {dup}")
+        via = {r["k"]: r["n"] for r in db.q("SELECT status k, COUNT(*) n FROM items WHERE extra LIKE '%\"via\"%'"
+                                            " GROUP BY 1")}
+        out.append(f"items imported from signals, by status: {via}")
 
         out.append("\n== Highest traction (coverage x Techmeme x HN), all candidates in any tab ==")
         shown = {c.id: c for ranked in tabs.values() for c, _ in ranked}

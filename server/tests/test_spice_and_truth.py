@@ -553,3 +553,25 @@ def test_image_urls_are_reported_unserved_in_a_test_run():
     got = publish_v1.image_url_check(_db(), {"publish": {"git_remote": None}},
                                      {"articles": [{"image": "https://x.test/img/a_std.jpg"}]}, NOW)
     assert got["served"] is False and got["urls"] == 1
+
+
+def test_rulings_are_asked_in_parallel_before_assignment_and_cached():
+    db, calls = _db(), []
+    a = _item("https://a.test/1", [1, 0, 0], "Letter")
+    store = cluster.Store(db, SRCS, S, NOW, _judge({"Report two": "same", "Report three": "followup"}, calls))
+    eid, _ = cluster.create(store, a)
+    two = _item("https://b.test/2", [0.8, 0.6, 0], "Report two", source_id="verge")
+    three = _item("https://c.test/3", [0.7, 0.7, 0], "Report three", source_id="cnbc")
+    jobs = [(it.url, it.title, it.text, [store.events[eid]]) for it in (two, three)]
+    assert cluster.prefetch_rulings(store, jobs) == 2 and len(calls) == 2
+    assert cluster.prefetch_rulings(store, jobs) == 0                     # nothing left to ask
+    assert cluster.assign(store, two) == (eid, "judge")
+    assert cluster.assign(store, three)[1] == "followup_judge"
+    assert len(calls) == 2                                                # the assignment used the cache
+
+    def down(title, text, events):
+        raise llm.LLMError("timeout")
+    store.judge = down
+    four = _item("https://d.test/4", [0.75, 0.66, 0], "Report four", source_id="bbc")
+    cluster.prefetch_rulings(store, [(four.url, four.title, four.text, [store.events[eid]])])
+    assert store.ruling(four.url, eid) is None                            # a failed call caches nothing

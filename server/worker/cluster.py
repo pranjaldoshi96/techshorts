@@ -22,6 +22,7 @@ models", and the thresholds measured on item pairs by tools/label_pairs.py still
 IDs are "ev_" + sha1(first member's canonical URL)[:10] and never change; a merge aliases the younger id to the
 older one for 30 days.
 """
+import concurrent.futures as cf
 import hashlib
 import json
 import logging
@@ -96,6 +97,10 @@ class Settings:
     t_same: float = 0.9
     # Judge rulings for signals per pass; the rest wait a tick.
     signal_judgements: int = 12
+    # Rulings are asked for in parallel before the serial assignment (a backlog tick asked 31 one after another,
+    # about a minute); rewrites are serial and capped, the rest stay queued for the next tick.
+    judge_workers: int = 8
+    max_rewrites: int = 3
 
     @classmethod
     def from_cfg(cls, cfg):
@@ -382,9 +387,9 @@ def assign(store, item):
     return create(store, item)
 
 
-def assign_judged(store, item, ranked, picked):
-    """Assignment with the judge (see the module docstring): the nearest events that pass the structural rules
-    are put to the judge in one call; "same" joins, "followup" starts a child event, anything else a new one."""
+def judged_candidates(store, item, ranked, picked):
+    """(same-text event or None, [(cosine, event)] to put to the judge, a too-old event of the same story or None).
+    The events are the nearest ones that pass the structural rules (types, ages)."""
     s, now = store.s, store.now
     cands, too_old = [], None
     for cos, ev in ranked:
@@ -393,11 +398,48 @@ def assign_judged(store, item, ranked, picked):
         why = joinable(item, ev, cos, ev.id == picked, now, s, judged=True)
         if why is None:
             if cos >= s.t_same:
-                return join(store, ev, item, cos, "same_text")
+                return (cos, ev), [], None
             if len(cands) < s.max_candidates:
                 cands.append((cos, ev))
         elif why == "event_too_old" and too_old is None and ((item.keys & ev.keys) or ev.id == picked):
             too_old = ev
+    return None, cands, too_old
+
+
+def prefetch_rulings(store, jobs):
+    """Asks the judge about several (key, title, text, [events]) at once and caches the answers. Only the calls
+    run in threads; the cache is written here, in the worker's own thread. A failed call caches nothing, so the
+    assignment asks again (and the item waits a tick if that fails too)."""
+    jobs = [(key, title, text, [ev for ev in events if store.ruling(key, ev.id) is None])
+            for key, title, text, events in jobs]
+    jobs = [j for j in jobs if j[3]]
+    if store.judge is None or not jobs:
+        return 0
+
+    def ask(job):
+        key, title, text, events = job
+        try:
+            return store.judge(title, text, [(ev.id, ev.row.get("headline"), ev.anchor.title if ev.anchor else "")
+                                             for ev in events])
+        except LLMError:
+            return None
+    with cf.ThreadPoolExecutor(store.s.judge_workers) as pool:
+        answers = list(pool.map(ask, jobs))
+    for (key, _, _, events), got in zip(jobs, answers):
+        store.judge_calls += 1
+        if got is None:
+            continue
+        for ev in events:
+            store.rule(key, ev.id, got.get(ev.id, "different"))
+    return len(jobs)
+
+
+def assign_judged(store, item, ranked, picked):
+    """Assignment with the judge (see the module docstring): the nearest events that pass the structural rules
+    are put to the judge in one call; "same" joins, "followup" starts a child event, anything else a new one."""
+    same_text, cands, too_old = judged_candidates(store, item, ranked, picked)
+    if same_text is not None:
+        return join(store, same_text[1], item, same_text[0], "same_text")
     rel = {}
     if cands:
         try:
@@ -750,7 +792,24 @@ def attach_signals(store):
         if r["source_id"] in signal_ids and r["url_canonical"] in member_of:
             extra = (json.loads(r["extra"] or "{}").get("signals") or {}).get(r["source_id"]) or {}
             attach(member_of[r["url_canonical"]], r["url_canonical"], r["source_id"], "url", _points(extra))
-    for r in signal_items(db, store.srcs, now):
+    rows = signal_items(db, store.srcs, now)
+    if store.judge is not None:
+        # The title matches that need a ruling, newest first, asked in parallel up to the pass's budget.
+        need = []
+        for r in sorted(rows, key=lambda r: r["published_at"], reverse=True):
+            extra = json.loads(r["extra"] or "{}")
+            linked = extra.get("linked_url") or r["url_canonical"]
+            if linked in member_of or r["url_canonical"] in member_of or r["vec"] is None \
+                    or (r["url_canonical"], r["source_id"]) in attached:
+                continue
+            ranked = store.ranked(embed_mod.from_blob(r["vec"]))
+            if ranked and ranked[0][0] >= store.s.t_signal and store.ruling(r["url_canonical"],
+                                                                             ranked[0][1].id) is None:
+                need.append((r["url_canonical"], r["title"], r["feed_text"] or "", [ranked[0][1]]))
+            if len(need) >= budget:
+                break
+        prefetch_rulings(store, need)
+    for r in rows:
         extra = json.loads(r["extra"] or "{}")
         key = (r["url_canonical"], r["source_id"])
         linked = extra.get("linked_url") or r["url_canonical"]
@@ -775,15 +834,8 @@ def attach_signals(store):
             if words & names:
                 attach(ev.id, r["url_canonical"], r["source_id"], "cosine", extra)
             continue
+        # Ruled above, or waiting for a later pass (over budget, or the judge could not be asked).
         verdict = store.ruling(r["url_canonical"], ev.id)
-        if verdict is None:
-            if budget <= 0:
-                continue
-            budget -= 1
-            try:
-                verdict = store.relations(r["url_canonical"], r["title"], r["feed_text"] or "", [ev])[ev.id]
-            except LLMError:
-                break
         if verdict == "same":
             attach(ev.id, r["url_canonical"], r["source_id"], "judge", extra)
     return n
@@ -907,7 +959,15 @@ def run(db, cfg, srcs, now, embedder=None, rewriter=None, judge=None):
             log.warning("embedding failed: %s", e)
             stats["embed_failed"] += 1
     store = Store(db, srcs, s, now, judge)
-    for item in pending_items(db, now):
+    pending = pending_items(db, now)
+    if judge is not None:
+        jobs = []
+        for item in pending:
+            _, cands, _ = judged_candidates(store, item, store.ranked(item.vec), None)
+            if cands:
+                jobs.append((item.url, item.title, item.text or item.headline or "", [ev for _, ev in cands]))
+        prefetch_rulings(store, jobs)
+    for item in pending:
         eid, how = assign(store, item)
         stats[how] += 1
     stats["signals_attached"] = attach_signals(store)
@@ -918,9 +978,11 @@ def run(db, cfg, srcs, now, embedder=None, rewriter=None, judge=None):
     for ev in list(store.events.values()):
         refresh(store, ev, tier1_ok)
     if rewriter is not None:
-        for ev in list(store.events.values()):
-            if not due_rewrite(ev.row, now, s):
-                continue
+        # Material updates first, then the best-covered events; the rest stay queued for the next tick.
+        due = [ev for ev in store.events.values() if due_rewrite(ev.row, now, s)]
+        due.sort(key=lambda ev: ("material_update" not in (ev.row.get("rewrite_reason") or ""),
+                                 -(ev.row.get("n_publishers") or 0), ev.id))
+        for ev in due[:s.max_rewrites]:
             try:
                 done = rewriter(store, ev)
             except LLMError as e:       # incl. AuthError: the lead's own text stays; degraded mode is WP4's

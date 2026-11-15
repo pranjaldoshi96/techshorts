@@ -207,7 +207,11 @@ class Client:
         self.key = key
         self.params = dict(self.DEFAULT_PARAMS if params is None else params)
         self.bucket = bucket or TokenBucket(clock=clock, sleep=sleep)
-        self.session = session or requests.Session()
+        if session is None:
+            # One connection per worker thread (the default pool of 10 was discarding connections at 12).
+            session = requests.Session()
+            session.mount("https://", requests.adapters.HTTPAdapter(pool_maxsize=32))
+        self.session = session
         self.timeout = timeout
         self.clock, self.sleep = clock, sleep
         # (kind, model, outcome, ms, prompt tokens, completion tokens) for health.json; drained by the stage
