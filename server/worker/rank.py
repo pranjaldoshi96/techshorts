@@ -37,6 +37,7 @@ IMAGE_HAMMING = 6       # dHash distance at or under which two images count as t
 STORYLINE_CAP = 3
 STORYLINE_HEAD = 12
 STORYLINE_MAX = 8
+STORYLINE_MAJOR = 7     # a development of this importance also counts ("Huang agrees to testify", one outlet)
 STRONG_PUBLISHERS = 3
 STRONG_HN = 300
 STRONG_LOBSTERS = 100
@@ -374,12 +375,16 @@ def eligible(c, tab, now, degraded=False):
         return "unclassified"
     if never_shipped(c):
         return "never_shipped"
-    if not c.is_news and tab.id not in ("reads", "dev"):
-        return "not_news"
     # Top takes analysis, opinion and interview pieces only at importance >= 8, or from 5 when the piece itself is
-    # widely shared (a Techmeme headline, a big Hacker News thread).
-    if c.type not in tab.types and not (tab.id == "top" and c.type in LABELLED and (
-            c.importance >= 8 or (widely_shared(c) and c.ai_text and c.importance >= SHARED_LABELLED_IMPORTANCE))):
+    # widely shared (a Techmeme headline, a big Hacker News thread) or three outlets carry it. Such a piece is
+    # not "news" to the writer (an essay reports nothing), so it is exempt from the not-news rule as well: "All
+    # AI-generated code should be Open Source" (HN 954) was kept out of Top by it.
+    labelled_top = tab.id == "top" and c.type in LABELLED and (c.importance >= 8 or (
+        (widely_shared(c) or c.n_publishers >= STRONG_PUBLISHERS) and c.ai_text
+        and c.importance >= SHARED_LABELLED_IMPORTANCE))
+    if not c.is_news and tab.id not in ("reads", "dev") and not labelled_top:
+        return "not_news"
+    if c.type not in tab.types and not labelled_top:
         return "type"
     if c.importance < tab.min_importance and not (tab.id == "top" and top_fresh(c, now)) \
             and not spicy_pass(c, tab, now) and not traction_pass(c, tab, now):
@@ -422,9 +427,10 @@ def hamming(a, b):
     return bin(int(a, 16) ^ int(b, 16)).count("1")
 
 
-def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None):
+def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None, ruled_apart=None):
     """Filter → drop below 25% of the median → sort → duplicate guard → diversity → storyline → image
-    dedupe → cap. Never pads. Returns [(candidate, score)] in rank order. `dup_threshold` is a Dedup, or a bare cosine."""
+    dedupe → cap. Never pads. Returns [(candidate, score)] in rank order. `dup_threshold` is a Dedup, or a bare cosine.
+    `ruled_apart(a_id, b_id)`: the clustering judge has ruled the two events different developments."""
     dedup = dup_threshold if isinstance(dup_threshold, Dedup) or dup_threshold is None else Dedup(dup_threshold)
     pool = []
     for c in cands:
@@ -452,7 +458,12 @@ def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None):
 
     def is_duplicate(c):
         # The merge pass should have joined these, but the feed must never show one story twice (spec 8 WP4 AC).
-        return dedup is not None and any(dedup.duplicate(c, o) for o, _ in out)
+        # Two cards the edition-wide guard deliberately kept are not duplicates here either: a follow-up and its
+        # parent, and a pair the judge ruled different developments. Without these exemptions the tab dropped
+        # exactly the saga's developments the judge had separated ("Musk says he will sign petition for Huang's
+        # Nvidia return", 4 publishers, against "Huang discusses possible return as Nvidia chief").
+        return dedup is not None and any(dedup.duplicate(c, o) and not _kept_apart(c, o, ruled_apart)
+                                         for o, _ in out)
 
     def blocked(c, relax):
         """Why `c` can't take the next rank now (it may later), or None."""
@@ -463,7 +474,7 @@ def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None):
             return "diversity"
         n_story = per_story.get(c.storyline, 0) if c.storyline else 0
         if n_story >= STORYLINE_CAP and not (len(out) >= STORYLINE_HEAD and n_story < STORYLINE_MAX
-                                             and strong_traction(c)):
+                                             and (strong_traction(c) or c.importance >= STORYLINE_MAJOR)):
             return "storyline"
         if n_story and c.age_eff(now) > (STORYLINE_SECOND_STRONG_H if strong_traction(c)
                                          else STORYLINE_SECOND_MAX_H):
@@ -509,18 +520,24 @@ def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None):
     return out
 
 
+def _kept_apart(a, b, ruled_apart=None):
+    if a.data.get("parent_id") == b.id or b.data.get("parent_id") == a.id:
+        return True
+    return bool(ruled_apart and ruled_apart(a.id, b.id))
+
+
 def _count(stats, key):
     if stats is not None:
         stats[key] = stats.get(key, 0) + 1
 
 
-def build_tabs(cands, now, degraded=False, dup_threshold=None, stats=None, tabs=None):
+def build_tabs(cands, now, degraded=False, dup_threshold=None, stats=None, tabs=None, ruled_apart=None):
     """{tab id: [(candidate, score)]} for every tab. `stats` collects per-tab filter counts."""
     tabs = tabs or TABS
     out = {}
     for tid in TAB_ORDER:
         s = {} if stats is not None else None
-        out[tid] = assemble(cands, tabs[tid], now, degraded, dup_threshold, s)
+        out[tid] = assemble(cands, tabs[tid], now, degraded, dup_threshold, s, ruled_apart)
         if stats is not None:
             stats[tid] = s
     return out

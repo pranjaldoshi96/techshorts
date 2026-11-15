@@ -240,7 +240,7 @@ def test_a_saga_shows_its_real_developments_past_the_head_of_a_tab():
     """Storyline ev_4c525e5e54 (Nvidia): "Megaspeed opens internal probe" (8 publishers, Techmeme), the petition
     and the investors' letter were cut by the cap of 3 while spice-4 single-source items filled Top."""
     saga = [_cand(f"saga{i}", importance=7, spice=8, n=4, techmeme=True, age_h=1 + i * 0.2) for i in range(6)]
-    weak = _cand("saga_weak", importance=7, spice=8, n=1, age_h=1.1)
+    weak = _cand("saga_weak", importance=6, spice=8, n=1, age_h=1.1)
     for c in saga + [weak]:
         c.storyline = "nvidia"
     others = [_cand(f"o{i:02}", importance=6, spice=6, n=1, age_h=2 + i * 0.1) for i in range(20)]
@@ -249,11 +249,35 @@ def test_a_saga_shows_its_real_developments_past_the_head_of_a_tab():
     assert sum(i.startswith("saga") for i in head) == rank.STORYLINE_CAP == 3
     assert all(f"saga{i}" in ranked for i in range(6))          # each well-covered development is shown
     assert "saga_weak" not in ranked                            # a single-source angle still waits its turn
+    # A major development counts even from one outlet ("Huang agrees to testify", Bloomberg, importance 7).
+    major = _cand("saga_major", importance=7, spice=9, n=1, age_h=1.2)
+    major.storyline = "nvidia"
+    assert "saga_major" in [c.id for c, _ in rank.assemble(saga[:4] + [major] + others, TOP, NOW)]
     many = [_cand(f"m{i:02}", importance=7, spice=8, n=4, techmeme=True, age_h=1 + i * 0.1) for i in range(12)]
     for c in many:
         c.storyline = "x"
     got = [c.id for c, _ in rank.assemble(many + others, TOP, NOW)]
     assert sum(i.startswith("m") for i in got) == rank.STORYLINE_MAX == 8
+
+
+def test_developments_the_judge_ruled_apart_are_both_shown_in_a_tab():
+    """ev_5f7e2eab7e "Musk says he will sign petition for Huang's Nvidia return" (4 publishers) was dropped from
+    Top as a duplicate of "Huang discusses possible return as Nvidia chief": the edition-wide guard honoured the
+    judge's ruling and the parent/follow-up link, the tab's own guard did not."""
+    d = rank.Dedup(alone=0.65, t=0.5)
+    comeback = _cand("ev_comeback", importance=7, spice=9, n=5, vec=[1, 0], age_h=1)
+    petition = _cand("ev_petition", importance=6, spice=8, n=4, vec=[0.8, 0.6], age_h=3)
+    child = _cand("ev_child", importance=6, spice=8, n=2, vec=[0.9, 0.44], age_h=2)
+    for c in (comeback, petition, child):
+        c.keys = frozenset([("p", "huang")])
+    child.data = {"parent_id": "ev_comeback"}
+    assert d.duplicate(comeback, petition) and d.duplicate(comeback, child)
+    got = [c.id for c, _ in rank.assemble([comeback, petition, child], TOP, NOW, dup_threshold=d)]
+    assert got == ["ev_comeback", "ev_child"]                   # a follow-up sits next to its parent
+    apart = {("ev_comeback", "ev_petition"), ("ev_child", "ev_petition")}
+    got = [c.id for c, _ in rank.assemble([comeback, petition, child], TOP, NOW, dup_threshold=d,
+                                          ruled_apart=lambda a, b: tuple(sorted((a, b))) in apart)]
+    assert sorted(got) == ["ev_child", "ev_comeback", "ev_petition"]
 
 
 def test_traction_opens_a_tab_like_spice_does():
@@ -271,13 +295,16 @@ def test_a_widely_shared_essay_reaches_reads_and_top_whoever_published_it():
     """"All AI-generated code should be Open Source" (HN 896, a personal blog) and "The MacBook Pro's OLED PWM
     problem" (HN 309) were written as analysis cards and shown in no tab."""
     essay = _cand("essay", importance=6, type="opinion", hn=896, title="Doe: All AI-generated code should be open")
-    essay.unvetted = True
+    essay.unvetted, essay.is_news = True, False         # an essay reports nothing: the writer says is_news false
     assert rank.eligible(essay, READS, NOW) is None and rank.eligible(essay, TOP, NOW) is None
     quiet = _cand("quiet", importance=6, type="opinion", hn=40)
     assert rank.eligible(quiet, READS, NOW) == "not_reads" and rank.eligible(quiet, TOP, NOW) == "type"
     assert rank.eligible(_cand(importance=4, type="analysis", hn=309), TOP, NOW) == "type"      # Top needs a 5
     listed = _cand("listed", importance=5, type="analysis", lead_reads=True)
     assert rank.eligible(listed, READS, NOW) is None
+    # ev_01c6c81e09 "Analysis: Nvidia begins CEO search after Jensen Huang resigns" (3 publishers) was in no tab.
+    assert rank.eligible(_cand(importance=7, type="analysis", n=3), TOP, NOW) is None
+    assert rank.eligible(_cand(importance=7, type="analysis", n=2), TOP, NOW) == "type"
 
 
 def test_a_site_nobody_chose_needs_a_second_outlet_for_top_and_alerts():

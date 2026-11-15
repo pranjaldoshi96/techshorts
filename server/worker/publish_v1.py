@@ -618,7 +618,8 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
     dedup = rank.Dedup.from_cfg(ctx.cfg)
     apart = {(r["a"][5:], r["b"]) for r in ctx.db.q(
         "SELECT a, b FROM judgements WHERE a LIKE 'pair:%' AND verdict != 'same'")}
-    live, twins = suppress_duplicates(live, dedup, lambda a, b: tuple(sorted((a, b))) in apart)
+    ruled_apart = lambda a, b: tuple(sorted((a, b))) in apart  # noqa: E731
+    live, twins = suppress_duplicates(live, dedup, ruled_apart)
     dcfg = ctx.cfg.get("dedup") or {}
     t_story = dcfg.get("t_storyline", ctx.cfg["cluster"]["t_join"])
     storylines(live, dedup, t_story, dcfg.get("t_storyline_org", t_story))
@@ -639,7 +640,7 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
             row = pictures.get(c.id)
             c.image_hash = row["dhash"] if row else None
     stats = {}
-    tabs = rank.build_tabs(live, now, degraded, dedup, stats, tab_specs)
+    tabs = rank.build_tabs(live, now, degraded, dedup, stats, tab_specs, ruled_apart)
     tabs = title_duplicates(tabs)
 
     base = (ctx.cfg.get("publish") or {}).get("base_url", "").rstrip("/") + "/"
