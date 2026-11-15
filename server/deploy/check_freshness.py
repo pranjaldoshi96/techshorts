@@ -107,7 +107,7 @@ def watchdog(what, unit, max_age_min, state_path=STATE, now=None, uptime=unit_up
         r = run(["systemctl", "restart", unit], capture_output=True, text=True)
         done = "restarted" if r.returncode == 0 else "restart_failed"
         st["restarts"] = st.get("restarts", 0) + 1
-        state = "was not running" if up is None else f"had been running {up / 60:.0f} min without publishing"
+        state = "was not running" if up is None else f"was running (up {up / 60:.0f} min) but not publishing"
         if send("Techgist: edition is stale, worker restarted",
                 f"{what}. {unit} {state}; " + ("restarted it" if done == "restarted" else
                                                f"the restart FAILED: {r.stderr.strip()[:200]}")
