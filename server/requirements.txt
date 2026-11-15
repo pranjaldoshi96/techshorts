@@ -9,3 +9,5 @@ trafilatura>=1.12
 lxml_html_clean>=0.4
 # Embeddings and clustering math (WP3).
 numpy>=1.24
+# Card images (spec 3): resize to 720x450 JPEG and 360x225 WebP.
+Pillow>=10.0
