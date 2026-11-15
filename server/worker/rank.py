@@ -38,6 +38,9 @@ STORYLINE_CAP = 3
 STORYLINE_HEAD = 12
 STORYLINE_MAX = 8
 STORYLINE_MAJOR = 7     # a development of this importance also counts ("Huang agrees to testify", one outlet)
+# The story's own main event is never the card the cap cuts: with eight fresher developments of the saga in Top,
+# "Jensen Huang resigns as Nvidia CEO" (importance 9, spice 10, a day old) was the one left out.
+STORYLINE_EVENT = 8
 STRONG_PUBLISHERS = 3
 STRONG_HN = 300
 STRONG_LOBSTERS = 100
@@ -473,8 +476,9 @@ def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None, ru
         if per_pub.get(pub, 0) >= cap:
             return "diversity"
         n_story = per_story.get(c.storyline, 0) if c.storyline else 0
-        if n_story >= STORYLINE_CAP and not (len(out) >= STORYLINE_HEAD and n_story < STORYLINE_MAX
-                                             and (strong_traction(c) or c.importance >= STORYLINE_MAJOR)):
+        if n_story >= STORYLINE_CAP and not (len(out) >= STORYLINE_HEAD and (
+                c.importance >= STORYLINE_EVENT or (n_story < STORYLINE_MAX and (
+                    strong_traction(c) or c.importance >= STORYLINE_MAJOR)))):
             return "storyline"
         if n_story and c.age_eff(now) > (STORYLINE_SECOND_STRONG_H if strong_traction(c)
                                          else STORYLINE_SECOND_MAX_H):

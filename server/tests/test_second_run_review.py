@@ -256,8 +256,11 @@ def test_a_saga_shows_its_real_developments_past_the_head_of_a_tab():
     many = [_cand(f"m{i:02}", importance=7, spice=8, n=4, techmeme=True, age_h=1 + i * 0.1) for i in range(12)]
     for c in many:
         c.storyline = "x"
-    got = [c.id for c, _ in rank.assemble(many + others, TOP, NOW)]
-    assert sum(i.startswith("m") for i in got) == rank.STORYLINE_MAX == 8
+    event = _cand("m_event", importance=9, spice=10, n=3, techmeme=True, age_h=27)
+    event.storyline = "x"
+    got = [c.id for c, _ in rank.assemble(many + [event] + others, TOP, NOW)]
+    assert sum(i.startswith("m") and i != "m_event" for i in got) == rank.STORYLINE_MAX == 8
+    assert "m_event" in got                 # the saga's main event is never the one the cap cuts
 
 
 def test_developments_the_judge_ruled_apart_are_both_shown_in_a_tab():
