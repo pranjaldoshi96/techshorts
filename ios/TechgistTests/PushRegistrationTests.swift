@@ -186,6 +186,31 @@ final class PushRegistrationTests: XCTestCase {
         XCTAssertFalse(store.focus(url: nil, eventId: nil))
     }
 
+    @MainActor func testATappedAlertWaitsForTheNewEditionAndItsCardStaysOnScreen() async {
+        func story(_ name: String, event: String, rank: Int) -> Article {
+            Article(url: URL(string: "https://example.com/\(name)")!, title: name, excerpt: "", content: "", source: "Wired",
+                    category: .dev, publishedAt: Date(), rank: rank, eventId: event)
+        }
+        let old = [story("one", event: "ev_1", rank: 0)]
+        let fresh = [story("three", event: "ev_3", rank: 0), story("one", event: "ev_1", rank: 1), story("two", event: "ev_2", rank: 2)]
+        let cache = ArticleCache(updatedAt: Date().addingTimeInterval(-3600), articles: old)
+        let store = NewsStore(readState: ReadState(readAt: [:]), cache: cache, service: { _ in
+            try? await Task.sleep(for: .milliseconds(200))
+            return (fresh, [], .direct)
+        })
+        // Tapping the alert brings the app to the front, which starts its own check for a newer edition.
+        let front = Task { await store.becameActive() }
+        try? await Task.sleep(for: .milliseconds(50))
+        let top = store.scrollToTopRequests
+        let shown = await store.showStory(url: URL(string: "https://example.com/two"), eventId: "ev_2")
+        await front.value
+        XCTAssertTrue(shown, "The story arrives with the edition being fetched; its page is not opened instead")
+        XCTAssertEqual(store.focus?.id, "https://example.com/two")
+        XCTAssertEqual(store.scrollToTopRequests, top, "The new edition does not send the feed back to its first story")
+        let gone = await store.showStory(url: URL(string: "https://example.com/gone"), eventId: "ev_404")
+        XCTAssertFalse(gone)
+    }
+
     func testLocalAlertsCarryTheEventIdAndTheServersAlertText() async {
         var article = Article(url: URL(string: "https://example.com/a")!, title: "Publisher title", excerpt: "", content: "", source: "Wired",
                               category: .top, publishedAt: Date(), headline: "Card headline", summary: "First. Second.", eventId: "ev_7")

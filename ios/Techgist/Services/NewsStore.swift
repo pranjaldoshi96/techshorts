@@ -49,6 +49,9 @@ final class NewsStore: ObservableObject {
     private var isChecking = false
     /// A refresh is running. Not published: see `performRefresh()`.
     private var refreshInFlight = false
+    /// Until then the feed is not sent back to its first story: a tapped alert's card stays on screen while the
+    /// refresh that runs when the app comes to the front lands.
+    private var holdPositionUntil = Date.distantPast
     private let readState: ReadState
     typealias Progress = @Sendable ([Article]) async -> Void
     typealias Service = (Progress?) async -> (articles: [Article], failed: [String], origin: NewsOrigin)
@@ -115,8 +118,12 @@ final class NewsStore: ObservableObject {
             if waiting != nil, awayLong || readerIsAtTop { showWaitingStories() }
         } else if awayLong {
             rebuildFeeds()
-            scrollToTopRequests += 1
+            sendToTop()
         }
+    }
+
+    private func sendToTop() {
+        if Date() >= holdPositionUntil { scrollToTopRequests += 1 }
     }
 
     func enteredBackground() {
@@ -169,7 +176,7 @@ final class NewsStore: ObservableObject {
         apply(result.articles.map(Self.slim), origin: result.origin)
         // Stories already read sink in the new order, and the feed would follow the card that was on screen down
         // the tab. Someone who asked for fresh stories wants the top of it.
-        if hadStories { scrollToTopRequests += 1 }
+        if hadStories { sendToTop() }
         refreshesCompleted += 1
     }
 
@@ -199,7 +206,7 @@ final class NewsStore: ObservableObject {
     func showWaitingStories() {
         guard let waiting else { return }
         apply(waiting.articles, origin: waiting.origin)
-        scrollToTopRequests += 1
+        sendToTop()
     }
 
     private func apply(_ fresh: [Article], origin newOrigin: NewsOrigin?) {
@@ -257,11 +264,37 @@ final class NewsStore: ObservableObject {
     /// Brings the story an alert is about on screen: by its link, or by the event it reports.
     @discardableResult
     func focus(url: URL?, eventId: String?) -> Bool {
+        let held = holdPositionUntil
+        holdPositionUntil = Date().addingTimeInterval(5)
         if let url, focus(on: url) { return true }
-        guard let eventId else { return false }
-        let match = articles.first { $0.eventId == eventId } ?? waiting?.articles.first { $0.eventId == eventId }
-        guard let match else { return false }
-        return focus(on: match.url)
+        let match = eventId.flatMap { id in
+            articles.first { $0.eventId == id } ?? waiting?.articles.first { $0.eventId == id }
+        }
+        if let match, focus(on: match.url) { return true }
+        holdPositionUntil = held
+        return false
+    }
+
+    /// A tapped alert: brings its story's card on screen, fetching the newest edition first when the story isn't
+    /// here yet. An alert usually arrives before the app has loaded the edition its story is in, and the tap
+    /// brings the app to the front, which starts a refresh of its own: that one is waited for, not raced.
+    /// Returns false when the story is in no edition any more.
+    func showStory(url: URL?, eventId: String?) async -> Bool {
+        if focus(url: url, eventId: eventId) { return true }
+        // Nothing sends the feed to its first story while the card is being looked for.
+        holdPositionUntil = .distantFuture
+        defer { if holdPositionUntil == .distantFuture { holdPositionUntil = .distantPast } }
+        await loadsSettle()
+        if focus(url: url, eventId: eventId) { return true }
+        if articles.isEmpty { await refresh() } else { await checkForNewStories() }
+        return focus(url: url, eventId: eventId)
+    }
+
+    /// Waits (15 s at most) for a refresh or a check that is already running.
+    private func loadsSettle() async {
+        for _ in 0..<300 where refreshInFlight || isChecking {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
     }
 
     // MARK: Saved
