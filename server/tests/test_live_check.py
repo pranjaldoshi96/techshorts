@@ -338,3 +338,38 @@ def test_a_backlog_is_screened_before_any_of_it_is_written(monkeypatch):
     assert len(wrote) == 2 and set(wrote) == {t for batch in screened for t in batch[1:]}
     waiting = [r["title"] for r in db.q("SELECT title FROM items WHERE status = 'new' AND triaged IS NULL")]
     assert len(waiting) == 3 and not set(waiting) & set(wrote)
+
+
+def test_a_rewrite_may_name_the_outlets_whose_reports_it_was_given():
+    """Rewrites on the VPS failed as ungrounded on 'Verge', 'Engadget' and 'Fortune': each report is headed by its
+    outlet and the card is asked to attribute by name, but only the reports' titles and texts counted as source."""
+    db = _db()
+    body = ("The FAA said flights were halted nationwide on Friday after a router flooded its network with "
+            "connection attempts. Transportation Secretary Sean Duffy said the equipment is being examined. ") * 3
+    first = _item("https://axios.test/faa", [1, 0, 0], "FAA halts flights nationwide after network failure",
+                  source_id="axios", people=("Sean Duffy",), pub=NOW - timedelta(hours=30))
+    later = _item("https://cnbc.test/router", [0.9, 0.4, 0], "Duffy blames router for nationwide ground stop",
+                  source_id="cnbc", people=("Sean Duffy",), pub=NOW - timedelta(hours=5))
+    first.text = later.text = body
+    _written(db, [first, later])
+    store = cluster.Store(db, SRCS, S, NOW)
+    eid, _ = cluster.create(store, first)
+    ev = store.events[eid]
+    cluster.join(store, ev, later, 0.9, "judge")
+    ev.row["lead_url"] = first.url
+    card = {"importance": 7, "spice": 7, "headline": "Duffy blames a router for the nationwide FAA flight halt",
+            "s1": "CNBC reports the router flooded the network with connection attempts before flights were "
+                  "halted nationwide on Friday.",
+            "s2": "Transportation Secretary Sean Duffy said the equipment is being examined after the FAA halted "
+                  "flights nationwide.",
+            "s3": "The FAA said flights were halted nationwide on Friday after the network was flooded with "
+                  "connection attempts.",
+            "notif_title": "Duffy blames router for flight halt",
+            "notif_line": "A router flooded the FAA network with connection attempts, Duffy said."}
+    client = Replies(card, {"entailed": "yes"})
+    assert llm.rewrite_event(client, {"llm": {"model": "w", "judge_model": "j"}}, store, ev) is True
+    assert "CNBC reports" in ev.row["summary"] and len(client.calls) == 2      # no retry: the outlet is not invented
+    # The note for a report that is merely newer asks for its account, not for a new lead.
+    prompt = " ".join(client.calls[0][2].split())
+    assert "The headline stays on the development the reports share" in prompt
+    assert "belongs in the sentences, never in the headline" in prompt

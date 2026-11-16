@@ -1356,10 +1356,16 @@ def rewrite_event(client, cfg, store, ev):
                 f"REPORT 2 is the newest report ({cluster.iso(newest[0].published_at)}): where it gives a newer "
                 f"account of the same development (its status, cause or numbers), state that account. The "
                 f"headline stays on the development the reports share.\n\n")
+    # The outlets the card may name ("Tom's Hardware reports"): each report is headed by its outlet, and the
+    # prompt asks for the outlet by name, so the name is not an invented fact even where no text carries it
+    # (rewrites failed as ungrounded on 'Verge', 'Engadget' and 'Fortune').
+    outlets = [m.publisher or (store.by_id[m.source_id].name if m.source_id in store.by_id else m.source_id)
+               for m in picked]
     reports = note + "\n\n".join(
-        f"REPORT {i}: {store.by_id[m.source_id].name if m.source_id in store.by_id else m.source_id}\n"
+        f"REPORT {i}: {name}\n"
         f"Published: {cluster.iso(m.published_at)}\n"
-        f"Title: {m.title}\nText: {text_mod.cap_words(m.text, REWRITE_WORDS)}" for i, m in enumerate(picked, 1))
+        f"Title: {m.title}\nText: {text_mod.cap_words(m.text, REWRITE_WORDS)}"
+        for i, (m, name) in enumerate(zip(picked, outlets), 1))
     base = [{"role": "system", "content": SYSTEM},
             {"role": "user", "content": entail.fill(REWRITE_PROMPT, reports=reports)}]
     model = role_model(cfg, "write")
@@ -1393,7 +1399,8 @@ def rewrite_event(client, cfg, store, ev):
             log.info("rewrite %s: %s", ev.id, type(e).__name__)
             return False
         validate.select(out)
-        v = validate.check(out, source_text, tense_title, "", None, None, " ".join(lead.text.split()[:200]))
+        v = validate.check(out, source_text, tense_title, "", None, None, " ".join(lead.text.split()[:200]),
+                           outlets=outlets)
         bad = rewrite_numbers_ok(out, lead.text, [m.text for m in picked])
         if bad:
             v.fail("ungrounded", f"'{bad}' is not in REPORT 1 or in two reports; use REPORT 1's figure or drop it.")
@@ -1403,8 +1410,11 @@ def rewrite_event(client, cfg, store, ev):
                      "; ".join(feedback)[:300])
             continue
         try:
+            # The fact-checker sees what the writer saw: each report under its outlet and title, so "CNBC
+            # reports ..." is checked against CNBC's report and a fact only a title carries is not unsupported.
             e = entail.check(client, role_model(cfg, "judge"), lead.title, "\n\n".join(
-                text_mod.cap_words(m.text, REWRITE_WORDS) for m in picked), out.headline, out.s1, out.s2,
+                f"{name.upper()}: {m.title}\n{text_mod.cap_words(m.text, REWRITE_WORDS)}"
+                for m, name in zip(picked, outlets)), out.headline, out.s1, out.s2,
                 out.s3 if v.full != v.short else "", out.notif_title, out.notif_line)
         except AuthError:
             raise
