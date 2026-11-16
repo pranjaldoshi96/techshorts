@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS devices (
   topics TEXT,
   owner INTEGER NOT NULL DEFAULT 0,
   held_event TEXT,
+  sound TEXT,                    -- the alert sound the reader chose in the app (NULL = the service's default)
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -78,6 +79,11 @@ class Store:
         self.conn.execute("PRAGMA synchronous=FULL")
         for stmt in SCHEMA.split(";"):
             self.conn.execute(stmt)
+        if "sound" not in {r["name"] for r in self.q("PRAGMA table_info(devices)")}:
+            try:
+                self.conn.execute("ALTER TABLE devices ADD COLUMN sound TEXT")        # a push.db from before it
+            except sqlite3.OperationalError:
+                pass
         if "queued_at" not in {r["name"] for r in self.q("PRAGMA table_info(alerts)")}:
             try:
                 self.conn.execute("ALTER TABLE alerts ADD COLUMN queued_at TEXT")     # a push.db from before it
@@ -93,20 +99,20 @@ class Store:
 
     # Devices
 
-    def register(self, token, env, tz, locale, app_version, topics, now, max_devices=None):
+    def register(self, token, env, tz, locale, app_version, topics, now, max_devices=None, sound=None):
         """Adds the device or refreshes it (owner flag and history are kept). False when the registry is full."""
         if self.q("SELECT 1 FROM devices WHERE token = ?", token):
             self.conn.execute("UPDATE devices SET env = ?, tz = ?, locale = ?, app_version = ?, topics = ?,"
-                              " updated_at = ? WHERE token = ?",
+                              " sound = ?, updated_at = ? WHERE token = ?",
                               (env, tz, locale, app_version, json.dumps(topics) if topics is not None else None,
-                               iso(now), token))
+                               sound, iso(now), token))
         else:
             if max_devices and self.device_count() >= max_devices:
                 return False
-            self.conn.execute("INSERT INTO devices (token, dkey, env, tz, locale, app_version, topics, created_at,"
-                              " updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            self.conn.execute("INSERT INTO devices (token, dkey, env, tz, locale, app_version, topics, sound,"
+                              " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                               (token, dkey(token), env, tz, locale, app_version,
-                               json.dumps(topics) if topics is not None else None, iso(now), iso(now)))
+                               json.dumps(topics) if topics is not None else None, sound, iso(now), iso(now)))
         self.conn.commit()
         return True
 

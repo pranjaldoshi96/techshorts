@@ -224,3 +224,15 @@ def test_the_nightly_backup_is_a_whole_checked_copy_and_keeps_seven(tmp_path):
     # No push.db to copy: exit 1 for the unit's OnFailure, and nothing written.
     assert backup.main(str(tmp_path / "empty")) == 1
     assert os.listdir(tmp_path / "empty" / "backups" / "nightly") == []
+
+
+def test_the_readers_alert_sound_is_kept_and_an_unknown_one_is_no_choice(app):
+    from push import apns
+    assert app.handle("POST", "/v1/devices", body(sound="wire"), "9.9.9.1")[0] == 200
+    d = app.store().devices()[0]
+    assert d["sound"] == "wire" and apns.sound_for(d, "techgist.caf") == "techgist-wire.caf"
+    assert app.handle("POST", "/v1/devices", body(sound="../../x"), "9.9.9.1")[0] == 200      # never refused over it
+    d = app.store().devices()[0]
+    assert d["sound"] is None and apns.sound_for(d, "techgist.caf") == "techgist.caf"
+    assert app.handle("POST", "/v1/devices", body(sound="default"), "9.9.9.1")[0] == 200
+    assert apns.sound_for(app.store().devices()[0], "techgist.caf") == "default"

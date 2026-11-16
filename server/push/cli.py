@@ -16,7 +16,7 @@ import json
 import sys
 
 from . import config
-from .apns import Apns, story_payload
+from .apns import Apns, sound_for, story_payload
 from .sender import Edition, EngineDB, Sender, alert_text, utcnow
 from .store import Store, short
 
@@ -78,10 +78,10 @@ def main(argv=None):
             title, body = alert_text({"title": "", "body": ""}, art)
             if not title or not body:
                 sys.exit("that event is not in the edition, or has no notification text")
-            payload = story_payload({"event_id": a.event, "title": title, "body": body}, art, cfg["apns"]["sound"])
+            payload = story_payload({"event_id": a.event, "title": title, "body": body}, art, sound_for(d, cfg["apns"]["sound"]))
         else:
             title, body = a.text if len(a.text) == 2 else ("Techgist test", "A test notification from the push server.")
-            payload = {"aps": {"alert": {"title": title, "body": body}, "sound": cfg["apns"]["sound"],
+            payload = {"aps": {"alert": {"title": title, "body": body}, "sound": sound_for(d, cfg["apns"]["sound"]),
                                "thread-id": "test"}, "kind": "test"}
         sender = Sender(cfg, store, Apns(cfg["apns"]))
         res = sender.apns.send(d["token"], d["env"], payload, collapse_id="test-" + now.strftime("%H%M%S"),

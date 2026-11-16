@@ -120,6 +120,17 @@ class Apns:
             return Result("bad", status, reason, apns_id, env, attempts)
 
 
+# The reader's choice of alert sound -> the file in the app bundle ("default" is the iPhone's own sound).
+SOUNDS = {"flash": "techgist-flash.caf", "wire": "techgist-wire.caf", "chime": "techgist.caf",
+          "soft": "techgist-soft.caf", "default": "default"}
+
+
+def sound_for(device, fallback):
+    """The sound name for this device's alerts: its own choice, else the service's."""
+    choice = device["sound"] if device is not None and "sound" in device.keys() else None
+    return SOUNDS.get(choice, fallback)
+
+
 def story_payload(alert, article, sound):
     """The PUSH CONTRACT payload. Title and body are the card's notification text, unchanged (the caller takes
     them from the edition at send time: sender.alert_text)."""

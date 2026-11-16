@@ -273,7 +273,7 @@ class Sender:
         def one(job):
             d, event_id = job
             alert, art = rows[event_id]
-            payload = apns_mod.story_payload(alert, art, self.cfg["apns"]["sound"])
+            payload = apns_mod.story_payload(alert, art, apns_mod.sound_for(d, self.cfg["apns"]["sound"]))
             return job, self.apns.send(d["token"], d["env"], payload, collapse_id=alert["collapse_id"],
                                        expiration=expiration)
 

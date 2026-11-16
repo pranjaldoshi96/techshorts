@@ -1,6 +1,6 @@
 """The device registry's HTTP side. Listens on localhost only; nginx terminates TLS and proxies /v1/ to it.
 
-  POST   /v1/devices            {"token", "env", "tz", "locale", "appVersion", "topics"?}  -> {"ok": true}
+  POST   /v1/devices            {"token", "env", "tz", "locale", "appVersion", "topics"?, "sound"?}  -> {"ok": true}
   DELETE /v1/devices/<token>    opt out; the same answer whether or not the token was known
   GET    /v1/health             {"ok": true} while the sender loop is alive, 503 otherwise (HEAD: the same, no body)
 
@@ -22,7 +22,9 @@ LOCALE = re.compile(r"^[A-Za-z0-9_\-@.]{1,35}$")
 VERSION = re.compile(r"^[0-9A-Za-z.\-+() ]{1,24}$")
 TOPIC = re.compile(r"^[A-Za-z0-9_\- &]{1,32}$")
 ENVS = ("sandbox", "production")
-FIELDS = {"token", "env", "tz", "locale", "appVersion", "topics"}
+FIELDS = {"token", "env", "tz", "locale", "appVersion", "topics", "sound"}
+# The alert sounds the app ships (apns.SOUNDS has their file names). Anything else is stored as "no choice".
+SOUNDS = ("flash", "wire", "chime", "soft", "default")
 
 
 class Invalid(Exception):
@@ -58,8 +60,9 @@ def validate(data):
         if (not isinstance(topics, list) or len(topics) > 32
                 or not all(isinstance(t, str) and TOPIC.match(t) for t in topics)):
             raise Invalid("topics")
+    sound = data.get("sound") if data.get("sound") in SOUNDS else None
     return {"token": token.lower(), "env": data["env"], "tz": tz, "locale": locale, "app_version": version,
-            "topics": topics}
+            "topics": topics, "sound": sound}
 
 
 class RateLimit:
@@ -119,7 +122,7 @@ class App:
             if not self.by_token.allow(dev["token"]):
                 return 429, {"ok": False, "error": "rate_limited"}
             ok = self.store().register(dev["token"], dev["env"], dev["tz"], dev["locale"], dev["app_version"],
-                                       dev["topics"], self.clock(), self.cfg["max_devices"])
+                                       dev["topics"], self.clock(), self.cfg["max_devices"], sound=dev["sound"])
             return (200, {"ok": True}) if ok else (503, {"ok": False, "error": "full"})
         if method == "DELETE" and path.startswith("/v1/devices/"):
             token = path[len("/v1/devices/"):].lower()
