@@ -108,12 +108,32 @@ struct FeedView: View {
 }
 
 /// One card per swipe when the feed is paged; free scrolling when it is a list of tall cards.
+///
+/// The system's view-aligned paging settles on whichever card is nearest to where the scroll would coast to. A drag
+/// that ends without speed (a mouse or trackpad drag in the simulator, a slow or hesitant finger) therefore sprang
+/// back to the same card unless it had crossed half the screen. Here the direction of the gesture decides: once the
+/// feed has moved a thumb's width from where the gesture began, it goes to the neighbouring card, and never further.
 struct FeedPaging: ScrollTargetBehavior {
     let paged: Bool
+    /// How far the feed must move (or be about to coast) before the gesture counts as "next card".
+    static let commitDistance: CGFloat = 36
 
     func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
         guard paged else { return }
-        ViewAlignedScrollTargetBehavior(limitBehavior: .always).updateTarget(&target, context: context)
+        target.rect.origin.y = Self.restingOffset(start: context.originalTarget.rect.minY, projected: target.rect.minY,
+                                                  page: context.containerSize.height, content: context.contentSize.height)
+    }
+
+    /// Where the feed comes to rest. `start` is the offset when the gesture began, `projected` where it would
+    /// coast to if left alone. Pure, so the rule is unit-tested.
+    static func restingOffset(start: CGFloat, projected: CGFloat, page: CGFloat, content: CGFloat) -> CGFloat {
+        guard page > 0 else { return projected }
+        let last = max(0, (content / page).rounded() - 1)
+        let moved = projected - start
+        // A gesture that begins while the previous one is still settling counts from the card nearest the finger.
+        var index = (start / page).rounded()
+        if moved > commitDistance { index += 1 } else if moved < -commitDistance { index -= 1 }
+        return min(max(index, 0), last) * page
     }
 }
 

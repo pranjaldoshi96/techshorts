@@ -29,16 +29,17 @@ struct CardView: View {
                     .frame(maxWidth: .infinity, maxHeight: flows ? nil : .infinity, alignment: .top)
                     .contentShape(Rectangle())
                     .onTapGesture(perform: onRead)
-                    .contextMenu { menu }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(spokenLabel)
                     .accessibilityHint("Opens the full story")
                     .accessibilityAddTraits(.isButton)
+                    .accessibilityIdentifier("story-card")
                     .accessibilityAction(.default, onRead)
                     .accessibilityAction(named: isSaved ? "Remove from saved" : "Save") { store.toggleSaved(article) }
                     .accessibilityAction(named: "Share") { share() }
                     .accessibilityActions {
                         if article.coverage >= 2 { Button("Full coverage", action: onCoverage) }
+                        Button("Copy link") { UIPasteboard.general.url = article.url }
                         Button("Mute \(article.source)") { store.disabledSources.insert(article.source) }
                     }
                 footer
@@ -52,11 +53,13 @@ struct CardView: View {
                 .animation(.easeInOut(duration: 0.35), value: highlighted)
                 .allowsHitTesting(false)
         }
-        // Swipe left to read, as in Inshorts. Simultaneous, so vertical paging is never held up by it.
+        // Swipe left to read, as in Inshorts. Simultaneous, so vertical paging is never held up by it, and it only
+        // fires for a clearly sideways swipe. There is no press-and-hold menu on the card: with one, a finger (or a
+        // mouse button) that rested before dragging opened the menu instead of moving to the next story.
         .simultaneousGesture(
             DragGesture(minimumDistance: 30).onEnded { value in
                 let dx = value.translation.width, dy = value.translation.height
-                if dx < -80, abs(dx) > 2 * abs(dy) { onRead() }
+                if dx < -80, abs(dx) > 3 * abs(dy) { onRead() }
             }
         )
     }
@@ -284,6 +287,13 @@ struct CardView: View {
             .disabled(preparingShare)
             .accessibilityLabel("Share")
             .accessibilityShowsLargeContentViewer { Label("Share", systemImage: "square.and.arrow.up") }
+            Menu { menu } label: {
+                Image(systemName: "ellipsis")
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("More")
+            .accessibilityShowsLargeContentViewer { Label("More", systemImage: "ellipsis") }
         }
         .font(.body.weight(.semibold))
         // The buttons stop growing at the third accessibility size so all three stay on one row; each still
@@ -303,12 +313,9 @@ struct CardView: View {
         }
     }
 
+    /// The "More" button's menu: the actions that have no button of their own.
     @ViewBuilder
     private var menu: some View {
-        Button { store.toggleSaved(article) } label: {
-            Label(isSaved ? "Remove from saved" : "Save", systemImage: isSaved ? "bookmark.slash" : "bookmark")
-        }
-        Button(action: share) { Label("Share", systemImage: "square.and.arrow.up") }
         if article.coverage >= 2 {
             Button(action: onCoverage) { Label("Full coverage", systemImage: "newspaper") }
         }
