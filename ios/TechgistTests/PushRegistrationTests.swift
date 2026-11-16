@@ -211,6 +211,24 @@ final class PushRegistrationTests: XCTestCase {
         XCTAssertFalse(gone)
     }
 
+    func testEveryCreditedOutletCarriesItsOwnLink() throws {
+        let json = """
+        {"url":"https://a.example/x","title":"T","excerpt":"","content":"","source":"Reuters","category":"AI",
+         "publishedAt":"2026-11-16T03:17:40Z","alsoCoveredBy":["Bloomberg","Wired","CNBC"],
+         "coverageLinks":{"Bloomberg":"https://b.example/y","Wired":"not a link","CNBC":"https://c.example/z"}}
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let article = try decoder.decode(Article.self, from: Data(json.utf8))
+        XCTAssertEqual(article.coverageLinks?["Bloomberg"]?.absoluteString, "https://b.example/y")
+        XCTAssertEqual(article.coverageLinks?["CNBC"]?.absoluteString, "https://c.example/z")
+        XCTAssertNil(article.coverageLinks?["Wired"], "A link that is not a web address is left out; the outlet is still named")
+        // The 1.x edition names outlets without links, and still decodes.
+        let old = try decoder.decode(Article.self, from: Data(json.replacingOccurrences(of: "\"coverageLinks\"", with: "\"x\"").utf8))
+        XCTAssertNil(old.coverageLinks)
+        XCTAssertEqual(old.alsoCoveredBy?.count, 3)
+    }
+
     func testLocalAlertsCarryTheEventIdAndTheServersAlertText() async {
         var article = Article(url: URL(string: "https://example.com/a")!, title: "Publisher title", excerpt: "", content: "", source: "Wired",
                               category: .top, publishedAt: Date(), headline: "Card headline", summary: "First. Second.", eventId: "ev_7")

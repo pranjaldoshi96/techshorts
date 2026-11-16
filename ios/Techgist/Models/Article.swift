@@ -38,6 +38,8 @@ struct Article: Codable, Identifiable, Hashable, Sendable {
     var points: Int?
     /// Other outlets reporting the same story, used for ranking and shown on the card.
     var alsoCoveredBy: [String]?
+    /// The other outlets' own reports, by outlet name, so each name in the coverage list opens its story.
+    var coverageLinks: [String: URL]?
     /// Position in the Top tab, which mixes Top sources with the strongest stories from every other tab.
     var topRank: Int?
     /// Techgist's own headline and summary, written on the server by an LLM and checked against the article.
@@ -78,7 +80,7 @@ struct Article: Codable, Identifiable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case url, title, excerpt, content, image, source, category, publishedAt, points, alsoCoveredBy, topRank
         case headline, summary
-        case summaryShort, alertLine, spice, rank, images, badge, kind = "type", updatedAt, aiText, eventId, notification
+        case summaryShort, alertLine, spice, rank, images, badge, kind = "type", updatedAt, aiText, eventId, notification, coverageLinks
     }
 }
 
@@ -128,6 +130,10 @@ extension Article {
         aiText = lenient(.aiText)
         eventId = lenient(.eventId)
         notification = lenient(.notification)
+        if let links: [String: String] = lenient(.coverageLinks) {
+            let found = links.compactMapValues { URL(string: $0) }.filter { $0.value.scheme?.hasPrefix("http") == true }
+            coverageLinks = found.isEmpty ? nil : found
+        }
     }
 }
 

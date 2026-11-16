@@ -190,9 +190,25 @@ struct CoverageSheet: View {
                         }
                     }
                     ForEach(article.alsoCoveredBy ?? [], id: \.self) { name in
-                        HStack(spacing: 12) {
-                            SourceMonogram(name: name, size: 32)
-                            Text(name)
+                        // Each outlet opens its own report. An older edition names outlets without their links.
+                        if let link = article.coverageLinks?[name] {
+                            Button {
+                                dismiss()
+                                Reader.open(link)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    SourceMonogram(name: name, size: 32)
+                                    Text(name).foregroundStyle(.primary)
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "chevron.right").imageScale(.small).foregroundStyle(Theme.metaText)
+                                }
+                            }
+                            .accessibilityHint("Opens this outlet's report")
+                        } else {
+                            HStack(spacing: 12) {
+                                SourceMonogram(name: name, size: 32)
+                                Text(name)
+                            }
                         }
                     }
                 } header: {
