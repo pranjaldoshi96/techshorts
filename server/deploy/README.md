@@ -66,6 +66,33 @@ Notes
   card under the card reporting the rocket lost), 18 cards dated by their news (HomeView from Sunday 21:55 to
   Friday), 23 events queued for a rewrite with the newest account (the FAA card now gives the router, the Musk
   card "signed"), and 4 of the edition's 129 cards sent back by the fact-checker's new rules.
+- The review of the first live hours (2026-11-16, revision 82929b1; `state-20261116T060803Z.db` is the backup taken
+  before it). What it found and what was done:
+  - Techmeme's own headlines join two facts with ";" and were dropped as digests (the Anthropic IPO pick, the
+    only sight of that story): Techmeme and Mediagazer titles are exempt from that one rule.
+  - A Techmeme entry without a thumbnail starts with the outlet's front page, which was imported as the article
+    (a card that opened `http://www.scmp.com/`, written from the home page's text). The article is now the
+    headline's own link; a link with no path is never imported, and a card whose lead link has no path is never
+    shipped (`held.not_article` in `health.json`). `tools/repair_signals.py` applied both to the stored rows
+    (worker stopped): 2 picks made signals again, 1 offered again, 2 front-page items dropped, 1 event closed.
+  - A security story with a developer term in its headline is Dev news, whether typed `security_incident` or
+    `news` (the Bitly link hijack, HN 232, from a site nobody vetted, had no tab at all: Top still refuses such
+    a site under 600 points without a second outlet, which is unchanged). The AI tab takes a story whose main
+    topic is not AI only when the card says something about AI; a big company's own news is not Startups.
+  - Cards without a photo: of the 24 on 2026-11-16, 20 had no picture to be had (Bloomberg, the FT, The New
+    Stack and Phoronix answer 403 to the worker's honest user agent; LWN, Martin Fowler, Stratechery and Simon
+    Willison's pages carry no og:image) and 4 had one that was too small or the wrong shape. The other members'
+    pictures were already tried. Such a card now scores 8% lower and does not take a tab's first place while a
+    card with a photo can.
+  - A card whose headline credits a member other than its lead ("Reuters: ..." on a Bloomberg link) takes that
+    member's link and source.
+  - Not changed, on purpose: the storyline cap (ten of Top's 60 for the Nvidia saga is the limit the second and
+    third reviews set, with tests); the Hacker News import bar of 150 points (the Tor and Coles links had 95
+    and 82); old articles Techmeme links days later (Kindo, Mount Thor and Blue J were published on 11-12 and
+    fall outside every tab's window by their own date).
+- The old box: the leftover test worker (`~/TechShorts-r1`, `--out ~/.techshorts-r1/out`) was stopped on
+  2026-11-16; its state is still in `~/.techshorts-r1`. `publish.sh` there exits 3 unless
+  `~/.techshorts/ROLLBACK` exists.
 
 ## Staying up
 
