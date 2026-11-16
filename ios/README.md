@@ -61,7 +61,7 @@ TEST_RUNNER_CONTENT_SIZE=UICTContentSizeCategoryAccessibilityXXXL xcodebuild …
 xcrun simctl ui booted increase_contrast enabled
 ```
 
-In a Debug build, `SIMCTL_CHILD_EDITION_URL=file:///path/to/edition.json xcrun simctl launch booted com.pranjald.techgist` points the app at another edition, and `SIMCTL_CHILD_UITEST_RESET=1` starts it as on a first launch.
+In a Debug build, `SIMCTL_CHILD_EDITION_URL=file:///path/to/edition.json xcrun simctl launch booted com.pranjald.techgist` points the app at another edition, and `SIMCTL_CHILD_UITEST_RESET=1` starts it as on a first launch. `SIMCTL_CHILD_EDITION_DELAY=1.5` makes that edition answer like a slow network (and fail when the request is cancelled).
 
 In the Simulator, scroll by clicking and dragging (a two-finger trackpad scroll is not a touch and does nothing in any app). A short drag is enough: the feed moves to the next story once it has travelled 36 points.
 
@@ -94,9 +94,9 @@ Follow [`STORE_CHECKLIST.md`](STORE_CHECKLIST.md).
 
 - **Signing:** team `A4HLS6BV3C`, bundle ID `com.pranjald.techgist`, automatic signing. The extension is `com.pranjald.techgist.NotificationService`; both come from the `APP_BUNDLE_ID` build setting.
 - **Listing text, review notes, privacy and age-rating answers:** [`AppStore/LISTING.md`](AppStore/LISTING.md)
-- **Screenshots:** [`AppStore/screenshots/`](AppStore/screenshots/), 6.9" (1320 × 2868)
-- **Product, support and privacy pages:** <https://pranjaldoshi96.github.io/apps/techgist/>
-- **Upload a build:** `scripts/archive.sh` archives, signs and uploads to App Store Connect.
+- **Screenshots:** [`AppStore/screenshots/`](AppStore/screenshots/), 6.9" (1320 × 2868), from the 2.0 build
+- **Product, support and privacy pages:** <https://pranjaldoshi96.github.io/apps/techgist/>. The privacy page's 2.0 text is in [`PRIVACY.md`](PRIVACY.md).
+- **Upload a build:** `scripts/archive.sh` archives, exports a signed IPA and validates it; `scripts/archive.sh --upload` also uploads it to App Store Connect (see the checklist for the credentials each step uses).
 - **Export compliance:** already answered in `Info.plist` (`ITSAppUsesNonExemptEncryption = NO`).
 
 ### Review risks
