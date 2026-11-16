@@ -175,8 +175,9 @@ struct CoverageSheet: View {
         NavigationStack {
             List {
                 Section {
+                    // The report opens over this list, which stays: closing it comes back here, to the other outlets.
+                    // Closing the list first took the report down with it.
                     Button {
-                        dismiss()
                         onRead(article)
                     } label: {
                         HStack(spacing: 12) {
@@ -193,7 +194,6 @@ struct CoverageSheet: View {
                         // Each outlet opens its own report. An older edition names outlets without their links.
                         if let link = article.coverageLinks?[name] {
                             Button {
-                                dismiss()
                                 Reader.open(link)
                             } label: {
                                 HStack(spacing: 12) {
