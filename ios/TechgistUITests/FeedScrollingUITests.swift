@@ -138,6 +138,21 @@ final class FeedScrollingUITests: FeedUITestCase {
         pageForward(3, tab: "after a refresh")
     }
 
+    /// The same pull against a slow edition, as over the network. SwiftUI cancels the task it runs the refresh in
+    /// a few milliseconds after it starts; the fetch must finish anyway, and must not end in "Offline".
+    func testPullToRefreshOverASlowNetworkLoadsAndIsNotOffline() {
+        app.launchEnvironment["EDITION_DELAY"] = "1.5"
+        launch()
+        _ = settledCard()
+        let offline = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Offline'")).firstMatch
+        XCTAssertFalse(offline.exists)
+        point(0.5, 0.35).press(forDuration: 0.05, thenDragTo: point(0.5, 0.75), withVelocity: 600, thenHoldForDuration: 0.4)
+        // Long enough for the slow fetch to end either way.
+        XCTAssertFalse(offline.waitForExistence(timeout: 5), "A refresh with the network up ended in the Offline banner")
+        XCTAssertFalse(settledCard().isEmpty)
+        pageForward(2, tab: "after a slow refresh")
+    }
+
     func testSwipingLeftOpensTheStoryAndASlantedSwipeDoesNot() {
         launch()
         // Mostly downward, a little sideways: that is a scroll, not "read".

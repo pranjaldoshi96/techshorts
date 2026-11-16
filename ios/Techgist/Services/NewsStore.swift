@@ -9,7 +9,10 @@ final class NewsStore: ObservableObject {
     /// so the list doesn't re-order under a finger.
     @Published private(set) var feeds: [Category: [Article]] = [:]
     @Published private(set) var lastUpdated: Date?
+    /// True while the first stories are loading (nothing on screen yet).
     @Published private(set) var isRefreshing = false
+    /// Bumped when a refresh the reader asked for brings stories back; the feed answers with a tap of haptics.
+    @Published private(set) var refreshesCompleted = 0
     @Published private(set) var failedSources: [String] = []
     @Published private(set) var origin: NewsOrigin?
     /// True when the last attempt to load stories got nothing back (usually no connection).
@@ -44,6 +47,8 @@ final class NewsStore: ObservableObject {
     var readerIsAtTop = true
     private var backgroundedAt: Date?
     private var isChecking = false
+    /// A refresh is running. Not published: see `performRefresh()`.
+    private var refreshInFlight = false
     private let readState: ReadState
     typealias Progress = @Sendable ([Article]) async -> Void
     typealias Service = (Progress?) async -> (articles: [Article], failed: [String], origin: NewsOrigin)
@@ -121,10 +126,26 @@ final class NewsStore: ObservableObject {
     }
 
     /// Pull to refresh, the "Try again" button and first launch: fetch and show the result straight away.
-    func refresh() async {
-        guard !isRefreshing else { return }
-        isRefreshing = true
-        defer { isRefreshing = false }
+    ///
+    /// The fetch runs in a task of its own. SwiftUI can cancel the task it runs `.refreshable` in while the pull is
+    /// still on screen, and a cancelled task cancels every request it started: nothing loaded, and the feed said
+    /// "Offline" with the network up. A refresh, once asked for, always runs to its end; the caller only waits.
+    ///
+    /// `atLeast` holds the result back until that long after the pull began. New stories re-order the feed and
+    /// send it to the top, and doing that while a finger is still holding the pull leaves the system's spinner
+    /// running out of sight; it also keeps the spinner from flashing on a fast connection.
+    func refresh(atLeast minimum: Duration = .zero) async {
+        await Task { await performRefresh(atLeast: minimum) }.value
+    }
+
+    private func performRefresh(atLeast minimum: Duration) async {
+        guard !refreshInFlight else { return }
+        refreshInFlight = true
+        defer { refreshInFlight = false }
+        // The skeleton card needs to know a first load is running. With stories on screen nothing is published
+        // until the fetch ends: the pull's own spinner shows the progress, and the feed is not rebuilt under it.
+        if articles.isEmpty { isRefreshing = true }
+        defer { if isRefreshing { isRefreshing = false } }
 
         // With nothing to show yet (first launch, and the edition unavailable), stories appear as each feed
         // answers instead of after the slowest one. Otherwise the full set is swapped in at once.
@@ -132,22 +153,34 @@ final class NewsStore: ObservableObject {
         if articles.isEmpty {
             onProgress = { [weak self] partial in await self?.showPartial(partial) }
         }
+        let began = ContinuousClock.now
         let result = await service(onProgress)
+        let spent = ContinuousClock.now - began
+        if spent < minimum { try? await Task.sleep(for: minimum - spent) }
+        // A fetch that was stopped says nothing about the connection.
+        guard !Task.isCancelled else { return }
         failedSources = result.failed
         guard !result.articles.isEmpty else {
             isOffline = true
             return
         }
         isOffline = false
+        let hadStories = lastUpdated != nil
         apply(result.articles.map(Self.slim), origin: result.origin)
+        // Stories already read sink in the new order, and the feed would follow the card that was on screen down
+        // the tab. Someone who asked for fresh stories wants the top of it.
+        if hadStories { scrollToTopRequests += 1 }
+        refreshesCompleted += 1
     }
 
     /// Looks for newer stories without disturbing the reader; `showWaitingStories()` brings them in.
     func checkForNewStories() async {
-        guard !isRefreshing, !isChecking, !articles.isEmpty else { return }
+        guard !refreshInFlight, !isChecking, !articles.isEmpty else { return }
         isChecking = true
         defer { isChecking = false }
-        let result = await service(nil)
+        // In its own task for the same reason as `refresh()`: the caller's task may be cancelled mid-fetch.
+        let service = service
+        let result = await Task { await service(nil) }.value
         guard !result.articles.isEmpty else {
             isOffline = true
             return

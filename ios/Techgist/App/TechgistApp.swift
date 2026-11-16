@@ -40,7 +40,7 @@ struct TechgistApp: App {
 #if DEBUG
 /// Hooks for the UI tests, compiled into Debug builds only.
 /// `UITEST_RESET=1` starts the app as on a first launch: no cached edition, nothing read or saved, default settings.
-/// (`EDITION_URL`, read by `FeedService`, points the app at a fixture edition.)
+/// (`EDITION_URL`, read by `FeedService`, points the app at a fixture edition; `EDITION_DELAY` makes it slow.)
 enum UITestSupport {
     static func prepare() {
         guard ProcessInfo.processInfo.environment["UITEST_RESET"] == "1" else { return }

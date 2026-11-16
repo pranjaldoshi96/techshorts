@@ -70,8 +70,8 @@ struct FeedView: View {
             .scrollPosition(id: $position)
             .scrollIndicators(paged ? .hidden : .automatic)
             .ignoresSafeArea(.container, edges: .bottom)
-            .refreshable { await store.refresh() }
-            .sensoryFeedback(.success, trigger: store.lastUpdated) { _, _ in store.isRefreshing }
+            .refreshable { await store.refresh(atLeast: .seconds(1.2)) }
+            .sensoryFeedback(.success, trigger: store.refreshesCompleted)
             .task(id: currentID) { await settled() }
     }
 

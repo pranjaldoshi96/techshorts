@@ -21,7 +21,13 @@ struct FeedService {
         var url = Edition.url
         #if DEBUG
         // Lets a test point the app at another edition, e.g. SIMCTL_CHILD_EDITION_URL=file:///…/edition.json.
-        if let override = ProcessInfo.processInfo.environment["EDITION_URL"].flatMap(URL.init(string:)) { url = override }
+        let environment = ProcessInfo.processInfo.environment
+        if let override = environment["EDITION_URL"].flatMap(URL.init(string:)) { url = override }
+        // EDITION_DELAY=seconds makes a file fixture behave like the network: it takes time, and it fails when the
+        // task that asked for it is cancelled, exactly as a URLSession request does.
+        if let delay = environment["EDITION_DELAY"].flatMap(Double.init) {
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return nil }
+        }
         #endif
         // The default policy revalidates with the server's ETag, so an unchanged edition costs a few hundred bytes.
         let request = URLRequest(url: url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 10)
