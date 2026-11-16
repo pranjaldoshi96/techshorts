@@ -80,6 +80,10 @@ def rules(edition, res):
                      ("summary", str)):
             if a.get(k) is not None and not isinstance(a[k], t):
                 res.add(f"{where} {k} has the wrong type")
+        links = a.get("coverageLinks")
+        if links is not None and not (isinstance(links, dict) and all(
+                isinstance(u, str) and u.startswith("http") for u in links.values())):
+            res.add(f"{where} coverageLinks is not a map of outlet to link")
         if not ((a.get("headline") and a.get("summary")) or a.get("aiText") is False):
             res.add(f"{where} has neither AI text nor aiText: false")
         if not a["title"].strip():

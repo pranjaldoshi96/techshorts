@@ -114,6 +114,12 @@ def test_sources_and_coverage_use_v1_names(edition):
         assert set(a.get("alsoCoveredBy", [])) <= names and a["source"] not in a.get("alsoCoveredBy", [])
     ipo = [a for a in edition[0]["articles"] if a.get("topRank") == 0][0]
     assert "Anthropic" in ipo["title"] and len(ipo["alsoCoveredBy"]) >= 4
+    # Every other outlet a card credits carries the link to its own report, never the credited one's.
+    assert set(ipo["coverageLinks"]) == set(ipo["alsoCoveredBy"])
+    for a in edition[0]["articles"]:
+        links = a.get("coverageLinks", {})
+        assert set(links) <= set(a.get("alsoCoveredBy", []))
+        assert all(u.startswith("http") and u != a["url"] for u in links.values())
 
 
 # Top contents

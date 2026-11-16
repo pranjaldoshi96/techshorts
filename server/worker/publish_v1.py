@@ -140,11 +140,14 @@ def event_candidate(ctx, ev):
     news = [m for m in members if not (ctx.src(m["source_id"]) and ctx.src(m["source_id"]).is_signal)]
     if any(ctx.editorial.blocked(ctx.src(m["source_id"]), m["url"]) for m in news) and len(news) > 1:
         news = [m for m in news if not ctx.editorial.blocked(ctx.src(m["source_id"]), m["url"])]
-    publishers = []
+    publishers, links = [], {}
     for m in sorted(news, key=lambda m: (-ctx.authority(m["source_id"]), m["published_at"])):
         name = ctx.pub(m)
         if name not in publishers:
             publishers.append(name)
+            # Each outlet a card credits opens its own report (coverageLinks).
+            if not prefilter.no_path(m["url"]):
+                links[name] = m["url_canonical"]
     hn = json.loads(ev["hn"] or "null") or {}
     social = json.loads(_col(ev, "social") or "null") or {}
     over = ctx.editorial.override.get(ev["id"]) or {}
@@ -182,7 +185,8 @@ def event_candidate(ctx, ev):
     credited = credited_member(ctx, headline, lead, news) if ai_text else None
     if credited is not None:
         credited = (credited, ctx.pub(credited))
-    c.data = {"lead": lead, "members": members, "publishers": publishers, "headline": headline, "summary": summary,
+    c.data = {"lead": lead, "members": members, "publishers": publishers, "links": links,
+              "headline": headline, "summary": summary,
               "hn": hn, "parent_id": ev["parent_id"], "title_words": _words(lead["title"]),
               "first_seen_at": min(m["first_seen_at"] for m in members),
               "first_report_at": first_report(ctx.db, ev["id"], members),
@@ -627,6 +631,11 @@ def article(c, category, top_rank, image_url):
     also = [p for p in c.data["publishers"] if p != source]
     if also:
         a["alsoCoveredBy"] = also
+        # Added for app 2.0; 1.x ignores it. An outlet whose only link is a front page has no entry.
+        found = c.data.get("links") or {}
+        linked = {p: clean_url(found[p]) for p in also if found.get(p)}
+        if linked:
+            a["coverageLinks"] = linked
     if top_rank is not None:
         a["topRank"] = top_rank
     if c.ai_text:
