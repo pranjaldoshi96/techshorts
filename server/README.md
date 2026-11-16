@@ -11,7 +11,9 @@ worker (VPS)        ──► edition branch ──► raw.githubusercontent.com
                                                                 └────────────────────────────── no  → fetch feeds directly
 ```
 
-Phones never connect to the server. It only pushes finished files to GitHub, which serves them.
+Phones never connect to the server. It only pushes finished files to GitHub, which serves them. The one exception is
+the 2.0 app's push alerts: a device that allows them registers its APNs token with the separate push service on
+the VPS ([`push/README.md`](push/README.md)).
 
 **Since 2026-11-16 the live publisher is the worker on the public VPS** (`213.210.36.218`, systemd
 `techgist-worker`; everything about that machine is in [deploy/README.md](deploy/README.md), including the
