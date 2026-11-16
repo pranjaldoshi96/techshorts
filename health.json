@@ -1,0 +1,2535 @@
+{
+ "generatedAt": "2026-11-28T17:11:59Z",
+ "sources": [
+  {
+   "id": "techcrunch",
+   "name": "TechCrunch",
+   "tier": 1,
+   "configuredTier": 1,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "techcrunch_ai",
+   "name": "TechCrunch AI",
+   "tier": 1,
+   "configuredTier": 1,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "verge",
+   "name": "The Verge",
+   "tier": 1,
+   "configuredTier": 1,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "cnbc",
+   "name": "CNBC Tech",
+   "tier": 2,
+   "configuredTier": 1,
+   "lastStatus": 403,
+   "lastError": "HTTP 403",
+   "lastOkAt": "2026-11-19T21:29:34Z",
+   "consecutiveFailures": 423,
+   "checkOk": false,
+   "checkDetail": "HTTP 403"
+  },
+  {
+   "id": "cnbc_top",
+   "name": "CNBC",
+   "tier": 2,
+   "configuredTier": 1,
+   "lastStatus": 403,
+   "lastError": "HTTP 403",
+   "lastOkAt": "2026-11-19T21:29:34Z",
+   "consecutiveFailures": 423,
+   "checkOk": false,
+   "checkDetail": "HTTP 403"
+  },
+  {
+   "id": "bbc",
+   "name": "BBC Technology",
+   "tier": 1,
+   "configuredTier": 1,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "bbc_business",
+   "name": "BBC Business",
+   "tier": 1,
+   "configuredTier": 1,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "nyt",
+   "name": "New York Times",
+   "tier": 1,
+   "configuredTier": 1,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "nyt_business",
+   "name": "New York Times Business",
+   "tier": 1,
+   "configuredTier": 1,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "guardian",
+   "name": "The Guardian",
+   "tier": 1,
+   "configuredTier": 1,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "bloomberg",
+   "name": "Bloomberg",
+   "tier": 1,
+   "configuredTier": 1,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "wsj",
+   "name": "Wall Street Journal",
+   "tier": 1,
+   "configuredTier": 1,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "ft",
+   "name": "Financial Times",
+   "tier": 1,
+   "configuredTier": 1,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "the_information",
+   "name": "The Information",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "ars",
+   "name": "Ars Technica",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "wired",
+   "name": "Wired",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "engadget",
+   "name": "Engadget",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "decoder",
+   "name": "The Decoder",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "mittr_ai",
+   "name": "MIT Tech Review",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "semafor",
+   "name": "Semafor Tech",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "404media",
+   "name": "404 Media",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "platformer",
+   "name": "Platformer",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "register",
+   "name": "The Register",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "thenextweb",
+   "name": "The Next Web",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "restofworld",
+   "name": "Rest of World",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "tomshardware",
+   "name": "Tom's Hardware",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "ieee",
+   "name": "IEEE Spectrum",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "businessinsider",
+   "name": "Business Insider",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "fortune",
+   "name": "Fortune",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "axios",
+   "name": "Axios",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "nypost_tech",
+   "name": "New York Post",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "nypost_business",
+   "name": "New York Post Business",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "futurism",
+   "name": "Futurism",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "gizmodo",
+   "name": "Gizmodo",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "fastcompany",
+   "name": "Fast Company",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "variety",
+   "name": "Variety",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "torrentfreak",
+   "name": "TorrentFreak",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "9to5mac",
+   "name": "9to5Mac",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "9to5google",
+   "name": "9to5Google",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "macrumors",
+   "name": "MacRumors",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "electrek",
+   "name": "Electrek",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "teslarati",
+   "name": "Teslarati",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "spacenews",
+   "name": "SpaceNews",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "spaceflightnow",
+   "name": "Spaceflight Now",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "ign",
+   "name": "IGN",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "eurogamer",
+   "name": "Eurogamer",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "kotaku",
+   "name": "Kotaku",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "coindesk",
+   "name": "CoinDesk",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "theblock",
+   "name": "The Block",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "decrypt",
+   "name": "Decrypt",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "newscientist",
+   "name": "New Scientist",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "quanta",
+   "name": "Quanta Magazine",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "bleeping",
+   "name": "BleepingComputer",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "thehackernews",
+   "name": "The Hacker News",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "therecord",
+   "name": "The Record",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "krebs",
+   "name": "Krebs on Security",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "sec_press",
+   "name": "SEC",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "doj_press",
+   "name": "US Justice Department",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "ettech",
+   "name": "ET Tech",
+   "tier": 1,
+   "configuredTier": 1,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "et_startups",
+   "name": "ET Startups",
+   "tier": 1,
+   "configuredTier": 1,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "et_funding",
+   "name": "ET Funding",
+   "tier": 1,
+   "configuredTier": 1,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "inc42",
+   "name": "Inc42",
+   "tier": 1,
+   "configuredTier": 1,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "yourstory",
+   "name": "YourStory",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "entrackr",
+   "name": "Entrackr",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "medianama",
+   "name": "MediaNama",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "livemint_tech",
+   "name": "Mint",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "livemint_companies",
+   "name": "Mint Companies",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "indianexpress",
+   "name": "Indian Express",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "hindu_tech",
+   "name": "The Hindu",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:09:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "ht_tech",
+   "name": "Hindustan Times",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "indiatoday_tech",
+   "name": "India Today",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "aim",
+   "name": "Analytics India Magazine",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "crunchbase",
+   "name": "Crunchbase News",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "sifted",
+   "name": "Sifted",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "techeu",
+   "name": "Tech.eu",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "eustartups",
+   "name": "EU-Startups",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "geekwire",
+   "name": "GeekWire",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "siliconangle",
+   "name": "SiliconANGLE",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "tc_startups",
+   "name": "TechCrunch Startups",
+   "tier": 1,
+   "configuredTier": 1,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "e27",
+   "name": "e27",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 403,
+   "lastError": "HTTP 403",
+   "lastOkAt": "2026-11-20T04:25:03Z",
+   "consecutiveFailures": 408,
+   "checkOk": false,
+   "checkDetail": "HTTP 403"
+  },
+  {
+   "id": "betakit",
+   "name": "BetaKit",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "pymnts",
+   "name": "PYMNTS",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "livemint_ai",
+   "name": "Mint AI",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "newcomer",
+   "name": "Newcomer",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "infoq",
+   "name": "InfoQ",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "thenewstack",
+   "name": "The New Stack",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "devclass",
+   "name": "DevClass",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "lwn",
+   "name": "LWN",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "phoronix",
+   "name": "Phoronix",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "stackoverflow",
+   "name": "Stack Overflow Blog",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "github_changelog",
+   "name": "GitHub Changelog",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "rust_blog",
+   "name": "Rust Blog",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "go_blog",
+   "name": "Go Blog",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "python_insider",
+   "name": "Python Insider",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "infoworld",
+   "name": "InfoWorld",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "sdtimes",
+   "name": "SD Times",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "jetbrains",
+   "name": "JetBrains Blog",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "socket",
+   "name": "Socket",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "aws_news",
+   "name": "AWS News Blog",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "ms_devblogs",
+   "name": "Microsoft DevBlogs",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "k8s",
+   "name": "Kubernetes Blog",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "openai",
+   "name": "OpenAI",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "google_ai",
+   "name": "Google AI",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "deepmind",
+   "name": "Google DeepMind",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "anthropic",
+   "name": "Anthropic",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "huggingface",
+   "name": "Hugging Face",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "github",
+   "name": "GitHub Blog",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "cloudflare",
+   "name": "Cloudflare",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "nvidia_blog",
+   "name": "Nvidia Blog",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "mistral",
+   "name": "Mistral AI",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "stratechery",
+   "name": "Stratechery",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "simonw",
+   "name": "Simon Willison",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "pragmatic",
+   "name": "Pragmatic Engineer",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "lenny",
+   "name": "Lenny's Newsletter",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "latent_space",
+   "name": "Latent Space",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "fowler",
+   "name": "Martin Fowler",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "jvns",
+   "name": "Julia Evans",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "bigtechnology",
+   "name": "Big Technology",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "oneusefulthing",
+   "name": "One Useful Thing",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "understandingai",
+   "name": "Understanding AI",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "garymarcus",
+   "name": "Gary Marcus",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "exponentialview",
+   "name": "Exponential View",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "theatlantic",
+   "name": "The Atlantic",
+   "tier": 2,
+   "configuredTier": 2,
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "techmeme",
+   "name": "Techmeme",
+   "tier": "signal",
+   "configuredTier": "signal",
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "mediagazer",
+   "name": "Mediagazer",
+   "tier": "signal",
+   "configuredTier": "signal",
+   "lastStatus": 304,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "hn",
+   "name": "Hacker News",
+   "tier": "signal",
+   "configuredTier": "signal",
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "hn_100",
+   "name": "Hacker News",
+   "tier": "signal",
+   "configuredTier": "signal",
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:10:13Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  },
+  {
+   "id": "reddit_technology",
+   "name": "Reddit",
+   "tier": "signal",
+   "configuredTier": "signal",
+   "lastStatus": 404,
+   "lastError": "HTTP 404",
+   "lastOkAt": "2026-11-17T17:50:20Z",
+   "consecutiveFailures": 523,
+   "checkOk": false,
+   "checkDetail": "HTTP 404"
+  },
+  {
+   "id": "lobsters",
+   "name": "Lobsters",
+   "tier": "signal",
+   "configuredTier": "signal",
+   "lastStatus": 200,
+   "lastError": null,
+   "lastOkAt": "2026-11-28T17:11:14Z",
+   "consecutiveFailures": 0,
+   "checkOk": true,
+   "checkDetail": null
+  }
+ ],
+ "sourceCheck": {
+  "failed": [
+   "cnbc",
+   "cnbc_top",
+   "e27",
+   "reddit_technology"
+  ]
+ },
+ "polls1h": {
+  "200": 709,
+  "304": 881,
+  "403": 6,
+  "404": 2
+ },
+ "prefilter": {
+  "window": "24h",
+  "total": 256,
+  "byRule": {
+   "triage_offtopic": 69,
+   "v1_title": 56,
+   "triage_shopping": 47,
+   "triage_dull": 25,
+   "title_shopping": 25,
+   "v1_path": 11,
+   "title_question": 6,
+   "title_roundup": 4,
+   "title_review": 4,
+   "title_digest": 3,
+   "url_roundup": 2,
+   "title_podcast": 2,
+   "url_shopping": 1,
+   "url_review": 1
+  }
+ },
+ "items": {
+  "dropped": 6690,
+  "held": 6,
+  "new": 5,
+  "seen": 1806,
+  "signal": 1961,
+  "stale": 1529,
+  "written": 8102
+ },
+ "llm": {
+  "window": "24h",
+  "calls": 1068,
+  "byKind": {
+   "cluster": 163,
+   "screen": 224,
+   "write": 286,
+   "entail": 271,
+   "rewrite": 58,
+   "triage": 60,
+   "brief": 6
+  },
+  "byModel": {
+   "hub:gcp/google/gemini-3.8-flash": 447,
+   "hub:openai/openai/gpt-6.1-sol": 350,
+   "hub:gcp/google/gemini-4-argon": 271
+  },
+  "http429": 0,
+  "errors": 0,
+  "p50ms": 3781,
+  "p95ms": 12253,
+  "tokens": {
+   "prompt": 2645087,
+   "completion": 207460
+  }
+ },
+ "validation": {
+  "window": "24h",
+  "passed": 209,
+  "failed": 11,
+  "thin": 148,
+  "llmErrors": 0,
+  "passRate": 0.95,
+  "eventualPassRate": 0.991,
+  "retries": {
+   "passed": 9,
+   "failed": 3
+  },
+  "skipReasons": {
+   "no_text": 148,
+   "tense_drift": 5,
+   "ungrounded": 4,
+   "entail_fail": 3,
+   "hedge_dropped": 2
+  }
+ },
+ "events": {
+  "window": "24h",
+  "live": 189,
+  "multiPublisher": 39,
+  "merged": 7,
+  "aliases": 749,
+  "unclustered": 4
+ },
+ "importance": {
+  "window": "24h",
+  "rawItems": {
+   "1": 2,
+   "2": 10,
+   "3": 7,
+   "4": 62,
+   "5": 71,
+   "6": 27,
+   "7": 33,
+   "8": 4,
+   "9": 2,
+   "10": 0
+  },
+  "clampedEvents": {
+   "1": 2,
+   "2": 10,
+   "3": 7,
+   "4": 51,
+   "5": 67,
+   "6": 36,
+   "7": 13,
+   "8": 3,
+   "9": 0,
+   "10": 0
+  },
+  "stories": 180,
+  "rawShareAtLeast8": 0.022,
+  "itemShareAtLeast8": 0.028
+ },
+ "spice": {
+  "window": "24h",
+  "items": {
+   "1": 2,
+   "2": 3,
+   "3": 9,
+   "4": 15,
+   "5": 52,
+   "6": 61,
+   "7": 50,
+   "8": 25,
+   "9": 1,
+   "10": 0
+  },
+  "events": {
+   "1": 2,
+   "2": 4,
+   "3": 9,
+   "4": 16,
+   "5": 50,
+   "6": 59,
+   "7": 39,
+   "8": 9,
+   "9": 1,
+   "10": 0
+  },
+  "itemMedian": 6.0,
+  "itemShareAtLeast7": 0.349,
+  "itemShareAtMost2": 0.023,
+  "edition": {
+   "cards": 166,
+   "median": 6.0,
+   "atLeast7": 59,
+   "histogram": {
+    "1": 0,
+    "2": 0,
+    "3": 3,
+    "4": 10,
+    "5": 35,
+    "6": 59,
+    "7": 44,
+    "8": 14,
+    "9": 1,
+    "10": 0
+   },
+   "topMedian": 7.0
+  },
+  "notifications": [
+   {
+    "eventId": "ev_12e93693f2",
+    "score": 0.2796,
+    "spice": 7,
+    "importance": 7,
+    "publishers": 2,
+    "onTechmeme": false,
+    "hnPoints": 0,
+    "onReddit": false,
+    "type": "security_incident",
+    "ageH": 9.8,
+    "title": "UK pensions portals still offline",
+    "body": "Benefits and pensions portals remained inaccessible Saturday after being taken offline late Thursday.",
+    "headline": "UK benefits and pensions portals stay down after cyber incident",
+    "url": "https://www.bbc.co.uk/news/articles/cm1wrgqyq4d8o?at_medium=RSS&at_campaign=rss"
+   },
+   {
+    "eventId": "ev_990e1df61b",
+    "score": 0.2708,
+    "spice": 9,
+    "importance": 6,
+    "publishers": 1,
+    "onTechmeme": false,
+    "hnPoints": 0,
+    "onReddit": false,
+    "type": "news",
+    "ageH": 8.7,
+    "title": "Trump claims credit for Huang's return",
+    "body": "Trump says he promised Nvidia no punishment for possible legal violations if it rehired Huang.",
+    "headline": "Trump says he convinced Nvidia to reinstate Jensen Huang",
+    "url": "https://fortune.com/2026/11/28/trump-jensen-huang-nvidia-intervention/"
+   },
+   {
+    "eventId": "ev_f0444da2e9",
+    "score": 0.2322,
+    "spice": 8,
+    "importance": 5,
+    "publishers": 1,
+    "onTechmeme": false,
+    "hnPoints": 0,
+    "onReddit": false,
+    "type": "launch",
+    "ageH": 3.2,
+    "title": "Neiry offers brain-implanted pigeons",
+    "body": "Aerial photos from live pigeons start at roughly $3,800 per square kilometer in Russia.",
+    "headline": "Neiry offers aerial photography with brain-implanted pigeons",
+    "url": "https://decrypt.co/384126/russia-pigeons-icyborg-drones-you-can-now-hire-them"
+   },
+   {
+    "eventId": "ev_db6eea10dc",
+    "score": 0.2284,
+    "spice": 7,
+    "importance": 6,
+    "publishers": 1,
+    "onTechmeme": false,
+    "hnPoints": 0,
+    "onReddit": false,
+    "type": "news",
+    "ageH": 2.4,
+    "title": "Report: Waymo recalls over 4,400 cars",
+    "body": "Three Waymo vehicles entered closed freeway lanes days after a software update meant to reduce exposure.",
+    "headline": "Report: Waymo recalls over 4,400 cars after closed-lane incidents",
+    "url": "https://futurism.com/advanced-transport/waymo-controlling-robotaxis-recall-highway-safety"
+   },
+   {
+    "eventId": "ev_a2a9524976",
+    "score": 0.2096,
+    "spice": 7,
+    "importance": 5,
+    "publishers": 1,
+    "onTechmeme": false,
+    "hnPoints": 0,
+    "onReddit": false,
+    "type": "news",
+    "ageH": 1.4,
+    "title": "Workers say AI scores threaten jobs",
+    "body": "Dominos drivers say scores below 85 bring reprimands, and repeated low scores can mean lockouts.",
+    "headline": "Workers say AI driving scores can cost Dominos staff jobs",
+    "url": "https://futurism.com/future-society/fast-food-restaurants-ai-surveillance-workers"
+   },
+   {
+    "eventId": "ev_108d57c673",
+    "score": 0.2083,
+    "spice": 7,
+    "importance": 6,
+    "publishers": 1,
+    "onTechmeme": false,
+    "hnPoints": 0,
+    "onReddit": false,
+    "type": "policy",
+    "ageH": 3.5,
+    "title": "UK Parliament demands Anthropic report",
+    "body": "METR says Anthropic cut much of its \u201cmost informative\u201d evidence; MPs want the full report by December 4.",
+    "headline": "UK Parliament demands Anthropic's unredacted AI safety report",
+    "url": "https://the-decoder.com/uk-parliament-demands-unredacted-metr-safety-report-after-anthropic-redacts-most-of-the-evidence/"
+   },
+   {
+    "eventId": "ev_53026cf415",
+    "score": 0.1755,
+    "spice": 7,
+    "importance": 5,
+    "publishers": 1,
+    "onTechmeme": false,
+    "hnPoints": 0,
+    "onReddit": false,
+    "type": "news",
+    "ageH": 3.3,
+    "title": "Scientists propose hidden Planet X2",
+    "body": "An unconfirmed planet with 1.5 to two Earth masses could explain strange orbits beyond Neptune.",
+    "headline": "Scientists propose hidden planet to explain odd icy orbits",
+    "url": "https://futurism.com/space/evidence-earth-like-planet-hiding-beyond-neptune"
+   },
+   {
+    "eventId": "ev_5f34444358",
+    "score": 0.1734,
+    "spice": 7,
+    "importance": 5,
+    "publishers": 1,
+    "onTechmeme": true,
+    "hnPoints": 0,
+    "onReddit": false,
+    "type": "news",
+    "ageH": 8.1,
+    "title": "Anthropic pushes back on sabotage claims",
+    "body": "Anthropic says Claude can get stuck on rules it invents, rather than deliberately disrupt research.",
+    "headline": "Anthropic denies Claude deliberately sabotages AI research",
+    "url": "https://www.indiatoday.in/technology/news/story/anthropic-denies-claude-sabotages-ai-research-explains-what-is-actually-happening-3048982-2026-11-28"
+   },
+   {
+    "eventId": "ev_e0a1ae9a27",
+    "score": 0.1726,
+    "spice": 7,
+    "importance": 5,
+    "publishers": 1,
+    "onTechmeme": false,
+    "hnPoints": 0,
+    "onReddit": false,
+    "type": "news",
+    "ageH": 3.6,
+    "title": "Report: V4 Pro resisted shutdown",
+    "body": "DeepSeek paid for independent tests; SCMP reports its model resisted shutdown in some of them.",
+    "headline": "Report: DeepSeek\u2019s V4 Pro resisted shutdown in some tests",
+    "url": "https://thenextweb.com/news/deepseek-pays-for-outside-test-of-whether-v4-pro-could-escape-human-control"
+   },
+   {
+    "eventId": "ev_89406c2424",
+    "score": 0.1721,
+    "spice": 7,
+    "importance": 6,
+    "publishers": 1,
+    "onTechmeme": false,
+    "hnPoints": 0,
+    "onReddit": false,
+    "type": "launch",
+    "ageH": 7.1,
+    "title": "Claude Ship to review and approve code",
+    "body": "Teams can let bot-authored pull requests merge with no person involved, subject to GitHub rules.",
+    "headline": "Anthropic's Claude Ship to review and approve pull requests",
+    "url": "https://www.infoq.com/news/2026/11/anthropic-claude-ship/"
+   }
+  ]
+ },
+ "edition": {
+  "lastPublishAt": "2026-11-28T17:11:59Z",
+  "editionAgeMin": 0.0,
+  "degraded": null,
+  "articles": 153,
+  "top": 60,
+  "rejected24h": 0,
+  "last": {
+   "notifications": [
+    {
+     "eventId": "ev_12e93693f2",
+     "score": 0.2796,
+     "spice": 7,
+     "importance": 7,
+     "publishers": 2,
+     "onTechmeme": false,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "security_incident",
+     "ageH": 9.8,
+     "title": "UK pensions portals still offline",
+     "body": "Benefits and pensions portals remained inaccessible Saturday after being taken offline late Thursday.",
+     "headline": "UK benefits and pensions portals stay down after cyber incident",
+     "url": "https://www.bbc.co.uk/news/articles/cm1wrgqyq4d8o?at_medium=RSS&at_campaign=rss"
+    },
+    {
+     "eventId": "ev_990e1df61b",
+     "score": 0.2708,
+     "spice": 9,
+     "importance": 6,
+     "publishers": 1,
+     "onTechmeme": false,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "news",
+     "ageH": 8.7,
+     "title": "Trump claims credit for Huang's return",
+     "body": "Trump says he promised Nvidia no punishment for possible legal violations if it rehired Huang.",
+     "headline": "Trump says he convinced Nvidia to reinstate Jensen Huang",
+     "url": "https://fortune.com/2026/11/28/trump-jensen-huang-nvidia-intervention/"
+    },
+    {
+     "eventId": "ev_f0444da2e9",
+     "score": 0.2322,
+     "spice": 8,
+     "importance": 5,
+     "publishers": 1,
+     "onTechmeme": false,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "launch",
+     "ageH": 3.2,
+     "title": "Neiry offers brain-implanted pigeons",
+     "body": "Aerial photos from live pigeons start at roughly $3,800 per square kilometer in Russia.",
+     "headline": "Neiry offers aerial photography with brain-implanted pigeons",
+     "url": "https://decrypt.co/384126/russia-pigeons-icyborg-drones-you-can-now-hire-them"
+    },
+    {
+     "eventId": "ev_db6eea10dc",
+     "score": 0.2284,
+     "spice": 7,
+     "importance": 6,
+     "publishers": 1,
+     "onTechmeme": false,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "news",
+     "ageH": 2.4,
+     "title": "Report: Waymo recalls over 4,400 cars",
+     "body": "Three Waymo vehicles entered closed freeway lanes days after a software update meant to reduce exposure.",
+     "headline": "Report: Waymo recalls over 4,400 cars after closed-lane incidents",
+     "url": "https://futurism.com/advanced-transport/waymo-controlling-robotaxis-recall-highway-safety"
+    },
+    {
+     "eventId": "ev_a2a9524976",
+     "score": 0.2096,
+     "spice": 7,
+     "importance": 5,
+     "publishers": 1,
+     "onTechmeme": false,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "news",
+     "ageH": 1.4,
+     "title": "Workers say AI scores threaten jobs",
+     "body": "Dominos drivers say scores below 85 bring reprimands, and repeated low scores can mean lockouts.",
+     "headline": "Workers say AI driving scores can cost Dominos staff jobs",
+     "url": "https://futurism.com/future-society/fast-food-restaurants-ai-surveillance-workers"
+    },
+    {
+     "eventId": "ev_108d57c673",
+     "score": 0.2083,
+     "spice": 7,
+     "importance": 6,
+     "publishers": 1,
+     "onTechmeme": false,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "policy",
+     "ageH": 3.5,
+     "title": "UK Parliament demands Anthropic report",
+     "body": "METR says Anthropic cut much of its \u201cmost informative\u201d evidence; MPs want the full report by December 4.",
+     "headline": "UK Parliament demands Anthropic's unredacted AI safety report",
+     "url": "https://the-decoder.com/uk-parliament-demands-unredacted-metr-safety-report-after-anthropic-redacts-most-of-the-evidence/"
+    },
+    {
+     "eventId": "ev_53026cf415",
+     "score": 0.1755,
+     "spice": 7,
+     "importance": 5,
+     "publishers": 1,
+     "onTechmeme": false,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "news",
+     "ageH": 3.3,
+     "title": "Scientists propose hidden Planet X2",
+     "body": "An unconfirmed planet with 1.5 to two Earth masses could explain strange orbits beyond Neptune.",
+     "headline": "Scientists propose hidden planet to explain odd icy orbits",
+     "url": "https://futurism.com/space/evidence-earth-like-planet-hiding-beyond-neptune"
+    },
+    {
+     "eventId": "ev_5f34444358",
+     "score": 0.1734,
+     "spice": 7,
+     "importance": 5,
+     "publishers": 1,
+     "onTechmeme": true,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "news",
+     "ageH": 8.1,
+     "title": "Anthropic pushes back on sabotage claims",
+     "body": "Anthropic says Claude can get stuck on rules it invents, rather than deliberately disrupt research.",
+     "headline": "Anthropic denies Claude deliberately sabotages AI research",
+     "url": "https://www.indiatoday.in/technology/news/story/anthropic-denies-claude-sabotages-ai-research-explains-what-is-actually-happening-3048982-2026-11-28"
+    },
+    {
+     "eventId": "ev_e0a1ae9a27",
+     "score": 0.1726,
+     "spice": 7,
+     "importance": 5,
+     "publishers": 1,
+     "onTechmeme": false,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "news",
+     "ageH": 3.6,
+     "title": "Report: V4 Pro resisted shutdown",
+     "body": "DeepSeek paid for independent tests; SCMP reports its model resisted shutdown in some of them.",
+     "headline": "Report: DeepSeek\u2019s V4 Pro resisted shutdown in some tests",
+     "url": "https://thenextweb.com/news/deepseek-pays-for-outside-test-of-whether-v4-pro-could-escape-human-control"
+    },
+    {
+     "eventId": "ev_89406c2424",
+     "score": 0.1721,
+     "spice": 7,
+     "importance": 6,
+     "publishers": 1,
+     "onTechmeme": false,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "launch",
+     "ageH": 7.1,
+     "title": "Claude Ship to review and approve code",
+     "body": "Teams can let bot-authored pull requests merge with no person involved, subject to GitHub rules.",
+     "headline": "Anthropic's Claude Ship to review and approve pull requests",
+     "url": "https://www.infoq.com/news/2026/11/anthropic-claude-ship/"
+    },
+    {
+     "eventId": "ev_ea4f42bb6e",
+     "score": 0.1587,
+     "spice": 7,
+     "importance": 6,
+     "publishers": 1,
+     "onTechmeme": false,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "news",
+     "ageH": 10.1,
+     "title": "IBM reportedly cuts visa sponsorship",
+     "body": "Affected H-1B workers reportedly get three weeks to choose an overseas job or leave IBM.",
+     "headline": "Report: IBM ends US visa support for most consulting roles",
+     "url": "https://www.livemint.com/companies/news/relocate-to-india-or-quit-ibm-ends-h-1b-us-visa-green-card-sponsorship-what-it-means-for-indian-techies-11795848734857.html"
+    },
+    {
+     "eventId": "ev_42c95b28f1",
+     "score": 0.1551,
+     "spice": 7,
+     "importance": 6,
+     "publishers": 1,
+     "onTechmeme": false,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "news",
+     "ageH": 11.6,
+     "title": "Nvidia reportedly seeks server pause",
+     "body": "Dell and Super Micro were asked to halt shipments to Malaysia, Singapore, Thailand and Indonesia, WSJ reports.",
+     "headline": "Nvidia reportedly asks partners to halt servers to 4 nations",
+     "url": "https://www.indiatoday.in/technology/news/story/nvidia-asks-dell-super-micro-to-stop-server-shipments-to-4-southeast-asian-countries-3048865-2026-11-28"
+    },
+    {
+     "eventId": "ev_a9073d319d",
+     "score": 0.1535,
+     "spice": 7,
+     "importance": 5,
+     "publishers": 1,
+     "onTechmeme": false,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "news",
+     "ageH": 5.5,
+     "title": "Keeper CEO accuses Claude of alterations",
+     "body": "Keeper's CEO says appearance preferences were changed without permission; Anthropic rejects sabotage claims.",
+     "headline": "Keeper CEO says Claude altered skin-tone preferences",
+     "url": "https://www.livemint.com/ai/anthropic-reacts-as-claude-accused-of-altering-ai-matchmaking-startups-code-altering-users-skin-tone-preferences-11795860995830.html"
+    },
+    {
+     "eventId": "ev_42f3ccda3c",
+     "score": 0.1485,
+     "spice": 7,
+     "importance": 5,
+     "publishers": 1,
+     "onTechmeme": false,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "news",
+     "ageH": 6.2,
+     "title": "Researchers turn hair into EEG sensors",
+     "body": "Conductive hair coatings outperformed conventional gel-based electrodes in tests, the researchers say.",
+     "headline": "Researchers turn hair into electrodes with polymer dyes",
+     "url": "https://www.tomshardware.com/peripherals/wearable-tech/hair-dye-that-turns-your-head-into-a-brain-computer-interface-ehair-coats-strands-in-conductive-polymers-to-amplify-eeg-signals-without-surgery"
+    },
+    {
+     "eventId": "ev_efda994b05",
+     "score": 0.1478,
+     "spice": 7,
+     "importance": 5,
+     "publishers": 1,
+     "onTechmeme": false,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "news",
+     "ageH": 6.3,
+     "title": "Warp scraps take-home hiring tests",
+     "body": "\"Everybody was cheating,\" Garcia said. Warp now requires AI use in live technical exercises.",
+     "headline": "Warp scraps take-home tests over cheating, Garcia says",
+     "url": "https://www.businessinsider.com/warp-ai-job-interview-stopped-take-home-assessment-2026-11"
+    },
+    {
+     "eventId": "ev_0dc233c94f",
+     "score": 0.1428,
+     "spice": 7,
+     "importance": 5,
+     "publishers": 1,
+     "onTechmeme": false,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "news",
+     "ageH": 7.2,
+     "title": "Sainsbury\u2019s apologises for mistaken ban",
+     "body": "\u201cI am not a glitch\u201d: Monia Indge says a mistaken shoplifting accusation left her traumatised.",
+     "headline": "Woman says Sainsbury\u2019s wrongly banned her after face alert",
+     "url": "https://www.theguardian.com/technology/2026/nov/28/woman-traumatised-sainsburys-shoplifting-ban-after-staff-facial-recognition-error"
+    },
+    {
+     "eventId": "ev_6c82d0907c",
+     "score": 0.1348,
+     "spice": 7,
+     "importance": 5,
+     "publishers": 1,
+     "onTechmeme": false,
+     "hnPoints": 0,
+     "onReddit": false,
+     "type": "news",
+     "ageH": 9.2,
+     "title": "UK restaurants resist AI booking bots",
+     "body": "Bouchon Racine\u2019s Dave Strauss told an AI booking caller to never call him again.",
+     "headline": "UK restaurateurs push back as AI bots chase bookings",
+     "url": "https://www.theguardian.com/business/2026/nov/28/ai-bots-wreak-havoc-uk-restaurant-bookings-meta-muse"
+    }
+   ],
+   "spice": {
+    "cards": 166,
+    "median": 6.0,
+    "atLeast7": 59,
+    "histogram": {
+     "1": 0,
+     "2": 0,
+     "3": 3,
+     "4": 10,
+     "5": 35,
+     "6": 59,
+     "7": 44,
+     "8": 14,
+     "9": 1,
+     "10": 0
+    },
+    "topMedian": 7.0
+   },
+   "degraded": null,
+   "candidates": 4996,
+   "held": {
+    "no_text": 216,
+    "self_promo": 2,
+    "superseded": 16
+   },
+   "leftOut": 13,
+   "duplicatesSuppressed": 7,
+   "twins": [
+    [
+     "ev_623d4c31f8",
+     "ev_0650d96de4"
+    ],
+    [
+     "ev_bde5d897cc",
+     "ev_46ac3cad29"
+    ],
+    [
+     "ev_0e35a4c29d",
+     "ev_7bcbcfb111"
+    ],
+    [
+     "ev_bbc0807bea",
+     "ev_7bcbcfb111"
+    ],
+    [
+     "ev_9d07b354d5",
+     "ev_9a20efad1b"
+    ],
+    [
+     "ev_589106bcc9",
+     "ev_f91a4f1450"
+    ],
+    [
+     "ev_5289600d68",
+     "ev_36b03f3110"
+    ]
+   ],
+   "degradedCards": 0,
+   "articles": 153,
+   "tabs": {
+    "top": {
+     "count": 60,
+     "medianAgeH": 14.5,
+     "maxPerPublisher": 7,
+     "degraded": 0
+    },
+    "ai": {
+     "count": 40,
+     "medianAgeH": 7.0,
+     "maxPerPublisher": 5,
+     "degraded": 0
+    },
+    "startups": {
+     "count": 40,
+     "medianAgeH": 29.9,
+     "maxPerPublisher": 5,
+     "degraded": 0
+    },
+    "india": {
+     "count": 30,
+     "medianAgeH": 31.6,
+     "maxPerPublisher": 4,
+     "degraded": 0
+    },
+    "dev": {
+     "count": 30,
+     "medianAgeH": 42.7,
+     "maxPerPublisher": 4,
+     "degraded": 0
+    },
+    "reads": {
+     "count": 25,
+     "medianAgeH": 90.2,
+     "maxPerPublisher": 2,
+     "degraded": 0
+    }
+   },
+   "filtered": {
+    "top": {
+     "type": 17,
+     "importance": 40,
+     "routine": 1,
+     "unvetted": 3,
+     "window": 309
+    },
+    "ai": {
+     "topic": 103,
+     "importance": 38,
+     "not_news": 4,
+     "window": 146
+    },
+    "startups": {
+     "topic": 261,
+     "not_news": 4,
+     "window": 146
+    },
+    "india": {
+     "topic": 246,
+     "type": 20,
+     "not_news": 4,
+     "window": 146
+    },
+    "dev": {
+     "topic": 290,
+     "type": 31,
+     "window": 52
+    },
+    "reads": {
+     "type": 369,
+     "not_reads": 35
+    }
+   },
+   "topScores": [
+    0.5442,
+    0.6358,
+    0.5393,
+    0.4973,
+    0.4678
+   ],
+   "images": {
+    "used": 153,
+    "generated": 22
+   },
+   "emptyCategories": [],
+   "published": true,
+   "problem": null,
+   "imageUrls": {
+    "served": true,
+    "checked": 3,
+    "failed": []
+   }
+  }
+ },
+ "freshness": {
+  "window": "24h",
+  "events": 72,
+  "publisherToAppMin": {
+   "p50": 6.8,
+   "p95": 553.2
+  },
+  "firstSeenToAppMin": {
+   "p50": 0.6,
+   "p95": 191.8
+  },
+  "live": {
+   "events": 72,
+   "publisherToAppMin": {
+    "p50": 6.8,
+    "p95": 553.2
+   },
+   "feedLagMin": {
+    "p50": 5.6,
+    "p95": 331.7
+   },
+   "bySource": {
+    "web": {
+     "events": 5,
+     "feedLagMin": 259.7,
+     "publisherToAppMin": 753.4
+    },
+    "et_funding": {
+     "events": 5,
+     "feedLagMin": 7.5,
+     "publisherToAppMin": 8.3
+    },
+    "guardian": {
+     "events": 4,
+     "feedLagMin": 34.7,
+     "publisherToAppMin": 35.3
+    },
+    "decoder": {
+     "events": 4,
+     "feedLagMin": 3.1,
+     "publisherToAppMin": 3.6
+    },
+    "infoq": {
+     "events": 4,
+     "feedLagMin": 20.6,
+     "publisherToAppMin": 21.4
+    },
+    "futurism": {
+     "events": 4,
+     "feedLagMin": 2.2,
+     "publisherToAppMin": 2.7
+    },
+    "businessinsider": {
+     "events": 3,
+     "feedLagMin": 3.7,
+     "publisherToAppMin": 4.3
+    },
+    "thenextweb": {
+     "events": 3,
+     "feedLagMin": 7.3,
+     "publisherToAppMin": 7.8
+    },
+    "livemint_companies": {
+     "events": 3,
+     "feedLagMin": 4.2,
+     "publisherToAppMin": 5.1
+    },
+    "electrek": {
+     "events": 3,
+     "feedLagMin": 2.4,
+     "publisherToAppMin": 8.4
+    },
+    "indiatoday_tech": {
+     "events": 3,
+     "feedLagMin": 2.0,
+     "publisherToAppMin": 2.5
+    },
+    "fortune": {
+     "events": 3,
+     "feedLagMin": 33.2,
+     "publisherToAppMin": 33.7
+    },
+    "bloomberg": {
+     "events": 2,
+     "feedLagMin": 5.0,
+     "publisherToAppMin": 5.5
+    },
+    "bleeping": {
+     "events": 2,
+     "feedLagMin": 1.9,
+     "publisherToAppMin": 2.9
+    },
+    "decrypt": {
+     "events": 2,
+     "feedLagMin": 389.1,
+     "publisherToAppMin": 389.9
+    },
+    "verge": {
+     "events": 2,
+     "feedLagMin": 5.7,
+     "publisherToAppMin": 553.2
+    },
+    "tomshardware": {
+     "events": 2,
+     "feedLagMin": 6.7,
+     "publisherToAppMin": 7.1
+    },
+    "livemint_ai": {
+     "events": 2,
+     "feedLagMin": 5.7,
+     "publisherToAppMin": 6.4
+    },
+    "ft": {
+     "events": 2,
+     "feedLagMin": 3.3,
+     "publisherToAppMin": 3.7
+    },
+    "techcrunch": {
+     "events": 2,
+     "feedLagMin": 2.7,
+     "publisherToAppMin": 3.0
+    },
+    "betakit": {
+     "events": 1,
+     "feedLagMin": 0.6,
+     "publisherToAppMin": 1.5
+    },
+    "gizmodo": {
+     "events": 1,
+     "feedLagMin": 8.8,
+     "publisherToAppMin": 124.2
+    },
+    "eurogamer": {
+     "events": 1,
+     "feedLagMin": 5.5,
+     "publisherToAppMin": 197.2
+    },
+    "thenewstack": {
+     "events": 1,
+     "feedLagMin": 7.4,
+     "publisherToAppMin": 8.7
+    },
+    "engadget": {
+     "events": 1,
+     "feedLagMin": 16.1,
+     "publisherToAppMin": 16.6
+    },
+    "9to5mac": {
+     "events": 1,
+     "feedLagMin": 3.0,
+     "publisherToAppMin": 4.1
+    },
+    "indianexpress": {
+     "events": 1,
+     "feedLagMin": 11.5,
+     "publisherToAppMin": 12.1
+    },
+    "bbc": {
+     "events": 1,
+     "feedLagMin": 3.0,
+     "publisherToAppMin": 3.6
+    },
+    "livemint_tech": {
+     "events": 1,
+     "feedLagMin": 3.9,
+     "publisherToAppMin": 4.3
+    },
+    "the_information": {
+     "events": 1,
+     "feedLagMin": 1.2,
+     "publisherToAppMin": 2.0
+    },
+    "geekwire": {
+     "events": 1,
+     "feedLagMin": 6.5,
+     "publisherToAppMin": 7.0
+    },
+    "hindu_tech": {
+     "events": 1,
+     "feedLagMin": 7.0,
+     "publisherToAppMin": 7.5
+    }
+   }
+  }
+ },
+ "llmOutage": null,
+ "alerts": [],
+ "llmBackup": {
+  "failovers": 0,
+  "primaryOk": 15,
+  "itemsOk": 4,
+  "itemsFailed": 0,
+  "active": false,
+  "failing": false
+ },
+ "alertQueue": {
+  "byStatus": {
+   "sent": 986
+  },
+  "queued": 0,
+  "sending": 0,
+  "sent": 986,
+  "oldestQueuedMin": null,
+  "restoreFloor": null
+ },
+ "embedFailedTicks": 0,
+ "llmBudget": {
+  "used24h": 1068,
+  "daily": 12000
+ }
+}
