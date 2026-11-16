@@ -91,19 +91,25 @@ and traction floors → score → tabs → images → v1 edition.json + notifica
   import cannot be written (a company page, a paywall) its points still attach to the event its title matches.
   A Techmeme pick also overrules a feed's category filter and the screening call's "off-topic" or "dull", and so
   does a Hacker News or Lobsters link past the import bar (`fetch.revive_shared`); when the screening prompt
-  changes, the last 36 h of its drops are screened again. An item whose text could not be fetched stays
+  changes, the last 36 h of its drops are screened again, at most 4 batches of 40 a tick: an item due a
+  screening is never written before it has had one. An item whose text could not be fetched stays
   clusterable for 48 h, and one that is itself a big Hacker News or Lobsters link (300+ / 100+) may start an
   event and get a brief, like a paywalled scoop.
 - **When the news happened** (`newsdate.py`): a late write-up of older news ("Apple began selling its HomeView
   Friday", published on Sunday) is dated by the news: the writer's `news_date` when the text carries that day,
-  else a plain statement in the first sentence. The event's clock, the card's date, its freshness and the 12 h
+  else a plain statement in the first sentence. Only a report is dated this way: an exclusive, or a new
+  development about an earlier incident, is its own news, and analysis, opinion and explainers keep their own
+  date. A vague "last week" carries a date only in the article's opening and only for a day in that stretch. The event's clock, the card's date, its freshness and the 12 h
   alert window follow. The page's own publication time moves an item back when the feed carried a later one or
   none; a lead with no publisher's date at all is never an alert candidate.
 - **Overtaken cards**: the judge may rule that a report *supersedes* a card (the outcome of what it reports as
   under way, a correction, a newer official account), and a follow-up whose title reports a reversal of its
   parent's does so by rule; the older event is left out while the newer one has a written card. Inside one event,
   a member a later member has overtaken ("says he will sign" once others report "signs") no longer leads, and
-  the rewrite is given each report's time and told that the newest account stands.
+  the rewrite is given each report's time and told that the newest account stands. Its headline stays on the
+  development the reports share: a detail only one report adds goes in the sentences (a how-to two days after
+  a launch had turned the launch card into its side angle). The card may name the outlets whose reports it was
+  given, and the fact-checker sees each report under its outlet.
 
 - **One card per development.** Reports of the same development cluster into one event (`cluster.py`); its card
   is the lead article's validated headline and summary, or a rewrite from several members. A judge call rules
@@ -171,9 +177,17 @@ Each provider's key comes from the variable named in `config.yaml` (`HUB_API_KEY
 named by `<NAME>_FILE`, else the last `export <NAME>=` line in `~/.bashrc`. Without the hub key the backup model
 writes; with no key at all the worker still publishes, in degraded mode.
 
-Two tools check a prompt, model or clustering change against a real run without touching it:
-`tools/eval_cards.py STATE_DB "title words"` writes cards for chosen items and prints the scores and each check's
-outcome; `tools/recluster.py STATE_DB --grep word` re-clusters a copy and prints the events.
+Three tools check a prompt, model or clustering change against a real run without touching it:
+`tools/eval_cards.py STATE_DB "title words"` writes cards for chosen items and prints the scores, the news date
+and each check's outcome; `tools/eval_events.py STATE_DB "headline words"` (or `--rewritten N`, `--briefs N`)
+rewrites or briefs chosen events on a throwaway copy and prints the reports, the old card and the new one;
+`tools/recluster.py STATE_DB --grep word` re-clusters a copy and prints the events.
+
+A rule added to the write or clustering path acts on new items only. `tools/reexamine.py` applies such rules to
+the cards a state already holds (take a backup and stop the worker first): follow-ups are put to the clustering
+judge again and mark the events they overtook; written cards get their news date; events holding a report hours
+newer than their lead are queued for a rewrite; and with `--edition` every card of that edition is fact-checked
+again with the current rules, a card that fails going back to the writer with the reason.
 
 The same worker also runs as a system service on the public VPS (a test run that publishes to a local directory
 only); see [deploy/README.md](deploy/README.md). There the key comes from the file named by `NVIDIA_API_KEY_FILE`.

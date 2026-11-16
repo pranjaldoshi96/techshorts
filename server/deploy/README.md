@@ -43,8 +43,26 @@ Notes
   edition point at `publish.base_url` (the GitHub raw URL), where nothing from this box is published, so they do
   not resolve; `health.json` reports this as `edition.last.imageUrls.served: false`.
 - Checking a change against real data without touching the service: copy the state with a SQLite backup, then
-  `tools/eval_cards.py COPY "title words"` (writes those cards with the current prompts and prints every check)
-  and `tools/recluster.py COPY --grep word` (re-clusters the copy and prints the events).
+  `tools/eval_cards.py COPY "title words"` (writes those cards with the current prompts and prints every check),
+  `tools/eval_events.py COPY "headline words"` (rewrites or briefs those events on a throwaway copy) and
+  `tools/recluster.py COPY --grep word` (re-clusters the copy and prints the events). A tool run as root from a
+  copy of the code needs the service's key files in its environment and no `NTFY_TOPIC` (so nothing it does
+  alerts the owner): `sudo -u techgist env TECHGIST_STATE=<copy dir> NVIDIA_API_KEY_FILE=/etc/techgist/nvidia_key
+  HUB_API_KEY_FILE=/etc/techgist/hub_key /opt/techgist/venv/bin/python tools/...`. A whole tick on a copy
+  (`-m worker.main --once --out <copy dir>/edition`) also needs `bin/v1decode` and `bin/v1decode.hash` copied
+  into the copy's state directory, or the edition is not published.
+- Applying a new rule to the cards the state already holds: `tools/reexamine.py` (see its docstring). With the
+  worker and `techgist-watchdog.timer` stopped and a backup taken:
+  `cd /opt/techgist && sudo -u techgist env TECHGIST_STATE=/var/lib/techgist NVIDIA_API_KEY_FILE=... HUB_API_KEY_FILE=...
+  venv/bin/python -m tools.reexamine --hours 168 --ask-dates --edition /var/lib/techgist/edition/edition.json`,
+  then start both. `--dry-run` first on a copy prints what it would do.
+- The third review's fixes (bbadb79) were checked against live models on 2026-11-16 and five things were changed
+  (revisions 2c627b6 to a4baadc). `tools/reexamine.py` then ran on the live state (5 min, worker stopped;
+  `state-20261116T001859Z.db` is the backup taken before it, `state-20261115T233001Z.db` the one before the
+  check began): 81 follow-ups put to the judge again and 2 older events marked as overtaken (the Vulcan launch
+  card under the card reporting the rocket lost), 18 cards dated by their news (HomeView from Sunday 21:55 to
+  Friday), 23 events queued for a rewrite with the newest account (the FAA card now gives the router, the Musk
+  card "signed"), and 4 of the edition's 129 cards sent back by the fact-checker's new rules.
 
 ## Staying up
 
