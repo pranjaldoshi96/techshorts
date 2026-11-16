@@ -68,4 +68,5 @@ def push(db, cfg, out_dir, now, force=False):
     if r.returncode != 0:
         log.warning("mirror push failed: %s", r.stderr.strip()[:200])
         return f"failed: push {r.stderr.strip()[:200]}"
+    db.set_meta("mirror_ok_at", iso(now))
     return "pushed"

@@ -541,6 +541,32 @@ def test_mirror_pushes_only_in_a_process_started_as_the_publisher(tmp_path, monk
     assert mirror.remote({"publish": {"git_remote": None}}) is None
 
 
+def test_image_urls_are_checked_only_for_pictures_already_pushed(tmp_path, monkeypatch):
+    """The check runs before the tick's push: a picture written this tick is not on GitHub yet and must not alert."""
+    monkeypatch.setenv(mirror.ENV, "1")
+    cfg = {"publish": {"git_remote": "git@example.test:x/y.git"}}
+    (tmp_path / "img").mkdir()
+    old, new = tmp_path / "img" / "old_std.jpg", tmp_path / "img" / "new_std.jpg"
+    old.write_bytes(b"x")
+    new.write_bytes(b"x")
+    at = tc.EDITION_AT
+    os.utime(old, (at.timestamp() - 600, at.timestamp() - 600))
+    os.utime(new, (at.timestamp() + 5, at.timestamp() + 5))
+    ed = {"articles": [{"image": "https://x.test/img/new_std.jpg"}, {"image": "https://x.test/img/old_std.jpg"}]}
+    asked = []
+
+    class Session:
+        def head(self, u, **kw):
+            asked.append(u)
+            return type("R", (), {"status_code": 200})()
+    db = tc.new_db()
+    got = publish_v1.image_url_check(db, cfg, ed, at + timedelta(minutes=1), Session(), out_dir=str(tmp_path))
+    assert got["checked"] == 0 and not asked                      # nothing pushed yet: nothing to expect
+    db.set_meta("mirror_ok_at", publish_v1.iso(at))
+    got = publish_v1.image_url_check(db, cfg, ed, at + timedelta(minutes=1), Session(), out_dir=str(tmp_path))
+    assert asked == ["https://x.test/img/old_std.jpg"] and got == {"served": True, "checked": 1, "failed": []}
+
+
 def test_the_worker_unit_is_the_only_file_that_makes_a_process_the_publisher():
     server = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     unit = open(os.path.join(server, "deploy", "techgist-worker.service")).read()

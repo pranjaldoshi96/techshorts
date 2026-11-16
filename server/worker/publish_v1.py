@@ -862,7 +862,7 @@ def publish(db, cfg, srcs, now, out_dir, embedder=None, outage=None, check=True,
     ok, problem = write(ctx, edition, report, used, out_dir, check, tabs)
     report["published"], report["problem"] = ok, problem
     if ok:
-        report["imageUrls"] = image_url_check(db, cfg, edition, now, session)
+        report["imageUrls"] = image_url_check(db, cfg, edition, now, session, out_dir=out_dir)
     db.commit()
     return report
 
@@ -870,7 +870,7 @@ def publish(db, cfg, srcs, now, out_dir, embedder=None, outage=None, check=True,
 IMAGE_CHECK_EVERY = timedelta(minutes=30)
 
 
-def image_url_check(db, cfg, edition, now, session=None, sample=3):
+def image_url_check(db, cfg, edition, now, session=None, sample=3, out_dir=None):
     """Do the edition's image URLs resolve? The files are written under out_dir/img and the URLs point at
     publish.base_url, so they resolve only once out_dir is served there. In a test run with no git_remote nothing
     is served (the VPS test edition's images all returned 404): that is reported as served: false rather than
@@ -885,6 +885,19 @@ def image_url_check(db, cfg, edition, now, session=None, sample=3):
     last = from_iso(db.get_meta("image_check_at"))
     if last and now - last < IMAGE_CHECK_EVERY:
         return json.loads(db.get_meta("image_check") or "null")
+    if out_dir is not None:
+        # This runs before the tick's push, so only pictures the last successful push already carried can be
+        # expected to resolve: the first publish after cutover alerted on a 404 for a file pushed 7 s later.
+        pushed_at = from_iso(db.get_meta("mirror_ok_at"))
+        if pushed_at is None:
+            return {"served": True, "checked": 0, "failed": [], "why": "nothing has been pushed yet"}
+
+        def pushed(u):
+            try:
+                return os.path.getmtime(os.path.join(out_dir, "img", u.rsplit("/", 1)[-1])) < pushed_at.timestamp()
+            except OSError:
+                return False
+        urls = [u for u in urls if pushed(u)]
     import requests
     bad = []
     for u in urls[:sample]:
