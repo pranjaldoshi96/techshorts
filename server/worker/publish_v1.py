@@ -33,7 +33,7 @@ from datetime import timedelta
 from urllib.parse import quote
 
 from . import (attribution as attribution_mod, degraded as degraded_mod, editorial as editorial_mod, embed as embed_mod, images as images_mod,
-               importance as importance_mod, rank, sources as sources_mod, validate)
+               importance as importance_mod, prefilter, rank, sources as sources_mod, validate)
 from .cluster import entity_keys
 from .db import from_iso, iso
 from .llm import LLMError
@@ -132,6 +132,9 @@ def event_candidate(ctx, ev):
     if lead is None:
         return None, "no_lead"
     lead_src = ctx.src(lead["source_id"])
+    if prefilter.no_path(lead["url"]):
+        # Every card opens its article: a lead whose link is a site's front page is never shipped.
+        return None, "not_article"
     if ctx.editorial.blocked(lead_src, lead["url"]) or ev["id"] in ctx.editorial.kill:
         return None, "editorial"
     news = [m for m in members if not (ctx.src(m["source_id"]) and ctx.src(m["source_id"]).is_signal)]
@@ -176,11 +179,15 @@ def event_candidate(ctx, ev):
         lobsters_points=social.get("lobsters") or 0, on_reddit=reddit_top(social.get("reddit")),
         unvetted=lead["source_id"] == sources_mod.WEB_ID,
         keys=frozenset().union(*(entity_keys(json.loads(m["entities"] or "{}")) for m in members)))
+    credited = credited_member(ctx, headline, lead, news) if ai_text else None
+    if credited is not None:
+        credited = (credited, ctx.pub(credited))
     c.data = {"lead": lead, "members": members, "publishers": publishers, "headline": headline, "summary": summary,
               "hn": hn, "parent_id": ev["parent_id"], "title_words": _words(lead["title"]),
               "first_seen_at": min(m["first_seen_at"] for m in members),
               "first_report_at": first_report(ctx.db, ev["id"], members),
               "images": image_sources(ctx, lead, members), "orgs": primary_orgs(members),
+              "credited": credited,
               # An owner's override replaces the card's text, so the alert written for the old text is dropped.
               "people": people(members),
               # No publisher's date at all (none in the feed, none on the page): the lead is dated by when the
@@ -189,6 +196,34 @@ def event_candidate(ctx, ev):
               "notif_title": None if over else _col(ev, "notif_title"),
               "notif_line": None if over else ev["notif_line"]}
     return c, None
+
+
+CREDIT = re.compile(r"^([A-Z][\w&.' -]{1,38}):\s")
+CREDIT_ALIASES = {"wsj": "wall street journal", "ft": "financial times", "nyt": "new york times",
+                  "scmp": "south china morning post", "bi": "business insider"}
+
+
+def credited_member(ctx, headline, lead, news):
+    """The member a headline credits when that is not the lead: "Reuters: SK Hynix plans ~$1.05B to support Korean
+    suppliers" sat on a card whose link and source were the event's Bloomberg lead, an article without that
+    figure. The card's link and source follow the credit, so tapping it opens the report the headline is from.
+    None when the headline credits nobody, the lead, or an outlet that is not a member."""
+    m = CREDIT.match(headline or "")
+    if not m:
+        return None
+    name = m.group(1).strip().lower()
+    names = {name, CREDIT_ALIASES.get(name, name)}
+
+    def norm(pub):
+        pub = (pub or "").lower()
+        return {pub, pub[4:] if pub.startswith("the ") else pub}
+    if norm(ctx.pub(lead)) & names:
+        return None
+    for mem in news:
+        if mem["url_canonical"] != lead["url_canonical"] and norm(ctx.pub(mem)) & names \
+                and not prefilter.no_path(mem["url"]):
+            return mem
+    return None
 
 
 def first_report(db, eid, members):
@@ -582,13 +617,14 @@ def article(c, category, top_rank, image_url):
     # 1.2 sorts by publishedAt: a story with a material update (the IPO that was "upcoming" has listed) carries the
     # update's time, as its rewritten card reports the update.
     when = max(c.published_at, c.material_at) if c.material_at else c.published_at
-    a = {"url": clean_url(lead["url_canonical"]), "title": title, "excerpt": body, "content": body,
-         "source": c.lead_publisher, "category": category, "publishedAt": iso(when)}
+    shown, source = c.data.get("credited") or (lead, c.lead_publisher)
+    a = {"url": clean_url(shown["url_canonical"]), "title": title, "excerpt": body, "content": body,
+         "source": source, "category": category, "publishedAt": iso(when)}
     if image_url:
         a["image"] = clean_url(image_url)
     if c.hn_points:
         a["points"] = int(c.hn_points)
-    also = [p for p in c.data["publishers"] if p != c.lead_publisher]
+    also = [p for p in c.data["publishers"] if p != source]
     if also:
         a["alsoCoveredBy"] = also
     if top_rank is not None:
@@ -682,7 +718,7 @@ def notification_candidates(tabs, now):
                         "onTechmeme": bool(c.on_techmeme), "hnPoints": int(c.hn_points or 0),
                         "onReddit": bool(c.on_reddit), "type": c.type,
                         "ageH": round(c.age_eff(now), 1), "title": note["title"], "body": note["body"],
-                        "headline": c.data.get("headline"), "url": clean_url(c.data["lead"]["url_canonical"])})
+                        "headline": c.data.get("headline"), "url": clean_url((c.data.get("credited") or (c.data["lead"],))[0]["url_canonical"])})
     out.sort(key=lambda n: (-n["score"], n["eventId"]))
     return out[:NOTIFY_LIST]
 
@@ -722,6 +758,7 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
         for c in live:
             row = pictures.get(c.id)
             c.image_hash = row["dhash"] if row else None
+            c.no_picture = row is None
     stats = {}
     tabs = rank.build_tabs(live, now, degraded, dedup, stats, tab_specs, ruled_apart)
     tabs = title_duplicates(tabs)

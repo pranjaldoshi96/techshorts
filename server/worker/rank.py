@@ -85,7 +85,7 @@ DEV_SECURITY = re.compile(
     r"supply[- ]chain|github|gitlab|bitbucket|ci/cd|repos?|repositor\w+|source code|codebase|apis?|api keys?|sdks?|"
     r"kubernetes|docker|containers?|linux|kernel|open[- ]source|developers?|coding|devops|post-?mortem|"
     r"backdoor\w*|firmware|supabase|firebase|databases?|vibe[- ]cod\w+|app builders?|coding agents?|"
-    r"prompt injection)\b", re.I)
+    r"prompt injection|xss|rce|flaws?|bugs?|hijack\w*|browser extensions?|dns|domains?)\b", re.I)
 # Words that make a breach developer news only when it is not, at heart, a leak of people's records: the third
 # review's Dev tab carried "TSMC confirms employee data leak tied to cloud service provider" (an HR data leak,
 # matched on "cloud"), one of its three cards under a day old.
@@ -98,6 +98,13 @@ PEOPLE_DATA = re.compile(
 DEV_SECURITY_BODY = re.compile(
     r"\b(vulnerabilit\w+|cve-[\d-]+|zero-days?|npm|pypi|crates\.io|supply[- ]chain|github|gitlab|repositor\w+|"
     r"source code|api keys?|sdks?|kubernetes|docker|open[- ]source|supabase|firebase|prompt injection)\b", re.I)
+# The AI tab takes a story whose main topic is not AI only when its card says something about AI: the model adds
+# "ai" to much that is not (a browser extension's XSS fix was [security, ai, consumer]).
+AI_TEXT = re.compile(
+    r"\b(ai|a\.i\.|artificial intelligence|llms?|gpt[-\w.]*|chatgpt|chatbots?|agents?|agentic|machine learning|"
+    r"neural|models?|openai|anthropic|claude|gemini|copilot|deepmind|mistral|llama|qwen|deepseek|grok|xai|nvidia|"
+    r"genai|generative|inference|training|hugging face|perplexity|cursor|gpus?|data cent(?:er|re)s?|robots?|"
+    r"robotaxis?|autonomous|self-driving|deepfakes?|superintelligence|agi)\b", re.I)
 # Startups is for startups: a big company buying one, or a big company's earnings, is not startup news unless the
 # model put startups_funding first ("Samsung in talks to acquire Modine Manufacturing" was [bigtech, startups_funding]).
 # Nor is a breach or outage that merely involves a startup ("Lovable apps expose passport details", topics
@@ -106,6 +113,10 @@ STARTUP_STRICT_TYPES = ("acquisition", "earnings", "security_incident")
 # A card with no validated text is a raw publisher title and a feed excerpt. Outside an LLM outage it never takes a
 # Top rank (the 2026-11 shadow led Top with a Verge column whose write failed, excerpt "...follow Terrence O'Brien.
 # Opt in for The Stepback here") and scores at most this importance elsewhere, so a written card on the same story wins.
+# A card with a drawn cover in place of a photo ranks a little lower, and never opens a tab while a card with a
+# real picture could (the first screen a reader sees): on 2026-11-16 the number 1 story of Top was a grey
+# gradient, since qwen.ai's page has no usable picture and Bloomberg refuses the bot.
+NO_PICTURE = 0.92
 UNWRITTEN_IMPORTANCE = 5
 # Fresh tier-1 hard news at importance 5 may enter Top within this many hours of publication (the spec's minimum of
 # 6 left a Sunday Top with 2 cards under 12 h while tier-1 outlets ran ordinary but current news).
@@ -238,6 +249,9 @@ class Candidate:
     # The lead is an article imported from a Hacker News or Lobsters link under the catch-all source: nobody
     # chose the site (publish_v1.event_candidate).
     unvetted: bool = False
+    # No source picture could be had (the outlet refuses the bot, or its page has none): the card shows a drawn
+    # cover. Set by publish_v1.build once pictures are resolved.
+    no_picture: bool = False
     boost: float = 1.0              # editorial boost / bury multiplier
     pin: frozenset = frozenset()    # tabs this event is pinned to the head of
     data: dict = field(default_factory=dict)    # whatever publish_v1 needs later (lead row, text, members)
@@ -293,6 +307,8 @@ def cand_score(c, tab, now, degraded=False):
     age = c.age_eff(now)
     base = score(imp, c.n_publishers, c.on_techmeme, c.hn_points, c.authority, 0, tab.tau_h, spice,
                  c.lobsters_points, c.on_reddit) * c.boost
+    if c.no_picture:
+        base *= NO_PICTURE
     return base * max(math.exp(-age / tab.tau_h), STAY_TAIL * math.exp(-age / (tab.tau_h * staying_power(c))))
 
 
@@ -405,6 +421,15 @@ def dev_security(c):
     return bool(DEV_SECURITY_BODY.search(c.data.get("summary") or ""))
 
 
+def big_company_story(c):
+    """A big company's own news that merely touches startups: "WSJ: Nvidia interim CEO Colette Kress expected to
+    rein in deals" (topics [ai, bigtech, startups_funding], type news) was filed under Startups. A round, an
+    acquisition and commentary (an analysis of Anthropic's IPO) stay."""
+    topics = list(c.topics)
+    return (c.type in ("news", "policy", "launch", "earnings") and "bigtech" in topics
+            and topics.index("bigtech") < topics.index("startups_funding"))
+
+
 def eligible(c, tab, now, degraded=False):
     """None when `c` may appear in `tab`, else the first failing rule (kept for health.json and tests).
     `degraded` is an LLM-outage edition, the only time an unwritten card may take a Top rank."""
@@ -447,10 +472,11 @@ def eligible(c, tab, now, degraded=False):
     if c.relevance < tab.min_relevance:
         return "relevance"
     topics = set(c.topics)
-    if tab.id == "ai" and "ai" not in topics:
+    if tab.id == "ai" and ("ai" not in topics or (c.topics[0] != "ai" and c.ai_text and not AI_TEXT.search(
+            f"{c.title} {c.data.get('summary') or ''}"))):
         return "topic"
     if tab.id == "startups" and ("startups_funding" not in topics or (
-            c.type in STARTUP_STRICT_TYPES and c.topics[0] != "startups_funding")):
+            c.type in STARTUP_STRICT_TYPES and c.topics[0] != "startups_funding") or big_company_story(c)):
         return "topic"
     if tab.id == "india" and not (c.region == "in" or "india" in topics):
         return "topic"
@@ -461,7 +487,13 @@ def eligible(c, tab, now, degraded=False):
     if tab.id == "dev":
         dev = ("dev_tools" in topics and c.type not in NOT_DEV_TYPES
                and (c.topics[0] == "dev_tools" or c.type in ("release_notes", "tutorial") or c.lead_dev))
-        sec = "security" in topics and c.type == "security_incident" and dev_security(c)
+        # ... typed security_incident, or plain news whose main topic is security ("uBlock Origin fixes one-click
+        # flaw enabling cross-site code", topics [security, ai, consumer], was filed under AI).
+        # For the latter the headline itself must name a developer term; the dev_tools tag is not enough (SpaceX
+        # Starship was [security, dev_tools, bigtech]).
+        sec = "security" in topics and (
+            (c.type == "security_incident" and dev_security(c))
+            or (c.type == "news" and c.topics[0] == "security" and bool(DEV_SECURITY.search(c.title or ""))))
         if not (dev or sec):
             return "topic"
         if c.type in LABELLED and c.importance < DEV_LABELLED_MIN:
@@ -569,6 +601,8 @@ def assemble(cands, tab, now, degraded=False, dup_threshold=None, stats=None, ru
             return "storyline_stale"
         if tab.id == "dev" and c.type == "tutorial" and tutorials >= TUTORIAL_PER_10 * (1 + len(out) // 10):
             return "tutorial_cap"
+        if not out and c.no_picture and not relax:
+            return "no_picture"
         if len(out) < 10 and c.image_hash and any(
                 o.image_hash and hamming(c.image_hash, o.image_hash) <= IMAGE_HAMMING for o, _ in out[:10]):
             return "image_duplicate"
