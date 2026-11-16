@@ -1,3 +1,5 @@
 # The push service's own venv (/opt/techgist-push/venv). The registry and the rules are standard library only.
 httpx[http2]>=0.27
 PyJWT[crypto]>=2.8
+# Old zone names (Asia/Calcutta, US/Pacific) that iOS still sends; Ubuntu keeps them in a package that is not installed.
+tzdata>=2024.1

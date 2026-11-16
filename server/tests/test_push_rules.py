@@ -144,3 +144,12 @@ def test_a_story_that_was_out_when_the_device_registered_is_never_sent_or_held()
     # Without a queue time the news date stands in.
     assert rules.decide(NOON, IST, [story()], History(registered_at=NOON), R).action == "none"
     assert rules.decide(NOON, IST, [story()], History(registered_at=NOON - timedelta(hours=1)), R).action == "send"
+
+
+def test_old_zone_names_are_not_utc():
+    """iOS still reports names like Asia/Calcutta; quiet hours must follow the phone, not UTC."""
+    from datetime import datetime, timezone
+    from push import rules
+    at = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
+    for name in ("Asia/Calcutta", "Asia/Katmandu", "Europe/Kiev", "US/Pacific"):
+        assert at.astimezone(rules.zone(name)).utcoffset().total_seconds() != 0, name
