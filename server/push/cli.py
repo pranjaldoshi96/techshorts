@@ -17,7 +17,7 @@ import sys
 
 from . import config
 from .apns import Apns, story_payload
-from .sender import Edition, EngineDB, Sender, utcnow
+from .sender import Edition, EngineDB, Sender, alert_text, utcnow
 from .store import Store, short
 
 
@@ -75,11 +75,10 @@ def main(argv=None):
         if a.event:
             # The story as a real alert carries it (text, link and picture from the edition), outside the rules.
             art = Edition(cfg["paths"]["edition"]).articles().get(a.event)
-            note = (art or {}).get("notification") or {}
-            if not note.get("title") or not note.get("body"):
+            title, body = alert_text({"title": "", "body": ""}, art)
+            if not title or not body:
                 sys.exit("that event is not in the edition, or has no notification text")
-            payload = story_payload({"event_id": a.event, "title": note["title"], "body": note["body"]}, art,
-                                    cfg["apns"]["sound"])
+            payload = story_payload({"event_id": a.event, "title": title, "body": body}, art, cfg["apns"]["sound"])
         else:
             title, body = a.text if len(a.text) == 2 else ("Techgist test", "A test notification from the push server.")
             payload = {"aps": {"alert": {"title": title, "body": body}, "sound": cfg["apns"]["sound"],

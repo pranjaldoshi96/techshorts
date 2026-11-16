@@ -12,6 +12,7 @@ DEFAULTS = {
         "port": 8787,
         "max_body": 2048,
         "ip_per_min": 60,           # requests per client address per minute
+        "ip_post_per_min": 10,      # ... of which registrations (each unproven token costs APNs calls later)
         "token_per_min": 30,        # requests per device token per minute (spec 6.5)
         "max_devices": 500000,
     },
@@ -27,6 +28,11 @@ DEFAULTS = {
         "attempts": 3,              # per send, on 429 / 5xx / a network error
         "backoff_s": [0.5, 2, 5],
         "concurrency": 8,
+        # A round of sends stops early, and the rest wait for the next loop, when APNs is not answering (this many
+        # sends in a row ended in a retry or a refused key) or when the round has run this long. While APNs is
+        # down a loop then costs one batch of `concurrency` devices, however many are registered.
+        "breaker_failures": 8,
+        "round_max_s": 120,
     },
     "rules": {
         "min_spice": 7,

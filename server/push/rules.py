@@ -3,6 +3,8 @@
 The rules (limits in config.py `rules`; spec 6.2 where it has a number):
   - only stories with spice >= min_spice, at most max_age_h old by their news date;
   - never a story the device already got;
+  - never a story that was already out when the device registered: the reader was looking at it in the app when
+    they allowed alerts (and a reinstalled app, which has a new token and no history, is not sent old news);
   - nothing in the device's quiet hours; the best story seen during them is held (one per device, replaced when a
     better one comes) and sent first when they end, even if it is older than max_age_h by then;
   - at least min_gap_min between two alerts;
@@ -24,6 +26,7 @@ class Story:
     spice: int
     importance: int
     news_at: datetime           # the story's own date, UTC
+    known_at: datetime = None   # when it was queued for an alert, about when the edition first carried it
 
 
 @dataclass
@@ -32,6 +35,7 @@ class History:
     sent_local_dates: list = field(default_factory=list)   # the local date of each alert sent, as "YYYY-MM-DD"
     last_sent_at: datetime = None
     held: str = None                            # event id held for the end of quiet hours
+    registered_at: datetime = None              # when the device first registered this token
 
 
 @dataclass
@@ -75,12 +79,18 @@ def _key(s):
     return (s.score, s.event_id)
 
 
+def _out_before(s, hist):
+    """The story was already out when this device registered."""
+    return hist.registered_at is not None and (s.known_at or s.news_at) <= hist.registered_at
+
+
 def decide(now, tz, stories, hist, rules):
     """`stories` are the ones the service holds that are released for sending (not killed, past the owner hold)."""
     loc = local(now, tz)
-    fresh = [s for s in stories if s.event_id not in hist.got and s.spice >= rules["min_spice"]
+    stories = [s for s in stories if s.event_id not in hist.got and not _out_before(s, hist)]
+    fresh = [s for s in stories if s.spice >= rules["min_spice"]
              and timedelta(minutes=-5) <= now - s.news_at <= timedelta(hours=rules["max_age_h"])]
-    held = next((s for s in stories if s.event_id == hist.held and s.event_id not in hist.got
+    held = next((s for s in stories if s.event_id == hist.held
                  and now - s.news_at <= timedelta(hours=rules["held_max_age_h"])), None)
     best = max(fresh, key=_key, default=None)
     if in_quiet(loc, rules):

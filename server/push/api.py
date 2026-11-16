@@ -2,7 +2,7 @@
 
   POST   /v1/devices            {"token", "env", "tz", "locale", "appVersion", "topics"?}  -> {"ok": true}
   DELETE /v1/devices/<token>    opt out; the same answer whether or not the token was known
-  GET    /v1/health             {"ok": true} while the sender loop is alive, 503 otherwise
+  GET    /v1/health             {"ok": true} while the sender loop is alive, 503 otherwise (HEAD: the same, no body)
 
 There is no way to list or look up devices over HTTP. Answers never carry a token back, and the request log shows
 a token's first six characters at most.
@@ -90,6 +90,7 @@ class App:
         self.open_store = open_store
         self.alive, self.clock = alive, clock
         self.by_ip = RateLimit(self.cfg["ip_per_min"])
+        self.by_ip_post = RateLimit(self.cfg["ip_post_per_min"])
         self.by_token = RateLimit(self.cfg["token_per_min"])
         self.local = threading.local()
 
@@ -100,11 +101,15 @@ class App:
 
     def handle(self, method, path, body, ip):
         path = path.split("?", 1)[0]
-        if method == "GET" and path == "/v1/health":
+        if method in ("GET", "HEAD") and path == "/v1/health":
             return (200, {"ok": True}) if self.alive() else (503, {"ok": False})
         if not self.by_ip.allow(ip):
             return 429, {"ok": False, "error": "rate_limited"}
         if method == "POST" and path == "/v1/devices":
+            # Anyone can register any well-formed token, and each one costs APNs calls at the next story: an
+            # address gets few registrations a minute (an app registers once per launch at most).
+            if not self.by_ip_post.allow(ip):
+                return 429, {"ok": False, "error": "rate_limited"}
             try:
                 dev = validate(json.loads(body.decode("utf-8")))
             except Invalid as e:
@@ -152,7 +157,8 @@ def make_handler(app, log=print):
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
-            self.wfile.write(data)
+            if self.command != "HEAD":
+                self.wfile.write(data)
             if self.path != "/v1/health" or status != 200:
                 log(f"api {self.command} {masked(self.path)} {status}")
 
@@ -172,7 +178,7 @@ def make_handler(app, log=print):
                 status, obj = 500, {"ok": False, "error": "server"}
             self._answer(status, obj)
 
-        do_GET = do_POST = do_DELETE = do_PUT = do_PATCH = _do
+        do_GET = do_HEAD = do_POST = do_DELETE = do_PUT = do_PATCH = _do
 
         def log_message(self, *args):       # the default log line carries the full path, token included
             pass

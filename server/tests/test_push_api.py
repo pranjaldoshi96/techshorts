@@ -153,6 +153,8 @@ def test_over_http_on_localhost_with_size_limit_and_masked_log(tmp_path):
         assert e.value.code == 413
         with urllib.request.urlopen(base + "/v1/health", timeout=5) as r:
             assert json.loads(r.read()) == {"ok": True}
+        with urllib.request.urlopen(urllib.request.Request(base + "/v1/health", method="HEAD"), timeout=5) as r:
+            assert r.status == 200 and r.read() == b"" and r.headers["Content-Type"] == "application/json"
     finally:
         httpd.shutdown()
     assert lines and all(TOKEN not in line and TOKEN[:7] not in line for line in lines)
@@ -183,3 +185,42 @@ def test_two_connections_write_at_once(tmp_path):
     [t.start() for t in threads]
     [t.join() for t in threads]
     assert Store(path).device_count() == 80
+
+
+def test_registrations_from_one_address_are_limited_tighter_than_other_requests(app):
+    n = app.cfg["ip_post_per_min"]
+    assert n <= 10 < app.cfg["ip_per_min"]
+    codes = [app.handle("POST", "/v1/devices", body(token=f"{i:064x}"), "7.7.7.7")[0] for i in range(n + 1)]
+    assert codes[:n] == [200] * n and codes[n] == 429
+    assert app.store().device_count() == n                              # the refused one was not stored
+    assert app.handle("DELETE", "/v1/devices/" + f"{0:064x}", b"", "7.7.7.7")[0] == 200     # opting out still works
+    assert app.handle("POST", "/v1/devices", body(), "7.7.7.8")[0] == 200                   # another address is fine
+
+
+def test_head_on_health_answers_like_get_and_elsewhere_is_refused(app):
+    assert app.handle("HEAD", "/v1/health", b"", "1.2.3.4") == (200, {"ok": True})
+    assert app.handle("HEAD", "/v1/devices", b"", "1.2.3.4")[0] == 405
+    assert app.handle("HEAD", "/", b"", "1.2.3.4")[0] == 404
+
+
+def test_the_nightly_backup_is_a_whole_checked_copy_and_keeps_seven(tmp_path):
+    import os
+    import sqlite3
+    from push import backup
+    cfg = config.load(str(tmp_path))
+    live = Store(cfg["paths"]["push_db"])
+    live.register(TOKEN, "production", "Asia/Kolkata", "en_IN", "2.0", None, NOW)
+    night = tmp_path / "backups" / "nightly"
+    night.mkdir(parents=True)
+    (night / "state-20261101T000000Z.db").write_text("the engine's; not ours to rotate")
+    for day in range(9):
+        assert backup.main(str(tmp_path), now=1794000000 + 86400 * day) == 0
+    ours = sorted(n for n in os.listdir(night) if n.startswith("push-"))
+    assert len(ours) == 7 and (night / "state-20261101T000000Z.db").exists()
+    assert sorted(os.listdir(night)) == sorted(ours + ["state-20261101T000000Z.db"])     # nothing half-made left
+    c = sqlite3.connect(str(night / ours[-1]))
+    assert [r[0] for r in c.execute("SELECT token FROM devices")] == [TOKEN]
+    assert os.stat(night / ours[-1]).st_mode & 0o777 == 0o640
+    # No push.db to copy: exit 1 for the unit's OnFailure, and nothing written.
+    assert backup.main(str(tmp_path / "empty")) == 1
+    assert os.listdir(tmp_path / "empty" / "backups" / "nightly") == []

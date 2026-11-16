@@ -128,3 +128,19 @@ def test_time_zones_iana_fixed_offset_and_unknown():
     assert rules.local(now, "Not/AZone").hour == 12
     # Daylight saving: Los Angeles is UTC-8 in November and UTC-7 in July.
     assert rules.local(datetime(2026, 7, 1, 12, tzinfo=timezone.utc), "America/Los_Angeles").hour == 5
+
+
+def test_a_story_that_was_out_when_the_device_registered_is_never_sent_or_held():
+    reg = NOON - timedelta(minutes=10)
+    before = Story("ev_before", 0.9, 9, 9, NOON - timedelta(minutes=30), NOON - timedelta(minutes=20))
+    after = Story("ev_after", 0.1, 8, 7, NOON - timedelta(minutes=30), NOON - timedelta(minutes=5))
+    d = rules.decide(NOON, IST, [before, after], History(registered_at=reg), R)
+    assert (d.action, d.event_id) == ("send", "ev_after")       # by when it came out here, not its news date
+    assert rules.decide(NOON, IST, [before], History(registered_at=reg), R).action == "none"
+    assert rules.decide(NOON, IST, [before], History(registered_at=reg - timedelta(hours=1)), R).action == "send"
+    night = utc(18)                                             # 23:30 IST
+    old = Story("ev_old", 0.9, 9, 9, night - timedelta(minutes=30), night - timedelta(minutes=20))
+    assert rules.decide(night, IST, [old], History(registered_at=night - timedelta(minutes=1)), R).action == "none"
+    # Without a queue time the news date stands in.
+    assert rules.decide(NOON, IST, [story()], History(registered_at=NOON), R).action == "none"
+    assert rules.decide(NOON, IST, [story()], History(registered_at=NOON - timedelta(hours=1)), R).action == "send"

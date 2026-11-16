@@ -8,6 +8,9 @@ One tick:
   deliver   for every device, rules.decide() picks at most one story; it is sent with the queue row's collapse id
             and recorded per device as soon as APNs answers. A crash between "APNs took it" and the record sends
             it once more with the same apns-collapse-id, which replaces the first on the phone.
+            The alert's words are the edition's at the moment of sending (the card's `notification`), so a card
+            the engine corrected after it was queued is never announced with its old text.
+            A round stops early when APNs is not answering or the round has run long; the rest go next loop.
   relay     operational alerts posted to the owner's ntfy topic are also sent to devices marked as the owner's.
   health    counts into push_health.json.
 
@@ -132,6 +135,18 @@ class Edition:
         return self.by_id
 
 
+def alert_text(alert, article):
+    """(title, body) for a story's alert: the edition card's notification text as it stands now, so a card the
+    engine corrected after the story was queued is announced with the corrected words. The queue row's text is
+    used only when the card carries none. Never a mix of the two."""
+    note = (article or {}).get("notification")
+    if isinstance(note, dict):
+        title, body = note.get("title"), note.get("body")
+        if isinstance(title, str) and isinstance(body, str) and title.strip() and body.strip():
+            return title, body
+    return alert["title"], alert["body"]
+
+
 def _news_at(article):
     try:
         return from_iso(article["publishedAt"][:19] + "Z")
@@ -140,7 +155,8 @@ def _news_at(article):
 
 
 class Sender:
-    def __init__(self, cfg, store, apns, alertq=None, engine=None, edition=None, ntfy=None, log=print):
+    def __init__(self, cfg, store, apns, alertq=None, engine=None, edition=None, ntfy=None, log=print,
+                 heartbeat=None, mono=time.monotonic):
         self.cfg, self.store, self.apns, self.alertq = cfg, store, apns, alertq
         self.engine = engine or (lambda: EngineDB(cfg["paths"]["engine_db"]))
         self.edition = edition or Edition(cfg["paths"]["edition"])
@@ -151,7 +167,15 @@ class Sender:
         self.last_prune = None
         self.dry_loops = 0
         self.last_error = None
+        self.busy_loops = 0
+        self.heartbeat, self.mono = heartbeat, mono
         self.beat = time.monotonic()
+
+    def _alive(self):
+        """Called between batches of a long round: the loop is working, for systemd's watchdog and /v1/health."""
+        self.beat = time.monotonic()
+        if self.heartbeat is not None:
+            self.heartbeat()
 
     # 1. Engine queue -> push.db
 
@@ -167,8 +191,10 @@ class Sender:
         try:
             self.alertq.ensure(db)
             for alert in self.alertq.claim(db, now, limit=20):
+                row = db.one("SELECT queued_at FROM alert_queue WHERE id = ?", alert.id)
                 new = self.store.add_alert(alert.event_id, alert.collapse_id, alert.title, alert.body, alert.score,
-                                           alert.payload, now, self.cfg["rules"]["owner_hold_s"])
+                                           alert.payload, now, self.cfg["rules"]["owner_hold_s"],
+                                           queued_at=row["queued_at"] if row else None)
                 self.alertq.mark_sent(db, alert.id, now)
                 taken += 1
                 self.log(f"intake: {alert.event_id} {'taken' if new else 'already held (redelivery)'}")
@@ -177,9 +203,13 @@ class Sender:
                                    f"{alert.title}\n{alert.body}\nStop it: /opt/techgist-push/pushctl kill {alert.event_id}",
                                    priority="low", tags=HOLD_TAG, log=self.log)
             db.commit()
+            self.busy_loops = 0
         except sqlite3.OperationalError as e:
-            # The worker holds the write lock for the length of a tick; the row stays where it was.
-            self.log(f"intake: engine state busy ({e}); next loop")
+            # The worker holds the write lock while it writes a tick; the row stays where it was. Normal for a
+            # loop or two, so it is only worth a line once it has lasted a minute.
+            self.busy_loops += 1
+            if self.busy_loops % 4 == 0:
+                self.log(f"intake: engine state busy for {self.busy_loops} loops ({e})")
         finally:
             db.close()
         return taken
@@ -200,13 +230,17 @@ class Sender:
         for a in self.store.released(now, r["held_max_age_h"] + r["max_age_h"]):
             art = arts.get(a["event_id"])
             at = _news_at(art) if art else None
-            if at is None or not a["title"] or not a["body"]:
+            if at is None:
+                continue
+            title, body = alert_text(a, art)
+            if not title or not body:
                 continue
             payload = json.loads(a["payload"] or "{}")
             spice = art.get("spice") if isinstance(art.get("spice"), int) else payload.get("spice", 0)
+            known = from_iso(a["queued_at"] or a["received_at"])
             out.append(rules.Story(a["event_id"], a["score"] or 0.0, int(spice or 0),
-                                   int(payload.get("importance") or 0), at))
-            rows[a["event_id"]] = (dict(a, payload=payload), art)
+                                   int(payload.get("importance") or 0), at, known))
+            rows[a["event_id"]] = (dict(a, payload=payload, title=title, body=body), art)
         return out, rows
 
     def deliver(self, now):
@@ -218,7 +252,7 @@ class Sender:
         hist_all = self.store.history(now)
         jobs = []
         for d in self.store.devices():
-            h = rules.History(held=d["held_event"])
+            h = rules.History(held=d["held_event"], registered_at=from_iso(d["created_at"]))
             for event_id, status, at, local_date in hist_all.get(d["dkey"], ()):
                 h.got.add(event_id)
                 if status == "sent":
@@ -243,9 +277,23 @@ class Sender:
             return job, self.apns.send(d["token"], d["env"], payload, collapse_id=alert["collapse_id"],
                                        expiration=expiration)
 
-        for (d, event_id), res in self.pool.map(one, jobs):
-            tally[res.outcome] = tally.get(res.outcome, 0) + 1
-            self._settle(d, event_id, res, now)
+        # In batches, so that a round can stop: with APNs unreachable every send takes its full timeouts and
+        # retries, and a round over all devices would outlast the unit's watchdog.
+        a = self.cfg["apns"]
+        batch, started, streak = max(1, a["concurrency"]), self.mono(), 0
+        for i in range(0, len(jobs), batch):
+            for (d, event_id), res in self.pool.map(one, jobs[i:i + batch]):
+                tally[res.outcome] = tally.get(res.outcome, 0) + 1
+                self._settle(d, event_id, res, now)
+                streak = streak + 1 if res.outcome in ("retry", "auth") else 0
+            self._alive()
+            left = len(jobs) - (i + batch)
+            if left > 0 and (streak >= a["breaker_failures"] or self.mono() - started >= a["round_max_s"]):
+                why = (f"APNs is not answering ({streak} sends in a row failed)" if streak >= a["breaker_failures"]
+                       else f"the round has run {a['round_max_s']} s")
+                self.log(f"deliver: stopped, {why}; {left} sends wait for the next loop")
+                tally["deferred"] = left
+                break
         if jobs:
             self.log("deliver: " + ", ".join(f"{k}={v}" for k, v in sorted(tally.items())))
             ok = tally.get("ok", 0)
@@ -317,6 +365,7 @@ class Sender:
                                          expiration=int(now.timestamp()) + 86400)
                     self._settle(d, None, res, now)
                     sent += res.outcome == "ok"
+                    self._alive()
             self.store.put("ntfy_since", m["id"])
         return sent
 

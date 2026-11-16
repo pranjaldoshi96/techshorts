@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS alerts (
   payload TEXT,
   received_at TEXT NOT NULL,
   not_before TEXT NOT NULL,
-  killed INTEGER NOT NULL DEFAULT 0
+  killed INTEGER NOT NULL DEFAULT 0,
+  queued_at TEXT                 -- when the engine queued it (about when the edition first carried it)
 );
 CREATE TABLE IF NOT EXISTS deliveries (
   dkey TEXT NOT NULL,
@@ -77,6 +78,11 @@ class Store:
         self.conn.execute("PRAGMA synchronous=FULL")
         for stmt in SCHEMA.split(";"):
             self.conn.execute(stmt)
+        if "queued_at" not in {r["name"] for r in self.q("PRAGMA table_info(alerts)")}:
+            try:
+                self.conn.execute("ALTER TABLE alerts ADD COLUMN queued_at TEXT")     # a push.db from before it
+            except sqlite3.OperationalError:
+                pass                                                              # another thread added it first
         self.conn.commit()
 
     def close(self):
@@ -144,14 +150,14 @@ class Store:
 
     # Stories taken from the engine's queue
 
-    def add_alert(self, event_id, collapse_id, title, body, score, payload, now, hold_s):
+    def add_alert(self, event_id, collapse_id, title, body, score, payload, now, hold_s, queued_at=None):
         """True when the story is new here. A second claim of the same queue row (a crash between this and the
         engine's mark_sent) changes nothing."""
         cur = self.conn.execute(
             "INSERT OR IGNORE INTO alerts (event_id, collapse_id, title, body, score, payload, received_at,"
-            " not_before) VALUES (?,?,?,?,?,?,?,?)",
+            " not_before, queued_at) VALUES (?,?,?,?,?,?,?,?,?)",
             (event_id, collapse_id, title or "", body or "", score, json.dumps(payload or {}), iso(now),
-             iso(now + timedelta(seconds=hold_s))))
+             iso(now + timedelta(seconds=hold_s)), queued_at))
         self.conn.commit()
         return cur.rowcount == 1
 

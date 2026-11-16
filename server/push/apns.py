@@ -121,7 +121,8 @@ class Apns:
 
 
 def story_payload(alert, article, sound):
-    """The PUSH CONTRACT payload. Title and body are the card's notification text, unchanged."""
+    """The PUSH CONTRACT payload. Title and body are the card's notification text, unchanged (the caller takes
+    them from the edition at send time: sender.alert_text)."""
     p = {"aps": {"alert": {"title": alert["title"], "body": alert["body"]}, "sound": sound, "mutable-content": 1,
                  "thread-id": alert["event_id"]},
          "eventId": alert["event_id"]}

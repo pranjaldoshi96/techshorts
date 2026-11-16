@@ -2,7 +2,8 @@
 
   python -m push.main            (PYTHONPATH holds this directory's parent and the engine's code, for worker.alertq)
 
-It tells systemd it is alive after every tick (WatchdogSec in the unit); a tick that keeps failing ends the process
+It tells systemd it is alive after every tick and between the batches of a round of sends (WatchdogSec in the
+unit); a tick that keeps failing ends the process
 so systemd starts a clean one.
 """
 import os
@@ -43,7 +44,8 @@ def main():
         log("worker.alertq not importable: registry only, nothing is taken from the engine's queue")
     store = Store(cfg["paths"]["push_db"])
     ntfy = Ntfy(cfg)
-    sender = Sender(cfg, store, Apns(cfg["apns"]), alertq=alertq, ntfy=ntfy, log=log)
+    sender = Sender(cfg, store, Apns(cfg["apns"]), alertq=alertq, ntfy=ntfy, log=log,
+                    heartbeat=lambda: sd_notify("WATCHDOG=1"))
     api.serve(cfg, lambda: Store(cfg["paths"]["push_db"]), sender.alive, log)
     key_ok = os.access(cfg["apns"]["key_file"], os.R_OK)
     log(f"push service up on {cfg['api']['host']}:{cfg['api']['port']}; sending "

@@ -1,6 +1,7 @@
 #!/bin/bash
 # Copies server/push/ to /opt/techgist-push on the VPS and restarts techgist-push.service.
-#   server/push/deploy/deploy_push.sh            code, venv (when requirements changed), unit, restart
+#   server/push/deploy/deploy_push.sh            code, venv (when requirements changed), units (the service and
+#                                                the nightly push.db backup timer), restart
 #   server/push/deploy/deploy_push.sh --key      also copy the APNs key from this Mac (never displayed)
 #   server/push/deploy/deploy_push.sh --https    also run setup_https.sh there (nginx server block + certificate)
 # It never touches /opt/techgist, the worker, or any nginx file but its own.
@@ -36,9 +37,13 @@ if ! cmp -s $DEST/push/requirements.txt $DEST/venv/requirements.installed; then
     cp $DEST/push/requirements.txt $DEST/venv/requirements.installed
 fi
 $DEST/venv/bin/python -m compileall -q $DEST/push >/dev/null
-cmp -s $DEST/push/deploy/techgist-push.service /etc/systemd/system/techgist-push.service || {
-    install -m 644 $DEST/push/deploy/techgist-push.service /etc/systemd/system/ && systemctl daemon-reload; }
+changed=0
+for f in $DEST/push/deploy/techgist-push*.service $DEST/push/deploy/techgist-push*.timer; do
+    cmp -s \$f /etc/systemd/system/\$(basename \$f) || { install -m 644 \$f /etc/systemd/system/ && changed=1; }
+done
+[ \$changed = 1 ] && systemctl daemon-reload
 systemctl enable techgist-push >/dev/null 2>&1
+systemctl enable --now techgist-push-backup.timer >/dev/null 2>&1
 systemctl restart techgist-push
 sleep 3
 systemctl is-active techgist-push" </dev/null

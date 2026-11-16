@@ -1,0 +1,11 @@
+[Unit]
+Description=Techgist nightly push registry backup
+
+[Timer]
+OnCalendar=*-*-* 03:50:00 UTC
+RandomizedDelaySec=300
+# A backup missed while the machine was off is taken at the next boot.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
