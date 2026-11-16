@@ -74,7 +74,7 @@ In the Simulator, move through the feed by clicking and dragging upward, as a fi
 - **Payload:** `{"aps": {"alert": {"title", "body"}, "sound": "techgist.caf", "mutable-content": 1, "thread-id": eventId}, "eventId", "url", "image"}`. The extension attaches `image`; tapping the alert shows the story's card, found by `url` or `eventId`, loading the newer edition first when the story isn't in the one on screen.
 - **People who turned alerts on in 1.x** (where alerts were local and the policy said nothing went to a server) see a one-time notice on the first launch of 2.0: "Keep alerts on" registers, "Turn off alerts" turns the switch off. Nothing is sent before the answer; until then the app's own local alerts carry on. Turning alerts on in 2.0 counts as an answer (the offer and Settings both say alerts come from the server).
 - While the server is pushing to a device, the app's own background big-story alerts are off for it, so nobody gets the same story twice. The morning gist stays local.
-- The permission prompt only ever follows the in-app offer (after eight stories or the first save) or a switch in Settings; never at launch.
+- iOS asks for notification permission once, on the first launch; yes turns on the morning gist and big story alerts, and both can be changed in Settings. The reader picks the alert sound there too.
 - `env` is `sandbox` in Debug builds and `production` in Release builds.
 
 `scripts/make_chime.sh` regenerates the notification sound (`Techgist/techgist.caf`). It is synthesised from sine waves in the script; nothing is sampled.

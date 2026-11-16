@@ -226,6 +226,7 @@ struct SettingsView: View {
     @AppStorage(Keys.digestMinute) private var digestMinute = 8 * 60
     @AppStorage(Keys.breakingNews) private var breakingEnabled = false
     @AppStorage(Keys.readerMode) private var readerMode = true
+    @AppStorage(AlertSound.key) private var alertSound = AlertSound.flash.rawValue
     @State private var showDeniedAlert = false
     @State private var sampleSent = false
 
@@ -238,6 +239,16 @@ struct SettingsView: View {
                         DatePicker("Time", selection: timeBinding, displayedComponents: .hourAndMinute)
                     }
                     Toggle("Big story alerts", isOn: breakingBinding)
+                    if digestEnabled || breakingEnabled {
+                        Picker("Alert sound", selection: $alertSound) {
+                            ForEach(AlertSound.allCases) { Text($0.title).tag($0.rawValue) }
+                        }
+                        .onChange(of: alertSound) { _, new in
+                            // Let them hear it, and tell the server which one this phone wants.
+                            AlertSound(rawValue: new)?.preview()
+                            Task { await PushRegistration.sync() }
+                        }
+                    }
                     if digestEnabled || breakingEnabled, let story = store.topStory {
                         Button(sampleSent ? "Preview on its way" : "Preview an alert") {
                             sampleSent = true

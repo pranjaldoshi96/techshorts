@@ -61,7 +61,7 @@ SIXTY WORDS, THEN MOVE ON
 Each card has a clear headline and a short summary written by Techgist's AI from the publisher's own story and checked against it. Cards with an AI summary are labelled. Every card names its publisher and links to the original article.
 
 MADE FOR A QUICK READ
-• Swipe up for the next story; tap a card or swipe left to read it in full
+• Swipe up for the next story, sideways to change tab; tap a card to read it in full
 • The full story opens inside the app, in Reader view when the page supports it
 • See every outlet covering a story
 • Search today's stories and your saved ones
@@ -126,7 +126,7 @@ Notifications: the app asks for permission only after its own explanation screen
 
 Data: with Big story alerts on, the app sends the APNs device token, time zone, language/region and app version to our server, used only to deliver alerts and deleted when alerts are turned off. Nothing else leaves the device. This is declared in App Privacy (Identifiers > Device ID, App Functionality, not linked, not used for tracking), in the privacy manifest and in the privacy policy, which is also linked in the app under Settings > About.
 
-To try it: swipe up through stories; tap a chip (Top, AI, Startups, Dev, Reads) to change tabs; tap a card or swipe left to read the full story; tap the magnifying glass to search; tap the bookmark to save and the share icon to share a story as an image; the "..." button on a card shows full coverage, copy link and mute source. Settings (gear icon) has the notification switches, Reader view, muted sources, and the Privacy Policy and Support links. "Preview an alert" in Settings shows what an alert looks like 5 seconds later.
+To try it: swipe up through stories; swipe sideways or tap a chip (Top, AI, Startups, Dev, Reads) to change tabs; tap a card to read the full story; tap the magnifying glass to search; tap the bookmark to save and the share icon to share a story as an image; the "..." button on a card shows full coverage, copy link and mute source. Settings (gear icon) has the notification switches, Reader view, muted sources, and the Privacy Policy and Support links. "Preview an alert" in Settings shows what an alert looks like 5 seconds later.
 ```
 
 **Screenshots:** `AppStore/screenshots/2.0/` — 6.9" (1320×2868, the size App Store Connect asks for in the

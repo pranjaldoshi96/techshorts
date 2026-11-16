@@ -137,6 +137,7 @@ enum PushRegistration {
             "tz": TimeZone.current.identifier,
             "locale": localeTag(Locale.current.identifier),
             "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
+            "sound": AlertSound.current.rawValue,
         ]
     }
 

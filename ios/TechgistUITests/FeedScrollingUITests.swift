@@ -106,27 +106,6 @@ final class FeedScrollingUITests: FeedUITestCase {
         pageForward(3, tab: "after Saved")
     }
 
-    /// The alerts offer appears once the eighth card has been read; the feed must keep working behind and after it.
-    func testFeedScrollsAfterTheNotificationsOfferIsDismissed() {
-        launch(offerAlreadyAnswered: false)
-        let notNow = app.buttons["Not now"]
-        XCTAssertFalse(notNow.exists, "The offer must not appear at launch")
-        var steps = 0
-        while !notNow.exists, steps < 14 {
-            // A card counts as read after a second and a half on screen.
-            sleep(2)
-            if notNow.exists { break }
-            drag(fromY: 0.6, by: 90)
-            _ = settledCard()
-            steps += 1
-        }
-        XCTAssertTrue(notNow.waitForExistence(timeout: 5), "The offer never appeared")
-        XCTAssertGreaterThanOrEqual(steps, 7, "The offer appeared before eight stories were read")
-        notNow.tap()
-        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5))
-        pageForward(3, tab: "after the offer")
-    }
-
     /// People who turned big story alerts on in 1.x are told once that alerts now come from the server, and
     /// choose, before anything is sent. The feed works behind and after the notice.
     func testTheServerAlertsNoticeIsShownOnceAndTheFeedPagesAfterIt() {
@@ -170,16 +149,21 @@ final class FeedScrollingUITests: FeedUITestCase {
         pageForward(2, tab: "after a slow refresh")
     }
 
-    func testSwipingLeftOpensTheStoryAndASlantedSwipeDoesNot() {
+    func testSwipingSidewaysChangesTabAndASlantedSwipeDoesNot() {
         launch()
-        // Mostly downward, a little sideways: that is a scroll, not "read".
+        let top = settledCard()
+        // Mostly upward, a little sideways: that is the next story, not another tab.
         point(0.6, 0.55).press(forDuration: 0.05, thenDragTo: point(0.45, 0.4), withVelocity: 400, thenHoldForDuration: 0.2)
-        _ = settledCard()
-        XCTAssertTrue(feedIsInFront, "A slanted scroll opened the story")
+        XCTAssertNotEqual(settledCard(), top, "A slanted swipe did not move to the next story")
+        XCTAssertTrue(feedIsInFront)
+        drag(fromY: 0.5, by: -90)
+        XCTAssertEqual(settledCard(), top)
+        // Left: the next tab (AI). Right: back to Top, where the reader left it.
         point(0.8, 0.6).press(forDuration: 0.05, thenDragTo: point(0.25, 0.6), withVelocity: 800, thenHoldForDuration: 0.1)
-        XCTAssertTrue(waitForReader(), "Swiping left did not open the story")
-        closeReader()
-        pageForward(2, tab: "after swiping left to read")
+        XCTAssertNotEqual(settledCard(), top, "Swiping left did not change tab")
+        point(0.25, 0.6).press(forDuration: 0.05, thenDragTo: point(0.8, 0.6), withVelocity: 800, thenHoldForDuration: 0.1)
+        XCTAssertEqual(settledCard(), top, "Swiping right did not come back to the first tab")
+        pageForward(2, tab: "after swiping between tabs")
     }
 
     func testEndOfTabIsReachableAndBackToTopWorks() {

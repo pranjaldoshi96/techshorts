@@ -160,12 +160,4 @@ final class AccessibilityUITests: FeedUITestCase {
         XCTAssertTrue(app.navigationBars["Full coverage"].waitForExistence(timeout: 5))
         try audit("full coverage", inScrollingSheet: true)
     }
-
-    func testNotificationsOffer() throws {
-        launch(offerAlreadyAnswered: false)
-        // The first save is one of the two moments the offer appears.
-        app.buttons["Save story"].firstMatch.tap()
-        XCTAssertTrue(app.buttons["Not now"].waitForExistence(timeout: 5))
-        try audit("alerts offer", inScrollingSheet: true)
-    }
 }

@@ -15,8 +15,9 @@ class FeedUITestCase: XCTestCase {
         app.launchEnvironment["EDITION_URL"] = try Self.freshEdition().absoluteString
     }
 
-    func launch(offerAlreadyAnswered: Bool = true) {
-        if offerAlreadyAnswered { app.launchArguments += ["-notificationsOffered", "YES"] }
+    func launch() {
+        // Without this the app asks iOS for notification permission at launch, and the prompt covers the feed.
+        app.launchArguments += ["-notificationsOffered", "YES"]
         if let contentSize { app.launchArguments += ["-UIPreferredContentSizeCategoryName", contentSize] }
         // The test runner lives in the same simulator, so this is what the app sees too.
         print("SIMULATOR SETTINGS: reduceMotion=\(UIAccessibility.isReduceMotionEnabled) increaseContrast=\(UIAccessibility.isDarkerSystemColorsEnabled) textSize=\(contentSize ?? "simulator default")")

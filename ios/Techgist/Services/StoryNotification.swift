@@ -8,8 +8,8 @@ enum StoryNotification {
     static let category = "STORY"
     static let readAction = "READ"
     static let saveAction = "SAVE"
-    /// `techgist.caf` in the app bundle, made by `scripts/make_chime.sh`.
-    static let sound = UNNotificationSound(named: UNNotificationSoundName("techgist.caf"))
+    /// The sound the reader chose in Settings.
+    static var sound: UNNotificationSound { AlertSound.current.notificationSound }
 
     enum Kind: String {
         case breaking, brief

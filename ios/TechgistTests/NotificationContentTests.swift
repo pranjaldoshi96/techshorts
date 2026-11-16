@@ -27,7 +27,11 @@ final class NotificationContentTests: XCTestCase {
         XCTAssertEqual(content.body, "A line written for the alert.")
         XCTAssertEqual(content.categoryIdentifier, StoryNotification.category)
         XCTAssertEqual(content.threadIdentifier, "breaking")
-        XCTAssertEqual(content.sound, UNNotificationSound(named: UNNotificationSoundName("techgist.caf")))
+        XCTAssertNotNil(content.sound)
+        XCTAssertEqual(AlertSound.current.fileName, "techgist-flash.caf", "News flash unless the reader chose another")
+        for sound in AlertSound.allCases {
+            if let file = sound.fileName { XCTAssertNotNil(Bundle.main.url(forResource: file, withExtension: nil), file) }
+        }
         XCTAssertEqual(content.attachments.count, 1)
         XCTAssertNotNil(StoryNotification.storyURL(from: content.userInfo))
     }

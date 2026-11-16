@@ -53,15 +53,8 @@ struct CardView: View {
                 .animation(.easeInOut(duration: 0.35), value: highlighted)
                 .allowsHitTesting(false)
         }
-        // Swipe left to read, as in Inshorts. Simultaneous, so vertical paging is never held up by it, and it only
-        // fires for a clearly sideways swipe. There is no press-and-hold menu on the card: with one, a finger (or a
-        // mouse button) that rested before dragging opened the menu instead of moving to the next story.
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 30).onEnded { value in
-                let dx = value.translation.width, dy = value.translation.height
-                if dx < -80, abs(dx) > 3 * abs(dy) { onRead() }
-            }
-        )
+        // No gestures of its own: the feed owns swipes (up and down for stories, sideways for tabs), and a
+        // press-and-hold menu here would open instead of moving to the next story.
     }
 
     private var isSaved: Bool { store.isSaved(article) }

@@ -17,9 +17,14 @@ struct FeedView: View {
     /// Called when a card has been on screen long enough to count as read.
     let onViewed: (Article) -> Void
     let onSaved: () -> Void
-    /// Where the feed is heading, kept across gestures so a flick made while the last one is still moving counts
-    /// from the card the feed was already going to.
-    @State private var paging = FeedPaging.Memory()
+    /// A sideways swipe: +1 for the tab to the right, -1 for the tab to the left.
+    let onSwipeTab: (Int) -> Void
+    /// How far the finger has dragged the page, and which way the gesture turned out to be going.
+    @State private var drag: CGFloat = 0
+    @State private var dragAxis: Axis?
+    /// The card the three-card window is built around. It follows the card on screen a moment after the snap
+    /// ends, so the next neighbour is built while the feed is still, not in the middle of the animation.
+    @State private var windowCenter: Int?
 
     static let endID = "end-of-tab"
 
@@ -32,33 +37,102 @@ struct FeedView: View {
             // safe area (which SwiftUI applies unevenly to pages that are partly off screen).
             GeometryReader { geo in
                 let inset = geo.safeAreaInsets.bottom
-                pages(CGSize(width: geo.size.width, height: geo.size.height + inset), inset: inset)
+                let page = CGSize(width: geo.size.width, height: geo.size.height + inset)
+                if typeSize.isAccessibilitySize {
+                    list(page, inset: inset)
+                } else {
+                    pager(page, inset: inset)
+                }
             }
         }
     }
 
-    private func pages(_ page: CGSize, inset: CGFloat) -> some View {
-        let paged = !typeSize.isAccessibilitySize
-        return ScrollView {
+    // MARK: Paged feed
+
+    /// One card per screen. The page follows the finger and, on release, snaps to the next card in a quarter of a
+    /// second whatever the speed of the swipe (a scroll view's own settle took over a second after a slow drag).
+    /// Only the card on screen and its two neighbours exist at any time.
+    private func pager(_ page: CGSize, inset: CGFloat) -> some View {
+        let ids = items.map(\.id) + [Self.endID]
+        let index = position.flatMap { ids.firstIndex(of: $0) } ?? 0
+        // Two quick flicks can outrun the window; then it moves at once.
+        let center = windowCenter.flatMap { abs($0 - index) <= 1 && $0 < ids.count ? $0 : nil } ?? index
+        let window = Array(ids[max(0, center - 1)...min(ids.count - 1, center + 1)])
+        return ZStack(alignment: .top) {
+            // The cards are their own view, compared by what they show: a drag moves them as one layer
+            // without drawing any of them again.
+            PageWindow(ids: window, first: max(0, center - 1), index: index, items: items, category: category,
+                       page: page, inset: inset, highlighted: highlighted,
+                       onRead: onRead, onCoverage: onCoverage, onTop: { go(to: 0, ids: ids) }, onSaved: onSaved)
+                .equatable()
+                .offset(y: drag)
+            if index == 0, drag > 24 || store.isRefreshing {
+                ProgressView().padding(.top, 14).allowsHitTesting(false)
+            }
+        }
+        .frame(width: page.width, height: page.height, alignment: .top)
+        .clipped()
+        .contentShape(Rectangle())
+        .simultaneousGesture(swipes(index: index, ids: ids, page: page))
+        .accessibilityScrollAction { edge in
+            switch edge {
+            case .bottom, .trailing: go(to: index + 1, ids: ids)
+            case .top, .leading: go(to: index - 1, ids: ids)
+            }
+        }
+        .ignoresSafeArea(.container, edges: .bottom)
+        .sensoryFeedback(.success, trigger: store.refreshesCompleted)
+        .task(id: currentID) { await settled() }
+    }
+
+    private static let snap = Animation.snappy(duration: 0.24, extraBounce: 0)
+
+    private func go(to index: Int, ids: [String]) {
+        let target = min(max(index, 0), ids.count - 1)
+        withAnimation(reduceMotion ? .easeOut(duration: 0.12) : Self.snap) {
+            position = ids[target]
+            drag = 0
+        }
+    }
+
+    /// Up and down move between stories (pulling down on the first one refreshes); left and right change tabs.
+    private func swipes(index: Int, ids: [String], page: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 10)
+            .onChanged { value in
+                let t = value.translation
+                if dragAxis == nil { dragAxis = abs(t.width) > abs(t.height) ? .horizontal : .vertical }
+                guard dragAxis == .vertical else { return }
+                // Past either end the page follows the finger at a third of its speed.
+                let atEnd = (index == 0 && t.height > 0) || (index == ids.count - 1 && t.height < 0)
+                drag = atEnd ? t.height / 3 : t.height
+            }
+            .onEnded { value in
+                let axis = dragAxis
+                dragAxis = nil
+                let t = value.translation
+                if axis == .horizontal {
+                    if let step = FeedPaging.tabStep(dx: t.width, dy: t.height) { onSwipeTab(step) }
+                    return
+                }
+                let step = FeedPaging.step(moved: t.height, projected: value.predictedEndTranslation.height)
+                let refresh = index == 0 && t.height > FeedPaging.refreshPull
+                go(to: index + step, ids: ids)
+                if refresh { Task { await store.refresh(atLeast: .seconds(0.6)) } }
+            }
+    }
+
+    // MARK: List at the accessibility text sizes
+
+    private func list(_ page: CGSize, inset: CGFloat) -> some View {
+        ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(items) { article in
-                    CardView(article: article, width: page.width, bottomInset: paged ? inset : 0, flows: !paged,
+                    CardView(article: article, width: page.width, bottomInset: 0, flows: true,
                              highlighted: highlighted == article.id,
                              onRead: { onRead(article) }, onCoverage: { onCoverage(article) })
-                        .frame(width: page.width, height: paged ? page.height : nil)
-                        .scrollTransition(.interactive, axis: .vertical) { [reduceMotion] content, phase in
-                            // Depth: the card leaving at the top shrinks and dims, the next one rises into place.
-                            // With Reduce Motion only the dimming remains; a scrolling list of tall cards has neither.
-                            let above = paged ? max(0, -phase.value) : 0, below = paged ? max(0, phase.value) : 0
-                            return content
-                                .scaleEffect(reduceMotion ? 1 : 1 - 0.06 * above)
-                                .opacity(1 - 0.5 * above)
-                                .offset(y: reduceMotion ? 0 : 24 * below)
-                        }
+                        .frame(width: page.width)
                         .id(article.id)
-                    if !paged {
-                        Color(.secondarySystemBackground).frame(height: 10)
-                    }
+                    Color(.secondarySystemBackground).frame(height: 10)
                 }
                 EndOfTabCard(category: category, count: items.count,
                              onTop: { withAnimation(reduceMotion ? nil : .default) { position = items.first?.id } },
@@ -69,12 +143,13 @@ struct FeedView: View {
             }
             .scrollTargetLayout()
         }
-            .scrollTargetBehavior(FeedPaging(paged: paged, memory: paging))
             .scrollPosition(id: $position)
-            .scrollIndicators(paged ? .hidden : .automatic)
             .ignoresSafeArea(.container, edges: .bottom)
             .refreshable { await store.refresh(atLeast: .seconds(1.2)) }
             .sensoryFeedback(.success, trigger: store.refreshesCompleted)
+            .simultaneousGesture(DragGesture(minimumDistance: 30).onEnded { value in
+                if let step = FeedPaging.tabStep(dx: value.translation.width, dy: value.translation.height) { onSwipeTab(step) }
+            })
             .task(id: currentID) { await settled() }
     }
 
@@ -82,12 +157,17 @@ struct FeedView: View {
 
     /// Runs each time a card comes to rest: warm the next pictures, then count the card as read after 1.5 s.
     private func settled() async {
+        try? await Task.sleep(for: .seconds(0.3))
+        guard !Task.isCancelled else { return }
+        if let id = currentID {
+            windowCenter = id == Self.endID ? items.count : items.firstIndex(where: { $0.id == id })
+        }
         guard let id = currentID, let index = items.firstIndex(where: { $0.id == id }) else { return }
         store.readerIsAtTop = index == 0
         let wide = UIScreen.main.bounds.width >= 390
         let upcoming = items.dropFirst(index + 1).prefix(3).compactMap { $0.cardImage(wide: wide) }
         ImageLoader.shared.prefetch(upcoming, maxPixel: ImageLoader.heroPixels)
-        try? await Task.sleep(for: .seconds(1.5))
+        try? await Task.sleep(for: .seconds(1.2))
         guard !Task.isCancelled else { return }
         onViewed(items[index])
     }
@@ -110,75 +190,79 @@ struct FeedView: View {
     }
 }
 
-/// One card per swipe when the feed is paged; free scrolling when it is a list of tall cards.
-///
-/// The system's view-aligned paging settles on whichever card is nearest to where the scroll would coast to. A drag
-/// that ends without speed (a mouse or trackpad drag in the simulator, a slow or hesitant finger) therefore sprang
-/// back to the same card unless it had crossed half the screen. Here the direction of the gesture decides: once the
-/// feed has moved a thumb's width from where the gesture began, it goes to the neighbouring card, and never further.
-struct FeedPaging: ScrollTargetBehavior {
-    let paged: Bool
-    var memory = Memory()
-    /// How far the feed must move (or be about to coast) before the gesture counts as "next card".
-    static let commitDistance: CGFloat = 36
+/// The card on screen and its neighbours, each a page apart. Equal when it would draw the same thing, so the
+/// feed can move it with the finger at no cost.
+private struct PageWindow: View, Equatable {
+    let ids: [String]
+    /// The index of `ids.first` in the tab, and of the card on screen.
+    let first: Int
+    let index: Int
+    let items: [Article]
+    let category: Category
+    let page: CGSize
+    let inset: CGFloat
+    let highlighted: String?
+    let onRead: (Article) -> Void
+    let onCoverage: (Article) -> Void
+    let onTop: () -> Void
+    let onSaved: () -> Void
 
-    /// What the feed remembers between gestures. A reference, because the behaviour itself is a value that
-    /// SwiftUI rebuilds with the view.
-    final class Memory {
-        /// The offset the feed was last sent to, and when.
-        private(set) var heading: CGFloat?
-        private var headedAt: TimeInterval = 0
-        /// The gesture last answered (by where it began) and the heading it was counted from. SwiftUI can ask
-        /// more than once about one gesture; every answer must count from the same card.
-        private var start: CGFloat?
-        private var base: CGFloat?
-        /// Longer than any settle; after it the feed is somewhere for another reason (a jump to the top, a new tab).
-        static let lifetime: TimeInterval = 1.5
+    static func == (a: PageWindow, b: PageWindow) -> Bool {
+        a.ids == b.ids && a.index == b.index && a.page == b.page && a.inset == b.inset
+            && a.highlighted == b.highlighted && a.category == b.category
+            && a.items.count == b.items.count && a.visible == b.visible
+    }
 
-        /// The heading to count a gesture that began at `start` from; nil when the last one is too old to mean anything.
-        func heading(forGestureAt start: CGFloat, now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> CGFloat? {
-            if self.start != start {
-                self.start = start
-                base = now - headedAt < Self.lifetime ? heading : nil
+    /// The articles this window shows (a story's text can change with a new edition while its id stays).
+    private var visible: [Article] { Array(items[min(first, items.count)..<min(first + ids.count, items.count)]) }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            ForEach(Array(ids.enumerated()), id: \.element) { offset, _ in
+                let i = first + offset
+                Group {
+                    if i < items.count {
+                        let article = items[i]
+                        CardView(article: article, width: page.width, bottomInset: inset, flows: false,
+                                 highlighted: highlighted == article.id,
+                                 onRead: { onRead(article) }, onCoverage: { onCoverage(article) })
+                    } else {
+                        EndOfTabCard(category: category, count: items.count, onTop: onTop, onSaved: onSaved)
+                            .padding(.bottom, inset)
+                    }
+                }
+                .frame(width: page.width, height: page.height)
+                .offset(y: CGFloat(i - index) * page.height)
+                .accessibilityHidden(i != index)
+                .transition(.identity)
             }
-            return base
         }
+        .frame(width: page.width, height: page.height, alignment: .top)
+    }
+}
 
-        func head(to offset: CGFloat, now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
-            heading = offset
-            headedAt = now
-        }
+/// What a swipe on the paged feed means. Pure, so the rules are unit-tested.
+enum FeedPaging {
+    /// How far the finger must move before the swipe counts as "next card"; shorter drags spring back.
+    static let commitDistance: CGFloat = 36
+    /// How far the first card must be pulled down to refresh.
+    static let refreshPull: CGFloat = 90
+    /// A flick shorter than `commitDistance` still counts when it would have coasted this far.
+    static let flickDistance: CGFloat = 120
+
+    /// +1 for the next card, -1 for the previous, 0 to stay. `moved` is the finger's vertical travel (up is
+    /// negative), `projected` where it would have coasted to. Never more than one card per swipe.
+    static func step(moved: CGFloat, projected: CGFloat) -> Int {
+        if moved < -commitDistance || (moved < 0 && projected < -flickDistance) { return 1 }
+        if moved > commitDistance || (moved > 0 && projected > flickDistance) { return -1 }
+        return 0
     }
 
-    func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
-        guard paged else { return }
-        let start = context.originalTarget.rect.minY
-        let rest = Self.restingOffset(start: start, projected: target.rect.minY,
-                                      page: context.containerSize.height, content: context.contentSize.height,
-                                      heading: memory.heading(forGestureAt: start))
-        memory.head(to: rest)
-        target.rect.origin.y = rest
-    }
-
-    /// Where the feed comes to rest. `start` is the offset when the gesture began, `projected` where it would
-    /// coast to if left alone, `heading` where the previous gesture sent the feed. Pure, so the rule is unit-tested.
-    static func restingOffset(start: CGFloat, projected: CGFloat, page: CGFloat, content: CGFloat,
-                              heading: CGFloat? = nil) -> CGFloat {
-        guard page > 0 else { return projected }
-        let last = max(0, (content / page).rounded() - 1)
-        let moved = projected - start
-        var index = (start / page).rounded()
-        // A gesture that begins while the feed is still on its way to a card counts from that card: the second
-        // of two quick flicks goes one past it, not to it again. (Counting from the nearest card swallowed any
-        // flick made before the feed was half way.) Without a heading in reach, the nearest card it is.
-        // Only a gesture that moves the feed counts this way. SwiftUI also asks when nothing was swiped (the
-        // text size or the layout changed); the answer then is the nearest card, wherever the feed was heading.
-        let swiped = abs(moved) > commitDistance
-        let atRest = abs(start - index * page) < 1
-        // (Several quick flicks put the heading more than a card ahead of the feed, hence three.)
-        if swiped, !atRest, let heading, abs(heading - start) < 3 * page { index = (heading / page).rounded() }
-        if moved > commitDistance { index += 1 } else if moved < -commitDistance { index -= 1 }
-        return min(max(index, 0), last) * page
+    /// +1 for the tab to the right (a swipe to the left), -1 for the tab to the left, nil when the swipe was
+    /// too short or not clearly sideways.
+    static func tabStep(dx: CGFloat, dy: CGFloat) -> Int? {
+        guard abs(dx) > 50, abs(dx) > 1.5 * abs(dy) else { return nil }
+        return dx < 0 ? 1 : -1
     }
 }
 

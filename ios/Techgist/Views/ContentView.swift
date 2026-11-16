@@ -17,7 +17,7 @@ struct ContentView: View {
     @State private var serverAlertsNotice = false
 
     enum Sheet: Identifiable {
-        case saved, settings, search, offer
+        case saved, settings, search
         case coverage(Article)
 
         var id: String {
@@ -25,7 +25,6 @@ struct ContentView: View {
             case .saved: "saved"
             case .settings: "settings"
             case .search: "search"
-            case .offer: "offer"
             case .coverage(let article): "coverage-" + article.id
             }
         }
@@ -42,7 +41,7 @@ struct ContentView: View {
                 ZStack {
                     FeedView(category: store.category, items: store.visibleArticles, position: position(for: store.category),
                              highlighted: highlighted, onRead: read, onCoverage: { sheet = .coverage($0) },
-                             onViewed: viewed, onSaved: { sheet = .saved })
+                             onViewed: viewed, onSaved: { sheet = .saved }, onSwipeTab: swipeTab)
                         .id(store.category)
                         .transition(reduceMotion ? .opacity : .push(from: pushEdge))
                 }
@@ -95,13 +94,15 @@ struct ContentView: View {
                     case .settings: SettingsView()
                     case .search: SearchView(onSelect: show)
                     case .coverage(let article): CoverageSheet(article: article, onRead: read)
-                    case .offer: NotificationsOffer()
                     }
                 }
                 .tint(Theme.accent)
             }
         }
-        .task { serverAlertsNotice = await PushRegistration.noticeIsDue() }
+        .task {
+            serverAlertsNotice = await PushRegistration.noticeIsDue()
+            await askForNotificationsOnce()
+        }
         .alert("Big story alerts now come from Techgist's server", isPresented: $serverAlertsNotice) {
             Button("Keep alerts on") { Task { await PushRegistration.answerNotice(keep: true) } }
             Button("Turn off alerts") { Task { await PushRegistration.answerNotice(keep: false) } }
@@ -135,10 +136,6 @@ struct ContentView: View {
                 if highlighted == focus.id { highlighted = nil }
             }
         }
-        .onChange(of: store.saved.count) { old, new in
-            // The first save is a good moment to offer alerts.
-            if new > old { offerNotificationsIfNeeded() }
-        }
         .onAppear {
             AppDelegate.handle = handle
             if let request = AppDelegate.takePending() { handle(request) }
@@ -153,6 +150,13 @@ struct ContentView: View {
             pushEdge = (order.firstIndex(of: new) ?? 0) >= (order.firstIndex(of: store.category) ?? 0) ? .trailing : .leading
             if new == store.category { scrollToTop() } else { store.category = new }
         })
+    }
+
+    /// A sideways swipe on the feed moves one tab over; at either end it does nothing.
+    private func swipeTab(_ step: Int) {
+        let order = Category.allCases
+        guard let now = order.firstIndex(of: store.category), order.indices.contains(now + step) else { return }
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) { tabSelection.wrappedValue = order[now + step] }
     }
 
     private func position(for category: Category) -> Binding<String?> {
@@ -206,13 +210,21 @@ struct ContentView: View {
     private func viewed(_ article: Article) {
         readState.markRead(article.id)
         viewedThisSession.insert(article.id)
-        // After a few stories the reader knows what the app is; that's when alerts are offered, once.
-        if viewedThisSession.count >= 8 { offerNotificationsIfNeeded() }
     }
 
-    private func offerNotificationsIfNeeded() {
-        guard !notificationsOffered, sheet == nil else { return }
-        sheet = .offer
+    /// On the first launch iOS asks whether Techgist may send notifications. Yes turns on the morning gist and
+    /// big story alerts; no leaves both off. Either can be changed in Settings afterwards. Asked once.
+    private func askForNotificationsOnce() async {
+        guard !notificationsOffered, !serverAlertsNotice else { return }
+        notificationsOffered = true
+        let granted = await StoryNotification.requestPermission()
+        UserDefaults.standard.set(granted, forKey: Keys.digestEnabled)
+        UserDefaults.standard.set(granted, forKey: Keys.breakingNews)
+        if granted {
+            PushRegistration.markAnswered()
+            await DailyDigest.reschedule(with: store.topStory)
+        }
+        await PushRegistration.sync()
     }
 
     /// Brings a story's card on screen, or opens the story when it isn't in the edition any more.
