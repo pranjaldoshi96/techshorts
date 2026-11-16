@@ -1,0 +1,3 @@
+# The push service's own venv (/opt/techgist-push/venv). The registry and the rules are standard library only.
+httpx[http2]>=0.27
+PyJWT[crypto]>=2.8

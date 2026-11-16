@@ -1,0 +1,44 @@
+# The Techgist push service on the VPS (server/push/README.md): the device registry on 127.0.0.1:8787 and the
+# APNs sender. Installed by server/push/deploy/deploy_push.sh as /etc/systemd/system/techgist-push.service.
+# Separate from the worker on purpose: its code is in /opt/techgist-push and a deploy of one never restarts the other.
+[Unit]
+Description=Techgist push (device registry and APNs sender)
+After=network-online.target
+Wants=network-online.target
+# The same ntfy alert as the worker's on every failed exit (deploy/alert.py, one message per 15 min in a crash loop).
+OnFailure=techgist-alert@%n.service
+# Restarted for ever: no start limit.
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=techgist
+Group=techgist
+WorkingDirectory=/opt/techgist-push
+Environment=TECHGIST_STATE=/var/lib/techgist
+Environment=PYTHONUNBUFFERED=1
+# push.* from here; worker.alertq (the engine's queue interface) from the engine's own deployed code.
+Environment=PYTHONPATH=/opt/techgist-push:/opt/techgist
+# NTFY_TOPIC=... (root:techgist 640): where failures are reported and where owner alerts are read from.
+EnvironmentFile=-/etc/techgist/env
+ExecStart=/opt/techgist-push/venv/bin/python -m push.main
+Restart=always
+RestartSec=2
+RestartSteps=5
+RestartMaxDelaySec=60
+# The loop reports in after every tick (15 s apart; a tick's slowest part is a round of APNs sends).
+WatchdogSec=300
+WatchdogSignal=SIGKILL
+TimeoutStopSec=15
+MemoryMax=512M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/lib/techgist
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
