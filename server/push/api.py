@@ -30,8 +30,8 @@ class Invalid(Exception):
 
 
 def validate(data):
-    """The device row for a registration body, or Invalid(field). Unknown fields are ignored; nothing is
-    truncated to fit: a value out of bounds is refused."""
+    """The device row for a registration body, or Invalid(field). Unknown fields are ignored. A token, env, tz or
+    topics value out of bounds is refused; locale and appVersion are kept only when they fit."""
     if not isinstance(data, dict):
         raise Invalid("body")
     token = data.get("token")
@@ -42,12 +42,17 @@ def validate(data):
     tz = data.get("tz")
     if not isinstance(tz, str) or not TZ.match(tz):
         raise Invalid("tz")
+    # Locale and app version only describe the device. iOS writes locales such as "en_US@rg=inzzzz" (a region
+    # override), so the part after "@" is dropped, and a value that still does not fit is stored as unknown:
+    # a device is never turned away over them.
     locale = data.get("locale")
-    if locale is not None and (not isinstance(locale, str) or not LOCALE.match(locale)):
-        raise Invalid("locale")
+    if isinstance(locale, str):
+        locale = locale.split("@", 1)[0]
+    if not isinstance(locale, str) or not LOCALE.match(locale):
+        locale = None
     version = data.get("appVersion")
-    if version is not None and (not isinstance(version, str) or not VERSION.match(version)):
-        raise Invalid("appVersion")
+    if not isinstance(version, str) or not VERSION.match(version):
+        version = None
     topics = data.get("topics")
     if topics is not None:
         if (not isinstance(topics, list) or len(topics) > 32

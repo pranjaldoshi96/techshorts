@@ -33,8 +33,9 @@ journalctl -u techgist-push -f
 
 `POST /v1/devices` with `{"token", "env": "sandbox"|"production", "tz", "locale", "appVersion", "topics"?}` answers
 `{"ok": true}`; the same call again refreshes the device. `DELETE /v1/devices/<token>` removes it (same answer for
-an unknown token). The token must be 64 to 200 hex characters; every other field has a length and character limit
-and a value outside it is refused with 400 and the field's name. Bodies over 2 KB are refused. 60 requests a minute
+an unknown token). The token must be 64 to 200 hex characters; `env`, `tz` and `topics` have a length and character
+limit and a value outside it is refused with 400 and the field's name; `locale` loses anything after `@` (iOS sends
+`en_US@rg=inzzzz`) and, like `appVersion`, is stored as unknown when it does not fit. Bodies over 2 KB are refused. 60 requests a minute
 per address and 30 per token, then 429. There is no endpoint that lists or returns devices, answers never contain a
 token, and the log shows a token's first six characters at most. `topics` is stored and not used yet.
 

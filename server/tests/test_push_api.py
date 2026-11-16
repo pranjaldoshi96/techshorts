@@ -48,13 +48,25 @@ def test_registering_again_updates_and_keeps_the_owner_flag(app):
     ({"token": "a" * 201}, "token"), ({"token": 5}, "token"), ({"token": None}, "token"),
     ({"env": "prod"}, "env"), ({"env": None}, "env"),
     ({"tz": "x" * 65}, "tz"), ({"tz": "Asia/Kol kata"}, "tz"), ({"tz": None}, "tz"),
-    ({"locale": "x" * 36}, "locale"), ({"appVersion": "<script>"}, "appVersion"),
     ({"topics": "AI"}, "topics"), ({"topics": ["a"] * 33}, "topics"), ({"topics": ["x" * 33]}, "topics"),
 ])
 def test_bad_input_is_refused_not_trimmed(app, over, field):
     status, out = app.handle("POST", "/v1/devices", body(**over), "1.2.3.4")
     assert status == 400 and out["field"] == field
     assert app.store().device_count() == 0
+
+
+@pytest.mark.parametrize("over,locale,version", [
+    ({"locale": "en_US@rg=inzzzz"}, "en_US", "2.0"),                       # what an iPhone with a region override sends
+    ({"locale": "en_IN@calendar=gregorian;numbers=latn"}, "en_IN", "2.0"),
+    ({"locale": "x" * 36}, None, "2.0"), ({"locale": 7}, None, "2.0"),
+    ({"appVersion": "<script>"}, "en_IN", None),
+])
+def test_a_device_is_never_refused_over_its_locale_or_version(app, over, locale, version):
+    status, out = app.handle("POST", "/v1/devices", body(**over), "1.2.3.4")
+    assert status == 200 and out == {"ok": True}
+    row = app.store().devices()[0]
+    assert (row["locale"], row["app_version"]) == (locale, version)
 
 
 def test_garbage_bodies(app):
