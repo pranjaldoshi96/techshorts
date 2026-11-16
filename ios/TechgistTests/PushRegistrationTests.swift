@@ -23,13 +23,20 @@ final class PushRegistrationTests: XCTestCase {
     }
 
     override func tearDown() {
-        PushRegistration.baseURL = PushConfig.registerURL
+        PushRegistration.baseURL = PushConfig.liveURL
         PushRegistration.defaults = .standard
         super.tearDown()
     }
 
-    func testPushIsOffUntilARegistryIsConfigured() async {
-        XCTAssertNil(PushConfig.registerURL, "Set by the release step, together with the server")
+    func testTheRegistryIsHTTPSAndTestRunsNeverUseIt() throws {
+        let url = try XCTUnwrap(PushConfig.registerURL)
+        XCTAssertEqual(url.scheme, "https")
+        XCTAssertEqual(url.host, "techgist.213-210-36-218.sslip.io")
+        XCTAssertEqual(url.path, "")
+        XCTAssertNil(PushConfig.liveURL, "A test run must not register its simulator with the real registry")
+    }
+
+    func testPushIsOffWithoutARegistry() async {
         PushRegistration.baseURL = nil
         await PushRegistration.register(token: token)
         await PushRegistration.unregister()
@@ -49,10 +56,19 @@ final class PushRegistrationTests: XCTestCase {
         XCTAssertTrue(["sandbox", "production"].contains(try XCTUnwrap(body["env"] as? String)))
         XCTAssertEqual(body["tz"] as? String, TimeZone.current.identifier)
         XCTAssertNotNil(TimeZone(identifier: try XCTUnwrap(body["tz"] as? String)))
-        XCTAssertEqual(body["locale"] as? String, Locale.current.identifier)
+        let locale = try XCTUnwrap(body["locale"] as? String)
+        XCTAssertEqual(locale, PushRegistration.localeTag(Locale.current.identifier))
+        XCTAssertNotNil(locale.range(of: "^[A-Za-z0-9_-]{1,35}$", options: .regularExpression), locale)
         XCTAssertEqual(body["appVersion"] as? String, Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
         XCTAssertEqual(PushRegistration.registeredToken, token)
         XCTAssertTrue(PushRegistration.isRegistered)
+    }
+
+    func testLocaleIsSentWithoutIOSSettings() {
+        XCTAssertEqual(PushRegistration.localeTag("en_US@rg=inzzzz"), "en_US")   // a region override, as on an Indian iPhone set to US English
+        XCTAssertEqual(PushRegistration.localeTag("en_IN@calendar=gregorian;numbers=latn"), "en_IN")
+        XCTAssertEqual(PushRegistration.localeTag("hi_IN"), "hi_IN")
+        XCTAssertEqual(PushRegistration.localeTag("zh-Hant_TW"), "zh-Hant_TW")
     }
 
     func testEveryLaunchRegistersAgain() async {

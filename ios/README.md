@@ -15,7 +15,7 @@ The app loads a ranked **edition** that the Techgist server (`../server/`) publi
 | `Services/ImageLoader.swift` | Downloads, downsamples and decodes pictures off the main thread; memory cache plus a 7-day disk cache; prefetches the next three cards. |
 | `Services/FeedService.swift`, `FeedParser.swift`, `Ranker.swift`, `HTMLText.swift`, `PageMetadata.swift` | The direct-feed fallback. The server's safe-mode publisher compiles these same files (plus the two models and `Disk.swift`) on Linux, so they must stay Foundation-only and keep their paths. |
 | `Services/StoryNotification.swift`, `BreakingNews.swift`, `DailyDigest.swift` | Local alerts: the morning gist and big-story alerts, with the story picture, Techgist's chime, and Read and Save buttons. |
-| `Services/PushRegistration.swift` | Server push, off until `PushConfig.registerURL` is set (see "Server push" below). |
+| `Services/PushRegistration.swift` | Server push to Techgist's registry at `PushConfig.registerURL` (see "Server push" below). |
 | `TechgistNotificationService/` | Notification Service Extension: attaches the picture named in a push's `image` key and gives the push the Read and Save buttons. |
 | `Views/` | `CardView` (the card and its layouts), `FeedView` (paging), `ChipBar`, `ContentView` (shell), `SupportViews` (reader, saved, search, coverage, settings), `Theme` (design tokens). |
 | `TechgistTests/` | Decoding against snapshots of the live v1 edition and the engine's edition, ordering, alert content, the push wire format, the paging rule. |
@@ -67,7 +67,7 @@ In the Simulator, scroll by clicking and dragging (a two-finger trackpad scroll 
 
 ## Server push
 
-Off until `PushConfig.registerURL` (one constant in `Services/PushRegistration.swift`) is set to the registry's HTTPS base URL.
+`PushConfig.registerURL` (one constant in `Services/PushRegistration.swift`) is the registry's HTTPS base URL, `https://techgist.213-210-36-218.sslip.io` (the VPS, see `server/push/README.md` on branch `push-r3`). Set it to nil and the app never asks iOS for a token and keeps its own local alerts. Test runs (unit and UI tests) never register. `locale` is sent as language and region only (`en_US`, not iOS's `en_US@rg=inzzzz`). Checked end to end on a simulator on 2026-11-16: registration, a story alert from the engine's queue, the picture attached by the service extension, a tap opening the story (app running and not running), opt-out. The simulator does not draw the picture's thumbnail (its thumbnailer fails), so that still needs a look on a phone.
 
 - **Register:** `POST <registerURL>/v1/devices` with `{"token", "env": "sandbox"|"production", "tz", "locale", "appVersion"}`. Sent after the reader allows notifications with Big story alerts on, on every launch after that, and when iOS issues a new token (the old one is deleted first).
 - **Opt out:** `DELETE <registerURL>/v1/devices/<token>` when Big story alerts is turned off in Settings or the permission is taken away. If the server can't be reached it is tried again on the next launch.

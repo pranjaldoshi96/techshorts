@@ -5,7 +5,15 @@ enum PushConfig {
     /// The base URL of Techgist's device registry, e.g. `https://push.example.com` (HTTPS, no trailing path).
     /// The app POSTs to `<registerURL>/v1/devices` and DELETEs `<registerURL>/v1/devices/<token>`.
     /// Nil means server push is off: the app never asks iOS for a token and sends nothing; alerts stay local.
-    static let registerURL: URL? = nil
+    static let registerURL: URL? = URL(string: "https://techgist.213-210-36-218.sslip.io")
+
+    /// The registry the running app uses. Test runs (unit tests hosted in the app, and UI tests) use none, so a
+    /// simulator that is only running tests never lands in the real registry.
+    static var liveURL: URL? {
+        let environment = ProcessInfo.processInfo.environment
+        if environment["XCTestConfigurationFilePath"] != nil || environment["UITEST_RESET"] == "1" { return nil }
+        return registerURL
+    }
 }
 
 /// Server push for big stories. The device registers after the reader allows notifications and has "Big story
@@ -19,7 +27,7 @@ enum PushRegistration {
     private static let registeredKey = "pushRegisteredToken"
 
     // Replaced in tests.
-    static var baseURL: URL? = PushConfig.registerURL
+    static var baseURL: URL? = PushConfig.liveURL
     static var defaults: UserDefaults = .standard
     /// Sends a request and returns the HTTP status, or nil when there was no answer.
     static var send: (URLRequest) async -> Int? = { request in
@@ -95,9 +103,15 @@ enum PushRegistration {
             "token": token,
             "env": environment,
             "tz": TimeZone.current.identifier,
-            "locale": Locale.current.identifier,
+            "locale": localeTag(Locale.current.identifier),
             "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
         ]
+    }
+
+    /// Language and region only. iOS adds settings after an "@" ("en_US@rg=inzzzz" for a region override,
+    /// calendars, number systems); the registry has no use for them and first refused a device that sent one.
+    static func localeTag(_ identifier: String) -> String {
+        String(identifier.prefix { $0 != "@" }.prefix(35))
     }
 
     static func registerRequest(base: URL, token: String) -> URLRequest? {

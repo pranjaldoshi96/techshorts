@@ -139,8 +139,7 @@ final class FeedOrderingTests: XCTestCase {
         XCTAssertNil(StoryNotification.imageExtension(of: Data("RIFF".utf8)))   // WebP
     }
 
-    func testPushIsOffUntilARegistryIsConfigured() {
-        XCTAssertNil(PushConfig.registerURL)
+    func testTokensAreSentAsLowercaseHex() {
         XCTAssertEqual(PushRegistration.hex(Data([0x00, 0xAB, 0x10])), "00ab10")
     }
 
