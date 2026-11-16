@@ -22,6 +22,9 @@ struct FeedView: View {
     /// How far the finger has dragged the page, and which way the gesture turned out to be going.
     @State private var drag: CGFloat = 0
     @State private var dragAxis: Axis?
+    /// True while a finger is down. iOS can take a gesture away without ending it (a system gesture, a sheet
+    /// arriving); this going false is then the only sign, and the page must not be left where the finger was.
+    @GestureState private var fingerDown = false
     /// The card the three-card window is built around. It follows the card on screen a moment after the snap
     /// ends, so the next neighbour is built while the feed is still, not in the middle of the animation.
     @State private var windowCenter: Int?
@@ -74,6 +77,13 @@ struct FeedView: View {
         .clipped()
         .contentShape(Rectangle())
         .simultaneousGesture(swipes(index: index, ids: ids, page: page))
+        .onChange(of: fingerDown) { _, down in
+            // After a normal end `drag` is already 0; after a cancelled gesture it is not.
+            if !down, drag != 0 || dragAxis != nil {
+                dragAxis = nil
+                go(to: index, ids: ids)
+            }
+        }
         .accessibilityScrollAction { edge in
             switch edge {
             case .bottom, .trailing: go(to: index + 1, ids: ids)
@@ -98,6 +108,7 @@ struct FeedView: View {
     /// Up and down move between stories (pulling down on the first one refreshes); left and right change tabs.
     private func swipes(index: Int, ids: [String], page: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 10)
+            .updating($fingerDown) { _, down, _ in down = true }
             .onChanged { value in
                 let t = value.translation
                 if dragAxis == nil { dragAxis = abs(t.width) > abs(t.height) ? .horizontal : .vertical }

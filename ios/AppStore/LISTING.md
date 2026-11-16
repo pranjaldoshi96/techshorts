@@ -31,7 +31,7 @@ Techgist 2.0 is a new app on the same idea: one story per card, sixty words each
 • Stories ranked all day by Techgist's newsroom engine, with the biggest first in every tab
 • Wider coverage: Indian tech and startups alongside Silicon Valley, from more than 50 publishers
 • Sharper headlines and short AI summaries, written from the publisher's story, checked against it and labelled
-• Big story alerts as the news breaks, with the story's picture: a few a day at most, none at night
+• Big story alerts as the news breaks, with the story's picture and a choice of sounds: up to 8 a day, none at night
 • Full coverage: see every outlet reporting a story
 • Search today's stories and everything you saved
 • A new Reads tab for longer essays and analysis
@@ -71,7 +71,7 @@ MADE FOR A QUICK READ
 • Works offline with the latest stories
 
 ALERTS YOU CHOOSE
-• Big story alerts as the news breaks, with the story's picture: a few a day at most, none at night, never marketing
+• Big story alerts as the news breaks, with the story's picture and a choice of sounds: up to 8 a day, none at night, never marketing
 • A morning gist with the day's top story, at the time you pick
 Both are off until you turn them on.
 
@@ -122,7 +122,7 @@ What changed in 2.0: a new card and feed, server-ranked stories, AI summaries wr
 
 Content: headlines and sixty-word summaries of stories from more than 50 publishers' public RSS/Atom feeds. Each card names its publisher and links to the original article, which opens in SFSafariViewController. Our server builds a ranked edition every few minutes and publishes it at https://raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/edition.json; if that is unavailable or more than 8 hours old the app reads the publishers' feeds directly. Summaries are written by a language model on our server from the publisher's story and automatically checked against it; cards with one are labelled "AI summary". Pictures are the publishers' story images, resized and served from the same GitHub branch, or a cover drawn by the app when a story has none.
 
-Notifications: the app asks for permission only after its own explanation screen (shown after eight stories or the first save) or from the switches in Settings. "Morning gist" is a local notification. "Big story alerts" are remote notifications sent by our server (https://techgist.213-210-36-218.sslip.io) to devices that turned them on: news only, at most 2 a day (3 on an exceptional day), none between 22:00 and 07:30 local time. No marketing or promotional pushes are sent.
+Notifications: iOS asks for notification permission once, on the first launch; allowing it turns on the two kinds below, and each has its own switch in Settings, where the alert sound can also be chosen. "Morning gist" is a local notification. "Big story alerts" are remote notifications sent by our server (https://techgist.213-210-36-218.sslip.io) to devices that have them on: news only, at most 8 a day (12 on an exceptional day), at least 30 minutes apart, none between 23:00 and 07:00 in the device's own time zone. No marketing or promotional pushes are sent.
 
 Data: with Big story alerts on, the app sends the APNs device token, time zone, language/region and app version to our server, used only to deliver alerts and deleted when alerts are turned off. Nothing else leaves the device. This is declared in App Privacy (Identifiers > Device ID, App Functionality, not linked, not used for tracking), in the privacy manifest and in the privacy policy, which is also linked in the app under Settings > About.
 
