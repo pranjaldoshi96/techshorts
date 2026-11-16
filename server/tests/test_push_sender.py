@@ -371,7 +371,7 @@ def test_owner_hold_announces_then_sends_and_a_kill_stops_it(tmp_path):
     env.sender.tick(NOW)
     assert env.apns.sent == []
     holds = [m for m in env.ntfy.out if m["tags"] == HOLD_TAG]
-    assert len(holds) == 2 and "push kill ev_" in holds[0]["message"]
+    assert len(holds) == 2 and "pushctl kill ev_" in holds[0]["message"]
     assert env.sender.health(NOW)["held"]["storiesInOwnerHold"] == 2
     assert env.store.kill("ev_b") == 1
     env.sender.tick(NOW + timedelta(seconds=299))
@@ -410,5 +410,5 @@ def test_health_file_counts(env):
     doc = json.load(open(env.cfg["paths"]["health"]))
     assert doc["devices"] == {"total": 2, "sandbox": 1, "production": 1, "owner": 1, "holding": 0}
     assert doc["sent"]["total"] == 2 and doc["sent"]["last24h"] == 2 and doc["failed"]["total"] == 0
-    assert doc["engineQueue"]["sent"] == 1 and doc["sendingEnabled"] is True
+    assert doc["engineQueue"] == {"sent": 1} and doc["sendingEnabled"] is True
     assert TOK_A not in json.dumps(doc) and TOK_B not in json.dumps(doc)

@@ -7,6 +7,7 @@
   kill EVENT_ID               stop a story before it is sent (during the owner hold, or while it waits its turn)
   test PREFIX ["title" "body"]    send one labelled test notification to a device now, outside every rule, and
                               print APNs' answer. A device APNs rejects is removed, as in normal sending.
+  test PREFIX --event EVENT_ID    the same, but the story itself, exactly as a real alert carries it (a tap opens it)
 
 PREFIX is the start of a device token (six characters are usually enough). Full tokens are never printed.
 """
@@ -15,8 +16,8 @@ import json
 import sys
 
 from . import config
-from .apns import Apns
-from .sender import EngineDB, Sender, utcnow
+from .apns import Apns, story_payload
+from .sender import Edition, EngineDB, Sender, utcnow
 from .store import Store, short
 
 
@@ -40,6 +41,7 @@ def main(argv=None):
     t = sub.add_parser("test")
     t.add_argument("prefix")
     t.add_argument("text", nargs="*")
+    t.add_argument("--event", help="send this edition story as a real alert would look")
     a = ap.parse_args(argv)
     cfg = config.load()
     store = Store(cfg["paths"]["push_db"])
@@ -70,10 +72,18 @@ def main(argv=None):
         print("killed" if n else "nothing waiting under that id")
     elif a.cmd == "test":
         d = _one(store, a.prefix)
-        title, body = (a.text + ["Techgist test", "A test notification from the push server."])[:2] \
-            if len(a.text) >= 2 else ("Techgist test", "A test notification from the push server.")
-        payload = {"aps": {"alert": {"title": title, "body": body}, "sound": cfg["apns"]["sound"],
-                           "thread-id": "test"}, "kind": "test"}
+        if a.event:
+            # The story as a real alert carries it (text, link and picture from the edition), outside the rules.
+            art = Edition(cfg["paths"]["edition"]).articles().get(a.event)
+            note = (art or {}).get("notification") or {}
+            if not note.get("title") or not note.get("body"):
+                sys.exit("that event is not in the edition, or has no notification text")
+            payload = story_payload({"event_id": a.event, "title": note["title"], "body": note["body"]}, art,
+                                    cfg["apns"]["sound"])
+        else:
+            title, body = a.text if len(a.text) == 2 else ("Techgist test", "A test notification from the push server.")
+            payload = {"aps": {"alert": {"title": title, "body": body}, "sound": cfg["apns"]["sound"],
+                               "thread-id": "test"}, "kind": "test"}
         sender = Sender(cfg, store, Apns(cfg["apns"]))
         res = sender.apns.send(d["token"], d["env"], payload, collapse_id="test-" + now.strftime("%H%M%S"),
                                expiration=int(now.timestamp()) + 600)

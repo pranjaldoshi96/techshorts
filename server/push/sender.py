@@ -151,7 +151,6 @@ class Sender:
         self.last_prune = None
         self.dry_loops = 0
         self.last_error = None
-        self.queue_stats = None
         self.beat = time.monotonic()
 
     # 1. Engine queue -> push.db
@@ -175,9 +174,8 @@ class Sender:
                 self.log(f"intake: {alert.event_id} {'taken' if new else 'already held (redelivery)'}")
                 if new and self.cfg["rules"]["owner_hold_s"] > 0 and self._worth_announcing(alert, now):
                     self.ntfy.send(f"Techgist push in {self.cfg['rules']['owner_hold_s'] // 60} min",
-                                   f"{alert.title}\n{alert.body}\nStop it: push kill {alert.event_id}",
+                                   f"{alert.title}\n{alert.body}\nStop it: /opt/techgist-push/pushctl kill {alert.event_id}",
                                    priority="low", tags=HOLD_TAG, log=self.log)
-            self.queue_stats = self.alertq.stats(db, now)
             db.commit()
         except sqlite3.OperationalError as e:
             # The worker holds the write lock for the length of a tick; the row stays where it was.
@@ -334,7 +332,7 @@ class Sender:
                "removedDevices": s.counter("removed_total"),
                "held": {"devicesHoldingForMorning": s.device_stats()["holding"],
                         "storiesInOwnerHold": s.waiting_hold(now)},
-               "engineQueue": self.queue_stats}
+               "engineQueue": self._queue_counts()}
         path = self.cfg["paths"]["health"]
         try:
             with open(path + ".tmp", "w") as f:
@@ -343,6 +341,17 @@ class Sender:
         except OSError as e:
             self.log(f"health: not written ({type(e).__name__})")
         return doc
+
+    def _queue_counts(self):
+        """The engine queue's rows by status, read-only (None when state.db cannot be read)."""
+        try:
+            conn = sqlite3.connect(f"file:{self.cfg['paths']['engine_db']}?mode=ro", uri=True, timeout=2)
+            try:
+                return dict(conn.execute("SELECT status, COUNT(*) FROM alert_queue GROUP BY status").fetchall())
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return None
 
     def tick(self, now=None):
         now = now or utcnow()
