@@ -17,6 +17,9 @@ struct FeedView: View {
     /// Called when a card has been on screen long enough to count as read.
     let onViewed: (Article) -> Void
     let onSaved: () -> Void
+    /// Where the feed is heading, kept across gestures so a flick made while the last one is still moving counts
+    /// from the card the feed was already going to.
+    @State private var paging = FeedPaging.Memory()
 
     static let endID = "end-of-tab"
 
@@ -66,7 +69,7 @@ struct FeedView: View {
             }
             .scrollTargetLayout()
         }
-            .scrollTargetBehavior(FeedPaging(paged: paged))
+            .scrollTargetBehavior(FeedPaging(paged: paged, memory: paging))
             .scrollPosition(id: $position)
             .scrollIndicators(paged ? .hidden : .automatic)
             .ignoresSafeArea(.container, edges: .bottom)
@@ -115,23 +118,65 @@ struct FeedView: View {
 /// feed has moved a thumb's width from where the gesture began, it goes to the neighbouring card, and never further.
 struct FeedPaging: ScrollTargetBehavior {
     let paged: Bool
+    var memory = Memory()
     /// How far the feed must move (or be about to coast) before the gesture counts as "next card".
     static let commitDistance: CGFloat = 36
 
+    /// What the feed remembers between gestures. A reference, because the behaviour itself is a value that
+    /// SwiftUI rebuilds with the view.
+    final class Memory {
+        /// The offset the feed was last sent to, and when.
+        private(set) var heading: CGFloat?
+        private var headedAt: TimeInterval = 0
+        /// The gesture last answered (by where it began) and the heading it was counted from. SwiftUI can ask
+        /// more than once about one gesture; every answer must count from the same card.
+        private var start: CGFloat?
+        private var base: CGFloat?
+        /// Longer than any settle; after it the feed is somewhere for another reason (a jump to the top, a new tab).
+        static let lifetime: TimeInterval = 1.5
+
+        /// The heading to count a gesture that began at `start` from; nil when the last one is too old to mean anything.
+        func heading(forGestureAt start: CGFloat, now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> CGFloat? {
+            if self.start != start {
+                self.start = start
+                base = now - headedAt < Self.lifetime ? heading : nil
+            }
+            return base
+        }
+
+        func head(to offset: CGFloat, now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+            heading = offset
+            headedAt = now
+        }
+    }
+
     func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
         guard paged else { return }
-        target.rect.origin.y = Self.restingOffset(start: context.originalTarget.rect.minY, projected: target.rect.minY,
-                                                  page: context.containerSize.height, content: context.contentSize.height)
+        let start = context.originalTarget.rect.minY
+        let rest = Self.restingOffset(start: start, projected: target.rect.minY,
+                                      page: context.containerSize.height, content: context.contentSize.height,
+                                      heading: memory.heading(forGestureAt: start))
+        memory.head(to: rest)
+        target.rect.origin.y = rest
     }
 
     /// Where the feed comes to rest. `start` is the offset when the gesture began, `projected` where it would
-    /// coast to if left alone. Pure, so the rule is unit-tested.
-    static func restingOffset(start: CGFloat, projected: CGFloat, page: CGFloat, content: CGFloat) -> CGFloat {
+    /// coast to if left alone, `heading` where the previous gesture sent the feed. Pure, so the rule is unit-tested.
+    static func restingOffset(start: CGFloat, projected: CGFloat, page: CGFloat, content: CGFloat,
+                              heading: CGFloat? = nil) -> CGFloat {
         guard page > 0 else { return projected }
         let last = max(0, (content / page).rounded() - 1)
         let moved = projected - start
-        // A gesture that begins while the previous one is still settling counts from the card nearest the finger.
         var index = (start / page).rounded()
+        // A gesture that begins while the feed is still on its way to a card counts from that card: the second
+        // of two quick flicks goes one past it, not to it again. (Counting from the nearest card swallowed any
+        // flick made before the feed was half way.) Without a heading in reach, the nearest card it is.
+        // Only a gesture that moves the feed counts this way. SwiftUI also asks when nothing was swiped (the
+        // text size or the layout changed); the answer then is the nearest card, wherever the feed was heading.
+        let swiped = abs(moved) > commitDistance
+        let atRest = abs(start - index * page) < 1
+        // (Several quick flicks put the heading more than a card ahead of the feed, hence three.)
+        if swiped, !atRest, let heading, abs(heading - start) < 3 * page { index = (heading / page).rounded() }
         if moved > commitDistance { index += 1 } else if moved < -commitDistance { index -= 1 }
         return min(max(index, 0), last) * page
     }
