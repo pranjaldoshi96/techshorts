@@ -522,7 +522,36 @@ def test_publish_refuses_an_edition_that_fails_the_check(replayed, tmp_path, mon
 
 
 @pytest.mark.skipif(not shutil.which("git"), reason="needs git")
-def test_mirror_force_pushes_one_amended_commit(tmp_path):
+def test_mirror_pushes_only_in_a_process_started_as_the_publisher(tmp_path, monkeypatch):
+    """config.yaml names the live repository; a test, a tool or a hand-run tick must never push to it."""
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    out = tmp_path / "site"
+    out.mkdir()
+    (out / "edition.json").write_text("{}")
+    cfg = {"publish": {"git_remote": str(remote), "git_branch": "edition", "deploy_key": ""}}
+    monkeypatch.delenv(mirror.ENV, raising=False)
+    assert mirror.remote(cfg) is None and mirror.remote(tc.CFG) is None
+    assert mirror.push(tc.new_db(), cfg, str(out), tc.EDITION_AT) is None
+    assert not (out / ".git").exists()
+    refs = subprocess.run(["git", "--git-dir", str(remote), "for-each-ref"], capture_output=True, text=True).stdout
+    assert refs == ""
+    monkeypatch.setenv(mirror.ENV, "1")
+    assert mirror.remote(cfg) == str(remote)
+    assert mirror.remote({"publish": {"git_remote": None}}) is None
+
+
+def test_the_worker_unit_is_the_only_file_that_makes_a_process_the_publisher():
+    server = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    unit = open(os.path.join(server, "deploy", "techgist-worker.service")).read()
+    assert "Environment=TECHGIST_MIRROR=1" in unit
+    for name in ("techgist-watchdog.service", "techgist-backup.service", "techgist-alert@.service"):
+        assert "TECHGIST_MIRROR" not in open(os.path.join(server, "deploy", name)).read()
+
+
+@pytest.mark.skipif(not shutil.which("git"), reason="needs git")
+def test_mirror_force_pushes_one_amended_commit(tmp_path, monkeypatch):
+    monkeypatch.setenv(mirror.ENV, "1")
     remote = tmp_path / "remote.git"
     subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
     out = tmp_path / "site"

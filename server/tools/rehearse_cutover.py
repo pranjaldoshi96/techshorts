@@ -91,6 +91,7 @@ def main():
 
         run_cfg = {**cfg, "publish": {**pub, "git_remote": args.remote, "git_branch": args.branch,
                                       "deploy_key": args.deploy_key or pub.get("deploy_key")}}
+        os.environ[mirror.ENV] = "1"        # this tool is the one other place a push is meant (to a scratch branch)
         result = mirror.push(Meta(), run_cfg, work, utcnow(), force=True)
         print(f"push to {args.remote} branch {args.branch}: {result} ({len(edition['articles'])} articles, "
               f"{n_img} image files)")

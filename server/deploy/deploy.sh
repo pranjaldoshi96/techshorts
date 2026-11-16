@@ -1,18 +1,29 @@
 #!/bin/bash
 # Copies server/ to the VPS and restarts the worker. Run from a checkout:  server/deploy/deploy.sh [--setup]
 #   --setup   also run deploy/setup_vps.sh there (first install, new requirements, or a changed tools/v1decode)
-# State (/var/lib/techgist) and the venv are left alone. Nothing here pushes to GitHub: publish.git_remote is
-# refused unless it is null, because this box is a test run until cutover.
+# State (/var/lib/techgist) and the venv are left alone. The worker it restarts pushes the edition to GitHub when
+# publish.git_remote is set (see the guard below).
 set -euo pipefail
 HOST=${TECHGIST_VPS:-root@213.210.36.218}
 KEY=${TECHGIST_VPS_KEY:-$HOME/.ssh/techgist_vps}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=8 -i "$KEY")
 
-if ! grep -Eq '^\s*git_remote:\s*null(\s|$)' "$HERE/config.yaml"; then
-    echo "config.yaml sets publish.git_remote; refusing to deploy a test run that could push" >&2
+# Since the cutover (2026-11-16) this box is the live publisher: it force-pushes the edition branch that the app
+# reads. The only remote a deploy accepts is that repository, or null (the rollback: nothing is pushed). Anything
+# else, or a branch other than `edition`, is refused, so a typo cannot replace some other branch or repository.
+LIVE_REMOTE=git@github.com:pranjaldoshi96/techshorts.git
+remote=$(sed -nE 's/^[[:space:]]+git_remote:[[:space:]]*([^[:space:]#]+).*/\1/p' "$HERE/config.yaml")
+branch=$(sed -nE 's/^[[:space:]]+git_branch:[[:space:]]*([^[:space:]#]+).*/\1/p' "$HERE/config.yaml")
+if [ "$remote" != null ] && [ "$remote" != "$LIVE_REMOTE" ]; then
+    echo "config.yaml: publish.git_remote is '$remote'; only null or $LIVE_REMOTE can be deployed" >&2
     exit 1
 fi
+if [ "$branch" != edition ]; then
+    echo "config.yaml: publish.git_branch is '$branch'; only 'edition' can be deployed" >&2
+    exit 1
+fi
+echo "publish.git_remote: $remote"
 rsync -az --delete -e "${SSH[*]}" \
     --exclude /venv --exclude /REVISION --exclude __pycache__ --exclude .pytest_cache --exclude '*.pyc' \
     --exclude /main.swift --exclude /publish.sh --exclude /enrich.py --exclude /editorial.example.json \

@@ -877,8 +877,10 @@ def image_url_check(db, cfg, edition, now, session=None, sample=3):
     fetched. With a remote, a few URLs are fetched every 30 min and a failure alerts."""
     pub = cfg.get("publish") or {}
     urls = [a["image"] for a in edition["articles"] if a.get("image")]
-    if not pub.get("git_remote"):
-        return {"served": False, "why": "publish.git_remote is null: the edition and img/ exist only in out_dir",
+    from . import mirror
+    if not mirror.remote(cfg):
+        return {"served": False, "why": "not pushing (publish.git_remote is null, or this process was not started"
+                                        " with TECHGIST_MIRROR=1): the edition and img/ exist only in out_dir",
                 "urls": len(urls)}
     last = from_iso(db.get_meta("image_check_at"))
     if last and now - last < IMAGE_CHECK_EVERY:
