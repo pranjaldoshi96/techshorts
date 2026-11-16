@@ -5,7 +5,7 @@ final class FeedOrderingTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
     private func story(_ name: String, _ category: Techgist.Category = .top, hoursAgo: Double, topRank: Int? = nil, rank: Int? = nil,
-                       source: String = "Wired", others: [String]? = nil, badge: String? = nil, spice: Double? = nil) -> Article {
+                       source: String = "Wired", others: [String]? = nil, badge: String? = nil, spice: Int? = nil) -> Article {
         Article(url: URL(string: "https://example.com/\(name)")!, title: name, excerpt: "", content: "", image: nil,
                 source: source, category: category, publishedAt: now.addingTimeInterval(-hoursAgo * 3600),
                 points: nil, alsoCoveredBy: others, topRank: topRank, headline: nil, summary: nil,
@@ -101,7 +101,7 @@ final class FeedOrderingTests: XCTestCase {
         let big = ["A", "B"]
         let all = [
             story("covered", hoursAgo: 1, topRank: 0, others: big),
-            story("spicy", hoursAgo: 1, topRank: 3, others: big, spice: 0.9),
+            story("spicy", hoursAgo: 1, topRank: 3, others: big, spice: 9),
             story("breaking", hoursAgo: 1, topRank: 7, badge: "breaking"),
             story("thin", hoursAgo: 1, topRank: 1, others: ["A"]),
             story("stale", hoursAgo: 7, topRank: 2, others: big),

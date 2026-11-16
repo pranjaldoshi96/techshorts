@@ -17,6 +17,12 @@ struct ImageVariants: Codable, Hashable, Sendable {
     var generated: Bool?
 }
 
+/// The text of a story's alert as the server wrote it: a title of at most 40 characters and a body of at most 110.
+struct AlertText: Codable, Hashable, Sendable {
+    var title: String?
+    var body: String?
+}
+
 struct Article: Codable, Identifiable, Hashable, Sendable {
     let url: URL
     let title: String
@@ -45,8 +51,9 @@ struct Article: Codable, Identifiable, Hashable, Sendable {
     var summaryShort: String?
     /// One short sentence with new information, used as the body of an alert. JSON key `alertLine` (or `notifLine`).
     var alertLine: String?
-    /// How tap-worthy the story is, 0 to 1 (a 0 to 10 value is scaled down). Drives the "Hot" badge and alert choice.
-    var spice: Double?
+    /// How tap-worthy the story is, 1 to 10. Drives the "Hot" badge and alert choice. An older 0-to-1 fraction is
+    /// read as tenths.
+    var spice: Int?
     /// 0-based position inside the story's own tab (`category`). `topRank` is the position in Top.
     var rank: Int?
     var images: ImageVariants?
@@ -58,7 +65,10 @@ struct Article: Codable, Identifiable, Hashable, Sendable {
     var updatedAt: Date?
     /// False when the card carries the publisher's title and excerpt because no checked AI text exists.
     var aiText: Bool?
+    /// The server's id for the event the story reports. A push names its story by this id.
     var eventId: String?
+    /// The title and body the server wrote for this story's alert, checked against the article like the headline.
+    var notification: AlertText?
 
     /// The headline to show: Techgist's when there is one, otherwise the publisher's.
     var displayTitle: String { headline ?? title }
@@ -68,7 +78,7 @@ struct Article: Codable, Identifiable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case url, title, excerpt, content, image, source, category, publishedAt, points, alsoCoveredBy, topRank
         case headline, summary
-        case summaryShort, alertLine, spice, rank, images, badge, kind = "type", updatedAt, aiText, eventId
+        case summaryShort, alertLine, spice, rank, images, badge, kind = "type", updatedAt, aiText, eventId, notification
     }
 }
 
@@ -105,7 +115,11 @@ extension Article {
         if alertLine == nil, let other = try? decoder.container(keyedBy: AnyKey.self) {
             alertLine = (try? other.decodeIfPresent(String.self, forKey: AnyKey("notifLine"))) ?? nil
         }
-        spice = lenient(.spice)
+        if let whole: Int = lenient(.spice) {
+            spice = whole > 0 ? min(whole, 10) : nil
+        } else if let number: Double = lenient(.spice), number > 0 {
+            spice = min(max(Int((number <= 1 ? number * 10 : number).rounded()), 1), 10)
+        }
         rank = lenient(.rank)
         images = lenient(.images)
         badge = lenient(.badge)
@@ -113,6 +127,7 @@ extension Article {
         updatedAt = lenient(.updatedAt)
         aiText = lenient(.aiText)
         eventId = lenient(.eventId)
+        notification = lenient(.notification)
     }
 }
 
@@ -131,8 +146,16 @@ extension Article {
         return Self.firstSentences(2, of: displaySummary)
     }
 
-    /// The body of an alert: the server's alert line, else the summary's first sentence.
+    /// The title of an alert: the server's, else the headline on the card.
+    var alertTitle: String {
+        if let title = notification?.title, !title.isEmpty { return title }
+        return displayTitle
+    }
+
+    /// The body of an alert: the server's (`notification.body`, or the older `alertLine`), else the summary's
+    /// first sentence.
     var alertBody: String {
+        if let body = notification?.body, !body.isEmpty { return body }
         if let line = alertLine, !line.isEmpty { return line }
         let first = Self.firstSentences(1, of: displaySummary)
         if !first.isEmpty { return first }
@@ -143,15 +166,12 @@ extension Article {
     /// Outlets reporting the story, the lead included.
     var coverage: Int { 1 + (alsoCoveredBy?.count ?? 0) }
 
-    /// `spice` on a 0 to 1 scale, whichever scale the edition used.
-    var spiceLevel: Double {
-        guard let spice, spice > 0 else { return 0 }
-        return min(spice > 1 ? spice / 10 : spice, 1)
-    }
+    /// `spice` on a 0 to 1 scale; 0 when the edition sent none.
+    var spiceLevel: Double { Double(spice ?? 0) / 10 }
 
     var isBreaking: Bool { badge == "breaking" }
     var isDeveloping: Bool { badge == "developing" }
-    var isHot: Bool { spiceLevel >= 0.75 }
+    var isHot: Bool { (spice ?? 0) >= 8 }
 
     /// A label for stories that aren't straight news, e.g. `ANALYSIS`.
     var kindLabel: String? {

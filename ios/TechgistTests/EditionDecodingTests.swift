@@ -54,7 +54,7 @@ final class EditionDecodingTests: XCTestCase {
         // The server's safe-mode publisher encodes with this same type; nil fields must not appear in its output.
         let edition = try XCTUnwrap(Edition.decode(try liveData()))
         let json = try XCTUnwrap(String(data: try edition.encoded(), encoding: .utf8))
-        for key in ["summaryShort", "alertLine", "spice", "rank", "images", "badge", "type", "updatedAt", "aiText", "eventId", "degraded"] {
+        for key in ["summaryShort", "alertLine", "spice", "rank", "images", "badge", "type", "updatedAt", "aiText", "eventId", "notification", "degraded"] {
             XCTAssertFalse(json.contains("\"\(key)\":"), key)
         }
         let again = try XCTUnwrap(Edition.decode(Data(json.utf8)))
@@ -85,7 +85,7 @@ final class EditionDecodingTests: XCTestCase {
         XCTAssertEqual(a.summaryShort, "One. Two.")
         XCTAssertEqual(a.alertLine, "New detail here.")
         XCTAssertEqual(a.alertBody, "New detail here.")
-        XCTAssertEqual(a.spice, 0.9)
+        XCTAssertEqual(a.spice, 9)
         XCTAssertTrue(a.isHot)
         XCTAssertEqual(a.rank, 3)
         XCTAssertEqual(a.images?.hero?.absoluteString, "https://example.com/h.webp")
@@ -125,6 +125,93 @@ final class EditionDecodingTests: XCTestCase {
         let a = try XCTUnwrap(Edition.decode(edition(article))?.articles.first)
         XCTAssertEqual(a.spiceLevel, 0.8, accuracy: 0.0001)
         XCTAssertTrue(a.isHot)
+    }
+
+    func testSpiceOfOneIsTheBottomOfTheScaleNotTheTop() throws {
+        let article = v1.replacingOccurrences(of: "\"source\"", with: "\"spice\":1,\"source\"")
+        let a = try XCTUnwrap(Edition.decode(edition(article))?.articles.first)
+        XCTAssertEqual(a.spice, 1)
+        XCTAssertFalse(a.isHot)
+    }
+
+    // MARK: The engine's edition (EDITION FIELD CONTRACT)
+
+    /// `edition-v2-engine.json` is the edition the new engine published on 16 Nov 2026
+    /// (/var/lib/techgist/edition/edition.json on the server), unchanged.
+    private func engineEdition() throws -> Edition {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "edition-v2-engine", withExtension: "json"))
+        return try XCTUnwrap(Edition.decode(try Data(contentsOf: url)))
+    }
+
+    func testEngineEditionDecodesEveryArticleWithItsNewFields() throws {
+        let e = try engineEdition()
+        XCTAssertEqual(e.articles.count, 126)
+        XCTAssertEqual(e.degraded, false)
+        for a in e.articles {
+            XCTAssertNotNil(a.eventId, a.id)
+            XCTAssertTrue((1...10).contains(try XCTUnwrap(a.spice)), a.id)
+            XCTAssertNotNil(a.image, a.id)
+            XCTAssertEqual(a.aiText, true)
+            XCTAssertFalse(a.alertTitle.isEmpty); XCTAssertFalse(a.alertBody.isEmpty)
+        }
+        let withAlert = e.articles.filter { $0.notification != nil }
+        XCTAssertEqual(withAlert.count, 125)
+        for a in withAlert {
+            let text = try XCTUnwrap(a.notification)
+            XCTAssertLessThanOrEqual(try XCTUnwrap(text.title).count, 40, a.id)
+            XCTAssertLessThanOrEqual(try XCTUnwrap(text.body).count, 110, a.id)
+            XCTAssertEqual(a.alertTitle, text.title); XCTAssertEqual(a.alertBody, text.body)
+        }
+        let lead = try XCTUnwrap(e.articles.first { $0.topRank == 0 })
+        XCTAssertEqual(lead.eventId, "ev_553277a985")
+        XCTAssertEqual(lead.spice, 8)
+        XCTAssertTrue(lead.isHot)
+        XCTAssertEqual(lead.notification?.title, "Huang weighs return as Nvidia CEO")
+        // The one story without alert text falls back to its headline and first sentence.
+        let plain = try XCTUnwrap(e.articles.first { $0.notification == nil })
+        XCTAssertEqual(plain.alertTitle, plain.displayTitle)
+    }
+
+    func testEngineEditionFillsEveryTabAndTopFollowsTopRank() throws {
+        let e = try engineEdition()
+        for tab in Techgist.Category.allCases {
+            XCTAssertGreaterThanOrEqual(FeedOrdering.stories(in: tab, from: e.articles).count, 10, tab.rawValue)
+        }
+        let top = FeedOrdering.stories(in: .top, from: e.articles)
+        XCTAssertEqual(top.compactMap(\.topRank), Array(0..<top.count))
+    }
+
+    func testEngineEditionSurvivesTheCacheRoundTrip() throws {
+        let e = try engineEdition()
+        let again = try XCTUnwrap(Edition.decode(try e.encoded()))
+        XCTAssertEqual(again.articles, e.articles)
+        // The app's own cache uses the default coding; alert text, spice and the event id must survive it too.
+        let cached = try JSONDecoder().decode([Article].self, from: try JSONEncoder().encode(e.articles))
+        XCTAssertEqual(cached, e.articles)
+    }
+
+    func testRankOrdersATabAndTheAlertTextComesFromNotification() throws {
+        func story(_ name: String, rank: Int, minutesOld: Int) -> String {
+            v1.replacingOccurrences(of: "/a\"", with: "/\(name)\"")
+                .replacingOccurrences(of: "00:30:00Z", with: String(format: "00:%02d:00Z", 59 - minutesOld))
+                .replacingOccurrences(of: "\"source\"", with: "\"rank\":\(rank),\"spice\":7,\"eventId\":\"ev_\(name)\",\"alertLine\":\"Older line.\",\"notification\":{\"title\":\"Alert \(name)\",\"body\":\"Body \(name).\"},\"source\"")
+        }
+        // The newest story has the worst rank; the rank wins.
+        let json = [story("newest", rank: 2, minutesOld: 1), story("oldest", rank: 0, minutesOld: 50), story("middle", rank: 1, minutesOld: 20)]
+        let e = try XCTUnwrap(Edition.decode(edition(json.joined(separator: ","))))
+        let ai = FeedOrdering.stories(in: .ai, from: e.articles)
+        XCTAssertEqual(ai.map(\.eventId), ["ev_oldest", "ev_middle", "ev_newest"])
+        XCTAssertEqual(ai[0].alertTitle, "Alert oldest")
+        XCTAssertEqual(ai[0].alertBody, "Body oldest.")
+        XCTAssertEqual(ai[0].spice, 7)
+    }
+
+    func testMistypedNotificationIsIgnored() throws {
+        let article = v1.replacingOccurrences(of: "\"source\"", with: "\"notification\":\"hello\",\"source\"")
+        let a = try XCTUnwrap(Edition.decode(edition(article))?.articles.first)
+        XCTAssertNil(a.notification)
+        XCTAssertEqual(a.alertTitle, "Publisher title")
+        XCTAssertEqual(a.alertBody, "Excerpt.")
     }
 
     func testAnArticleThatDoesNotDecodeIsDroppedAndTheRestKept() throws {

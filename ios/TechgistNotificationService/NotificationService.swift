@@ -12,10 +12,15 @@ final class NotificationService: UNNotificationServiceExtension {
                              withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void) {
         self.contentHandler = contentHandler
         bestAttempt = request.content.mutableCopy() as? UNMutableNotificationContent
+        // A push about a story gets the same Read and Save buttons as the app's own alerts.
+        if let best = bestAttempt, best.categoryIdentifier.isEmpty,
+           request.content.userInfo["url"] is String || request.content.userInfo["eventId"] is String {
+            best.categoryIdentifier = "STORY"
+        }
         guard let content = bestAttempt,
               let link = request.content.userInfo["image"] as? String,
               let url = URL(string: link), url.scheme == "https" else {
-            contentHandler(request.content)
+            contentHandler(bestAttempt ?? request.content)
             return
         }
 

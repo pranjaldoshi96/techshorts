@@ -217,6 +217,16 @@ final class NewsStore: ObservableObject {
         return true
     }
 
+    /// Brings the story an alert is about on screen: by its link, or by the event it reports.
+    @discardableResult
+    func focus(url: URL?, eventId: String?) -> Bool {
+        if let url, focus(on: url) { return true }
+        guard let eventId else { return false }
+        let match = articles.first { $0.eventId == eventId } ?? waiting?.articles.first { $0.eventId == eventId }
+        guard let match else { return false }
+        return focus(on: match.url)
+    }
+
     // MARK: Saved
 
     private static func loadSaved() -> [Article] { Disk.load([Article].self, from: savedFile) ?? [] }

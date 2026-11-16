@@ -1,7 +1,7 @@
 import Foundation
 import UserNotifications
 
-/// Alerts for big stories, shown by the app itself until server push arrives. When iOS lets the app refresh in the
+/// Alerts for big stories, shown by the app itself while the server isn't pushing to this device. When iOS lets the app refresh in the
 /// background, a new Top story becomes a local notification if it is marked breaking by the edition, or is covered by
 /// 3+ outlets, and is under 6 hours old. At most 1 per refresh and 3 per 24 hours, never the same story twice.
 /// Stories already seen in the app don't alert. Timing depends on when iOS runs the refresh.
@@ -16,11 +16,14 @@ enum BreakingNews {
     static func enable() async -> Bool {
         let granted = await StoryNotification.requestPermission()
         UserDefaults.standard.set(granted, forKey: Keys.breakingNews)
+        await PushRegistration.sync()
         return granted
     }
 
-    static func disable() {
+    /// Turns alerts off and takes this device out of the push registry.
+    static func disable() async {
         UserDefaults.standard.set(false, forKey: Keys.breakingNews)
+        await PushRegistration.sync()
     }
 
     /// Big stories in `articles` that are not in `seen`, best first: breaking ones, then the spiciest, then by Top rank.
@@ -44,7 +47,9 @@ enum BreakingNews {
 
     /// After a background refresh: alert the best new big story, within the daily cap.
     static func alertIfNeeded(_ articles: [Article], now: Date = Date()) async {
-        guard isEnabled, let story = candidates(in: articles, seen: seen, now: now).first else { return }
+        // Once the server pushes to this device, it decides what alerts; a second, local alert would be a duplicate.
+        guard isEnabled, !PushRegistration.isRegistered,
+              let story = candidates(in: articles, seen: seen, now: now).first else { return }
         let recent = (UserDefaults.standard.array(forKey: sentKey) as? [Date] ?? []).filter { now.timeIntervalSince($0) < 86_400 }
         guard recent.count < maxPerDay else { return }
 

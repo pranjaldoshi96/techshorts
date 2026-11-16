@@ -1,20 +1,36 @@
 import UIKit
 import UserNotifications
 
-/// Server push is not live yet. Everything below is ready for it and stays idle until `registerURL` is set.
 enum PushConfig {
-    /// Where the device token is sent (the registry's `/v1/register`). Nil means: don't ask iOS for a token and
-    /// don't upload anything. Set it together with the Push Notifications capability on the app target.
+    /// The base URL of Techgist's device registry, e.g. `https://push.example.com` (HTTPS, no trailing path).
+    /// The app POSTs to `<registerURL>/v1/devices` and DELETEs `<registerURL>/v1/devices/<token>`.
+    /// Nil means server push is off: the app never asks iOS for a token and sends nothing; alerts stay local.
     static let registerURL: URL? = nil
 }
 
-/// Asks iOS for a push token, keeps it, and sends it to the registry when one is configured.
+/// Server push for big stories. The device registers after the reader allows notifications and has "Big story
+/// alerts" on: at that moment, on every launch after it, and whenever iOS issues a new token. Turning the switch off
+/// (or taking the permission away) removes the device from the registry.
+///
+/// The registry learns the APNs token, whether it is a sandbox or production token, the time zone, the locale and
+/// the app version. Nothing else leaves the device.
 enum PushRegistration {
-    private static let tokenKey = "pushDeviceToken"
-    private static let uploadedKey = "pushTokenUploaded"
+    /// The token the registry currently holds for this device; nil when it holds none.
+    private static let registeredKey = "pushRegisteredToken"
 
-    /// The APNs device token as hex, once iOS has issued one.
-    static var deviceToken: String? { UserDefaults.standard.string(forKey: tokenKey) }
+    // Replaced in tests.
+    static var baseURL: URL? = PushConfig.registerURL
+    static var defaults: UserDefaults = .standard
+    /// Sends a request and returns the HTTP status, or nil when there was no answer.
+    static var send: (URLRequest) async -> Int? = { request in
+        guard let (_, response) = try? await URLSession.shared.data(for: request) else { return nil }
+        return (response as? HTTPURLResponse)?.statusCode
+    }
+
+    static var registeredToken: String? { defaults.string(forKey: registeredKey) }
+
+    /// True while the server is the one sending big-story alerts to this device, so the app must not send its own.
+    static var isRegistered: Bool { baseURL != nil && registeredToken != nil }
 
     static var environment: String {
         #if DEBUG
@@ -24,51 +40,87 @@ enum PushRegistration {
         #endif
     }
 
-    /// Registers with APNs when push is configured and the reader has allowed notifications.
-    @MainActor static func registerIfPossible() async {
-        guard PushConfig.registerURL != nil else { return }
+    /// Brings the registry in line with the reader's choices. Called on launch, after the permission prompt, and
+    /// when "Big story alerts" changes. Never shows a prompt itself.
+    @MainActor static func sync() async {
+        guard baseURL != nil else { return }
         let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
-        guard status == .authorized || status == .provisional else { return }
-        UIApplication.shared.registerForRemoteNotifications()
+        if wantsPush(alertsOn: BreakingNews.isEnabled, status: status) {
+            // iOS answers through the app delegate, which calls `didRegister(deviceToken:)`.
+            UIApplication.shared.registerForRemoteNotifications()
+        } else {
+            await unregister()
+            UIApplication.shared.unregisterForRemoteNotifications()
+        }
+    }
+
+    static func wantsPush(alertsOn: Bool, status: UNAuthorizationStatus) -> Bool {
+        alertsOn && (status == .authorized || status == .provisional)
     }
 
     static func didRegister(deviceToken data: Data) {
-        UserDefaults.standard.set(hex(data), forKey: tokenKey)
-        Task { await upload() }
+        let token = hex(data)
+        Task { await register(token: token) }
     }
 
     static func didFail(_ error: Error) {
-        // No token: local alerts keep working, and the next launch tries again.
-        UserDefaults.standard.removeObject(forKey: tokenKey)
+        // No token this time: local alerts keep working, and the next launch asks again.
     }
 
     static func hex(_ data: Data) -> String { data.map { String(format: "%02x", $0) }.joined() }
 
-    /// What the registry needs to deliver in the reader's morning and respect their switches.
+    /// Sends the token. When iOS has issued a different token than the one the registry holds, the old one is removed.
+    static func register(token: String) async {
+        guard let base = baseURL, let request = registerRequest(base: base, token: token) else { return }
+        if let old = registeredToken, old != token, let remove = unregisterRequest(base: base, token: old) {
+            _ = await send(remove)
+        }
+        guard let status = await send(request), (200..<300).contains(status) else { return }
+        defaults.set(token, forKey: registeredKey)
+    }
+
+    /// Removes this device from the registry. If the server can't be reached the token is kept, so the next
+    /// launch tries again.
+    static func unregister() async {
+        guard let base = baseURL, let token = registeredToken,
+              let request = unregisterRequest(base: base, token: token) else { return }
+        guard let status = await send(request), (200..<300).contains(status) || status == 404 || status == 410 else { return }
+        defaults.removeObject(forKey: registeredKey)
+    }
+
+    // MARK: The wire format (PUSH CONTRACT)
+
     static func registration(token: String) -> [String: Any] {
         [
             "token": token,
             "env": environment,
             "tz": TimeZone.current.identifier,
-            "brief": DailyDigest.isEnabled,
-            "briefMinute": DailyDigest.minuteOfDay,
-            "breaking": BreakingNews.isEnabled,
+            "locale": Locale.current.identifier,
             "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
         ]
     }
 
-    /// Sends the token and settings. Skipped when nothing changed since the last successful upload.
-    static func upload() async {
-        guard let url = PushConfig.registerURL, let token = deviceToken,
-              let body = try? JSONSerialization.data(withJSONObject: registration(token: token), options: [.sortedKeys]) else { return }
-        let fingerprint = String(decoding: body, as: UTF8.self)
-        guard UserDefaults.standard.string(forKey: uploadedKey) != fingerprint else { return }
-        var request = URLRequest(url: url, timeoutInterval: 15)
+    static func registerRequest(base: URL, token: String) -> URLRequest? {
+        guard isUsable(base), isToken(token),
+              let body = try? JSONSerialization.data(withJSONObject: registration(token: token), options: [.sortedKeys]) else { return nil }
+        var request = URLRequest(url: base.appendingPathComponent("v1/devices"), timeoutInterval: 15)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
-        guard let (_, response) = try? await URLSession.shared.data(for: request),
-              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return }
-        UserDefaults.standard.set(fingerprint, forKey: uploadedKey)
+        return request
+    }
+
+    static func unregisterRequest(base: URL, token: String) -> URLRequest? {
+        guard isUsable(base), isToken(token) else { return nil }
+        var request = URLRequest(url: base.appendingPathComponent("v1/devices").appendingPathComponent(token), timeoutInterval: 15)
+        request.httpMethod = "DELETE"
+        return request
+    }
+
+    /// Tokens only ever travel over HTTPS.
+    private static func isUsable(_ base: URL) -> Bool { base.scheme == "https" && base.host != nil }
+
+    private static func isToken(_ token: String) -> Bool {
+        !token.isEmpty && token.allSatisfy { $0.isHexDigit }
     }
 }

@@ -35,6 +35,7 @@ struct NotificationsOffer: View {
                         breakingEnabled = granted
                         notificationsOffered = true
                         if granted { await DailyDigest.reschedule(with: store.topStory) }
+                        await PushRegistration.sync()
                         dismiss()
                     }
                 } label: {
@@ -66,7 +67,7 @@ struct AlertPreview: View {
                 .frame(width: 38, height: 38)
                 .clipShape(.rect(cornerRadius: 9))
             VStack(alignment: .leading, spacing: 2) {
-                Text(article.displayTitle)
+                Text(article.alertTitle)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
                 Text(article.alertBody)
@@ -82,6 +83,6 @@ struct AlertPreview: View {
         .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 20))
         .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Color.primary.opacity(0.08)))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Example alert: \(article.displayTitle). \(article.alertBody)")
+        .accessibilityLabel("Example alert: \(article.alertTitle). \(article.alertBody)")
     }
 }

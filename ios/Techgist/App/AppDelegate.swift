@@ -5,7 +5,8 @@ import UserNotifications
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     /// What to do with a tapped alert: show its card in the feed, or open the full story.
     enum Request: Equatable {
-        case show(URL)
+        /// A tapped alert. A server push names its story by `eventId`, by `url`, or both.
+        case show(url: URL?, eventId: String?)
         case read(URL)
     }
 
@@ -17,7 +18,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         StoryNotification.registerCategories()
-        Task { await PushRegistration.registerIfPossible() }
+        Task { await PushRegistration.sync() }
         return true
     }
 
@@ -36,18 +37,19 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
-        guard let url = StoryNotification.storyURL(from: info) else { return }
+        let url = StoryNotification.storyURL(from: info)
+        let eventId = StoryNotification.eventId(from: info)
         switch response.actionIdentifier {
         case StoryNotification.saveAction:
             // Runs in the background, possibly with no feed on screen.
             if let article = StoryNotification.article(from: info)
-                ?? ArticleCache.load()?.articles.first(where: { $0.url == url }) {
+                ?? StoryNotification.story(url: url, eventId: eventId, in: ArticleCache.load()?.articles ?? []) {
                 NewsStore.saveFromNotification(article)
             }
         case StoryNotification.readAction:
-            Self.deliver(.read(url))
+            if let url { Self.deliver(.read(url)) }
         case UNNotificationDefaultActionIdentifier:
-            Self.deliver(.show(url))
+            if url != nil || eventId != nil { Self.deliver(.show(url: url, eventId: eventId)) }
         default:
             break
         }

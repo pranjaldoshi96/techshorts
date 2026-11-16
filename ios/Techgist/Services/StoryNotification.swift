@@ -29,14 +29,13 @@ enum StoryNotification {
     /// Asks for permission once; later calls return the current answer.
     static func requestPermission() async -> Bool {
         let granted = (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])) ?? false
-        if granted { await PushRegistration.registerIfPossible() }
         return granted
     }
 
     /// The notification for `article`. Downloads the picture (8 s at most) and attaches it when it is a JPEG, PNG or GIF.
     static func content(for article: Article, kind: Kind, subtitle: String? = nil) async -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
-        content.title = article.displayTitle
+        content.title = article.alertTitle
         if let subtitle { content.subtitle = subtitle }
         content.body = article.alertBody
         content.sound = sound
@@ -53,6 +52,7 @@ enum StoryNotification {
     /// `url` finds the story in the feed; `article` lets Save work even when the story has left the edition.
     static func userInfo(for article: Article) -> [String: Any] {
         var info: [String: Any] = ["url": article.url.absoluteString]
+        if let eventId = article.eventId { info["eventId"] = eventId }
         var slim = article
         slim.content = ""
         if let data = try? JSONEncoder().encode(slim), data.count < 3000, let json = String(data: data, encoding: .utf8) {
@@ -64,6 +64,18 @@ enum StoryNotification {
     /// The story link carried by a notification.
     static func storyURL(from userInfo: [AnyHashable: Any]) -> URL? {
         (userInfo["url"] as? String).flatMap(URL.init(string:))
+    }
+
+    /// The server's event id carried by a notification.
+    static func eventId(from userInfo: [AnyHashable: Any]) -> String? {
+        (userInfo["eventId"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// The story an alert is about: matched by its link first, then by the event it reports.
+    static func story(url: URL?, eventId: String?, in articles: [Article]) -> Article? {
+        if let url, let match = articles.first(where: { $0.url == url }) { return match }
+        if let eventId, let match = articles.first(where: { $0.eventId == eventId }) { return match }
+        return nil
     }
 
     /// The story carried by a notification, when it was small enough to ride along.

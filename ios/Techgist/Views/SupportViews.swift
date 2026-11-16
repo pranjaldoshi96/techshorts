@@ -241,7 +241,9 @@ struct SettingsView: View {
                 } header: {
                     Text("Notifications")
                 } footer: {
-                    Text("One notification each morning with the top story, and an alert when a story is covered by several outlets at once, at most 3 a day. iOS decides when the app checks in the background, so alerts can arrive a few hours after a story breaks."
+                    Text((PushConfig.registerURL == nil
+                          ? "One notification each morning with the top story, and an alert when a story is covered by several outlets at once, at most 3 a day. iOS decides when the app checks in the background, so alerts can arrive a few hours after a story breaks."
+                          : "One notification each morning with the top story, and an alert from Techgist when a big story breaks, at most a few a day. Turning alerts off removes this phone from Techgist's alert list.")
                          + (digestEnabled || breakingEnabled ? " A sample alert arrives 5 seconds after you ask for it." : ""))
                 }
 
@@ -260,7 +262,7 @@ struct SettingsView: View {
                         LabeledContent("Sources", value: store.disabledSources.isEmpty ? "All on" : "\(store.disabledSources.count) muted")
                     }
                 } footer: {
-                    Text("Muted sources don't appear in any tab. You can also mute a source by pressing and holding a story.")
+                    Text("Muted sources don't appear in any tab. You can also mute a source from the More button on a story.")
                 }
 
                 Section {
@@ -306,7 +308,6 @@ struct SettingsView: View {
                     digestEnabled = false
                 }
                 await DailyDigest.reschedule(with: store.topStory)
-                await PushRegistration.upload()
             }
         })
     }
@@ -319,10 +320,9 @@ struct SettingsView: View {
                     breakingEnabled = granted
                     showDeniedAlert = !granted
                 } else {
-                    BreakingNews.disable()
                     breakingEnabled = false
+                    await BreakingNews.disable()
                 }
-                await PushRegistration.upload()
             }
         })
     }
@@ -333,10 +333,7 @@ struct SettingsView: View {
         }, set: { date in
             let c = Calendar.current.dateComponents([.hour, .minute], from: date)
             digestMinute = (c.hour ?? 8) * 60 + (c.minute ?? 0)
-            Task {
-                await DailyDigest.reschedule(with: store.topStory)
-                await PushRegistration.upload()
-            }
+            Task { await DailyDigest.reschedule(with: store.topStory) }
         })
     }
 

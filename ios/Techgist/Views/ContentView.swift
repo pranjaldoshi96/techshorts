@@ -214,8 +214,13 @@ struct ContentView: View {
     private func handle(_ request: AppDelegate.Request) {
         sheet = nil
         switch request {
-        case .show(let url):
-            if !store.focus(on: url) { Reader.open(url) }
+        case .show(let url, let eventId):
+            if store.focus(url: url, eventId: eventId) { return }
+            // An alert usually arrives before the app has loaded the edition its story is in.
+            Task {
+                await store.checkForNewStories()
+                if !store.focus(url: url, eventId: eventId), let url { Reader.open(url) }
+            }
         case .read(let url):
             store.focus(on: url)
             readState.markRead(url.absoluteString)
