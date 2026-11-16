@@ -6,24 +6,33 @@ downloaded or decoded, the app fetches the feeds itself until a fresh one appear
 
 ```
 server                                   GitHub (techshorts repo)            iPhone (1.2)
-worker / publish.sh ──► edition branch ──► raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/edition.json
+worker (VPS)        ──► edition branch ──► raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/edition.json
                                                                 │ fresh (< 8 h) and decodable?  yes → show it
                                                                 └────────────────────────────── no  → fetch feeds directly
 ```
 
-The server is on a private network, so phones never connect to it. It only pushes finished files to GitHub, which
-serves them.
+Phones never connect to the server. It only pushes finished files to GitHub, which serves them.
 
-There are two publishers in this directory. Only one owns the `edition` branch at a time.
+**Since 2026-11-16 the live publisher is the worker on the public VPS** (`213.210.36.218`, systemd
+`techgist-worker`; everything about that machine is in [deploy/README.md](deploy/README.md), including the
+rollback). The old publisher, `publish.sh` on the private box, is switched off (its two cron lines are commented
+out) and kept as the rollback. Only one of the two owns the `edition` branch at a time.
 
-| | Live today | R1 worker (`worker/`, built, not cut over) |
+| | Old publisher (off, the rollback) | Worker (`worker/`), live on the VPS |
 |---|---|---|
 | What | `publish.sh`: the app's own Swift feed and ranking code (`main.swift`) in Docker, then `enrich.py` for LLM headlines and images | Python worker: sources, filtering, LLM writing and validation, clustering into events, ranking, tabs, images (docs/V2_SPEC.md sections 2, 3, 7) |
-| Cadence | cron **every 30 min** (`*/30 * * * *`, plus `@reboot`) | a 60 s tick; sources polled every 3 or 10 min; `edition.json` rewritten when it changes and at least every 5 min; pushed to GitHub at most every 10 min |
-| State | `~/.techshorts/` (`site/`, `enriched.json`, `publish.log`) | `~/.techshorts/state.db` (SQLite), `editorial.yaml`, `health.json`; the published directory is `~/.techshorts/edition/` |
+| Cadence | cron **every 30 min** (`*/30 * * * *`, plus `@reboot`) | a 60 s tick; sources polled every 3 or 10 min; `edition.json` rewritten when it changes and at least every 3 min; pushed to GitHub after a publish, at most every 2 min. GitHub's raw host caches a file for 5 min, so readers are served an edition up to about 10 min old |
+| State | `~/.techshorts/` on the private box (`site/`, `enriched.json`, `publish.log`) | `/var/lib/techgist/` on the VPS: `state.db` (SQLite), `editorial.yaml`, `health.json`; the published directory is `/var/lib/techgist/edition/`, which is also the git checkout that is pushed |
 
-At cutover (WP5) the worker takes over the branch and `publish.sh`/`enrich.py` retire. `main.swift` stays: it
-becomes the safe-mode publisher (spec 6.4), which isn't built yet (see "Not built yet").
+What the worker pushes to the `edition` branch: `edition.json`, `img/`, `health.json` and `notifications.json`
+(so the worker's health counters are public; they hold no key, topic or address). `main.swift` stays in the
+repository: it is the old publisher's builder and would be the safe-mode publisher (spec 6.4), which isn't built
+(see "Not built yet").
+
+Beyond the v1 fields that 1.2 decodes, every article carries, for the 2.0 app (1.2 ignores unknown keys):
+`rank` (int, 0-based place inside its `category`, the engine's order), `spice` (int 1-10, on every classified
+card), `eventId` (string) and, on a card with validated text and an alert that fits, `notification`
+`{"title": <= 40 characters, "body": <= 110}`. All four are optional for a reader.
 
 ## The R1 worker
 
@@ -171,8 +180,10 @@ python3 -m worker.main --out ~/.techshorts-r1/edition          # loop: a tick ev
 python3 tools/check_edition.py ~/.techshorts-r1/edition/edition.json   # the 1.2 decoder check, by hand
 ```
 
-`--out` defaults to `publish.out_dir`, else `<state_dir>/edition`. Nothing is pushed to GitHub unless
-`publish.git_remote` is set in `config.yaml`; it is unset until cutover, so a test run can't touch the live branch.
+`--out` defaults to `publish.out_dir`, else `<state_dir>/edition`. `config.yaml` names the live repository as
+`publish.git_remote`, but a process pushes there only when it was started with `TECHGIST_MIRROR=1`, which
+`deploy/techgist-worker.service` on the VPS sets and nothing else does (`worker/mirror.py`). So the commands
+above, the tests and every tool never touch the live branch. Do not export that variable in a shell.
 Each provider's key comes from the variable named in `config.yaml` (`HUB_API_KEY`, `NVIDIA_API_KEY`), else the file
 named by `<NAME>_FILE`, else the last `export <NAME>=` line in `~/.bashrc`. Without the hub key the backup model
 writes; with no key at all the worker still publishes, in degraded mode.
@@ -189,8 +200,8 @@ judge again and mark the events they overtook; written cards get their news date
 newer than their lead are queued for a rewrite; and with `--edition` every card of that edition is fact-checked
 again with the current rules, a card that fails going back to the writer with the reason.
 
-The same worker also runs as a system service on the public VPS (a test run that publishes to a local directory
-only); see [deploy/README.md](deploy/README.md). There the key comes from the file named by `NVIDIA_API_KEY_FILE`.
+The live worker is this code as a system service on the public VPS; see [deploy/README.md](deploy/README.md).
+There the keys come from the files named by `HUB_API_KEY_FILE` and `NVIDIA_API_KEY_FILE`.
 
 ### Owner controls: `server/tg`
 
@@ -231,33 +242,29 @@ to `publish.sh` and is not read by the worker.)
   source failing 6 polls in a row, more than 10% of stories (events) at raw importance ≥ 8, the primary LLM
   endpoint being answered by a backup (`llm_backup`), the embedding endpoint failing 5 ticks in a row, and the
   systemd unit failing (`techgist-alert@.service`), a nearly full disk, a corrupt `state.db` and ticks that keep
-  failing. On the VPS `techgist-watchdog.timer` also checks the edition's age from outside the worker every
-  minute and restarts it after 15 min without a publish (`deploy/README.md`, "Staying up"). A low pass rate is an alert only, never degraded mode; an endpoint that
+  failing, and a push to GitHub that fails (`mirror_push`). On the VPS `techgist-watchdog.timer` also checks the edition's age from outside the worker every
+  minute and restarts it after 15 min without a publish, and a cron job on the old private box checks the public
+  URL every 5 min and alerts when it is over 20 min old (`deploy/README.md`, "Staying up"). A low pass rate is an alert only, never degraded mode; an endpoint that
   times out more than it answers for 15 min is (`degraded.py`).
 
-### Cutover (WP5, owner)
+### Cutover and rollback
 
-1. Comment out the two `publish.sh` cron lines (`crontab -e`).
-2. Put `NVIDIA_API_KEY=…` and `NTFY_TOPIC=…` in `~/.techshorts/env` (`chmod 600`).
-3. In `config.yaml` set `publish.git_remote: git@github.com:pranjaldoshi96/techshorts.git` (it uses the existing
-   deploy key `~/.ssh/techshorts_deploy`).
-4. `cp techgist-worker.service techgist-alert@.service ~/.config/systemd/user/ && loginctl enable-linger $USER &&
-   systemctl --user daemon-reload && systemctl --user enable --now techgist-worker`
-5. `journalctl --user -u techgist-worker -f` and `./tg status`.
-
-To roll back: `systemctl --user disable --now techgist-worker` and restore the cron lines.
+Done on 2026-11-16: the worker on the VPS owns the `edition` branch. What was done, what was measured and the
+rollback (one command sequence) are in [deploy/README.md](deploy/README.md), "Cutover" and "Rollback".
 
 ### Not built yet
 
 - Safe mode (`.github/workflows/safe-mode.yml`, spec 2.14): a GitHub Action that publishes a degraded edition from
-  `main.swift` when the published `health.json` is over 30 min old. **TODO**, so a dead box is today noticed only
-  through the systemd `OnFailure` alert and the app's own 8 h fallback.
+  `main.swift` when the published `health.json` is over 30 min old. **TODO**: a dead VPS is noticed (the old
+  box's freshness cron alerts within about 25 min) but nothing publishes in its place; the owner rolls back by
+  hand, and 1.2 fetches feeds itself once the edition is 8 h old.
 - The v2 edition, edge, `hero` image variant and push (R2/R3), the daily owner digest, HN-only and Techmeme-only
   imports.
 
-## The live publisher (`publish.sh`), until cutover
+## The old publisher (`publish.sh`): off since the cutover, kept as the rollback
 
-Cron runs `publish.sh` every 30 minutes:
+On the private box (`pranjald@10.40.138.81`). Until 2026-11-16 cron ran `publish.sh` every 30 minutes; both lines
+are now commented out in that crontab (the original is saved there as `~/crontab.before-cutover-20261116`):
 
 ```
 */30 * * * * $HOME/TechShorts/server/publish.sh --log
