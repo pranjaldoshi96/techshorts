@@ -15,10 +15,11 @@ The app loads a ranked **edition** that the Techgist server (`../server/`) publi
 | `Services/ImageLoader.swift` | Downloads, downsamples and decodes pictures off the main thread; memory cache plus a 7-day disk cache; prefetches the next three cards. |
 | `Services/FeedService.swift`, `FeedParser.swift`, `Ranker.swift`, `HTMLText.swift`, `PageMetadata.swift` | The direct-feed fallback. The server's safe-mode publisher compiles these same files (plus the two models and `Disk.swift`) on Linux, so they must stay Foundation-only and keep their paths. |
 | `Services/StoryNotification.swift`, `BreakingNews.swift`, `DailyDigest.swift` | Local alerts: the morning gist and big-story alerts, with the story picture, Techgist's chime, and Read and Save buttons. |
-| `Services/PushRegistration.swift` | Server push, ready but off: it does nothing until `PushConfig.registerURL` is set. |
-| `TechgistNotificationService/` | Notification Service Extension that attaches the picture named in a push's `image` key. |
+| `Services/PushRegistration.swift` | Server push, off until `PushConfig.registerURL` is set (see "Server push" below). |
+| `TechgistNotificationService/` | Notification Service Extension: attaches the picture named in a push's `image` key and gives the push the Read and Save buttons. |
 | `Views/` | `CardView` (the card and its layouts), `FeedView` (paging), `ChipBar`, `ContentView` (shell), `SupportViews` (reader, saved, search, coverage, settings), `Theme` (design tokens). |
-| `TechgistTests/` | Decoding against a snapshot of the live edition, ordering, alert content, image decoding. |
+| `TechgistTests/` | Decoding against snapshots of the live v1 edition and the engine's edition, ordering, alert content, the push wire format, the paging rule. |
+| `TechgistUITests/` | Drives the app in the simulator: pages through every tab with short drags, flicks and held presses; accessibility audits of each screen; a hitch measurement. |
 
 ### Edition fields the app reads
 
@@ -30,14 +31,15 @@ Added for 2.0, all optional. A missing or mistyped value is ignored, never fatal
 |---|---|---|
 | `rank` | int | 0-based position inside the story's own tab. Without it, tabs other than Top are newest first. |
 | `summaryShort` | string | Shown when the full summary doesn't fit. Without it the app cuts the summary to two sentences. |
-| `alertLine` (or `notifLine`) | string | The body of an alert. Without it the summary's first sentence is used. |
-| `spice` | number, 0 to 1 (0 to 10 is scaled) | 0.75 and above shows a HOT badge and is preferred for alerts. |
+| `notification` | `{title, body}` | The alert's title (40 characters at most) and body (110). Without it the alert uses the headline and `alertLine`. |
+| `alertLine` (or `notifLine`) | string | Older name for the alert body. Without either, the summary's first sentence is used. |
+| `spice` | int, 1 to 10 (a 0 to 1 fraction is read as tenths) | 8 and above shows a HOT badge and is preferred for alerts. |
 | `images` | `{hero, std, thumb, generated}` | `hero` on phones 390 pt and wider, `std` otherwise and for alerts, `thumb` in lists. Falls back to `image`. |
 | `badge` | `breaking` or `developing` | Badge on the card; `breaking` stories can alert with fewer than 3 outlets. |
 | `type` | string | `analysis`, `opinion`, `interview`, `release_notes` and `tutorial` get a label. |
 | `updatedAt` | ISO 8601 date | "Updated 2h" when more than an hour after `publishedAt`. |
 | `aiText` | bool | `false` shows "Summary pending" instead of the AI label. |
-| `eventId` | string | Carried along; not used yet. |
+| `eventId` | string | The server's id for the event. A push names its story by it. |
 | `degraded` (on the edition) | bool | Shows the "Summaries catching up" banner. |
 
 An article that fails to decode (an unknown `category`, say) is dropped on its own; 1.2 rejects the whole edition in that case.
@@ -50,7 +52,29 @@ Open `Techgist.xcodeproj` in Xcode and press Run, or use the command line:
 xcodebuild -project Techgist.xcodeproj -scheme Techgist -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath build test
 ```
 
-In a Debug build, `SIMCTL_CHILD_EDITION_URL=file:///path/to/edition.json xcrun simctl launch booted com.pranjald.techgist` points the app at another edition.
+That runs the unit tests and the UI tests (about 15 minutes). Add `-only-testing:TechgistTests` for the unit tests alone (seconds), or `-only-testing:TechgistUITests/FeedScrollingUITests` for the paging tests.
+
+The accessibility audits read the text size from the environment, so they can be repeated at any size, and they follow the simulator's contrast and appearance settings:
+
+```bash
+TEST_RUNNER_CONTENT_SIZE=UICTContentSizeCategoryAccessibilityXXXL xcodebuild … test -only-testing:TechgistUITests/AccessibilityUITests
+xcrun simctl ui booted increase_contrast enabled
+```
+
+In a Debug build, `SIMCTL_CHILD_EDITION_URL=file:///path/to/edition.json xcrun simctl launch booted com.pranjald.techgist` points the app at another edition, and `SIMCTL_CHILD_UITEST_RESET=1` starts it as on a first launch.
+
+In the Simulator, scroll by clicking and dragging (a two-finger trackpad scroll is not a touch and does nothing in any app). A short drag is enough: the feed moves to the next story once it has travelled 36 points.
+
+## Server push
+
+Off until `PushConfig.registerURL` (one constant in `Services/PushRegistration.swift`) is set to the registry's HTTPS base URL.
+
+- **Register:** `POST <registerURL>/v1/devices` with `{"token", "env": "sandbox"|"production", "tz", "locale", "appVersion"}`. Sent after the reader allows notifications with Big story alerts on, on every launch after that, and when iOS issues a new token (the old one is deleted first).
+- **Opt out:** `DELETE <registerURL>/v1/devices/<token>` when Big story alerts is turned off in Settings or the permission is taken away. If the server can't be reached it is tried again on the next launch.
+- **Payload:** `{"aps": {"alert": {"title", "body"}, "sound": "techgist.caf", "mutable-content": 1, "thread-id": eventId}, "eventId", "url", "image"}`. The extension attaches `image`; tapping the alert shows the story's card, found by `url` or `eventId`, loading the newer edition first when the story isn't in the one on screen.
+- While the server is pushing to a device, the app's own background big-story alerts are off for it, so nobody gets the same story twice. The morning gist stays local.
+- The permission prompt only ever follows the in-app offer (after eight stories or the first save) or a switch in Settings; never at launch.
+- `env` is `sandbox` in Debug builds and `production` in Release builds.
 
 `scripts/make_chime.sh` regenerates the notification sound (`Techgist/techgist.caf`). It is synthesised from sine waves in the script; nothing is sampled.
 

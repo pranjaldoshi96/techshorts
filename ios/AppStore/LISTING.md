@@ -37,7 +37,7 @@ SUMMARIES WRITTEN ON YOUR IPHONE
 On iPhones with Apple Intelligence, Techgist writes a short summary of each story on your device. Nothing is sent to a server. On other iPhones you get the publisher's own excerpt.
 
 MADE FOR A QUICK READ
-• Swipe up for the next story, left and right to switch tabs
+• Swipe up for the next story, swipe left to read it in full
 • Tap through to read the full article in Safari
 • Save stories for later
 • Share a story as a clean image card, ready for any chat
@@ -71,7 +71,7 @@ Content: headlines and short excerpts from 22 publishers' public RSS/Atom feeds,
 
 On-device summaries use Apple's Foundation Models framework and appear only on Apple Intelligence devices (iOS 26+), labelled "Summarized on device". Other devices show the publisher's excerpt.
 
-To try it: swipe up through stories and left/right between tabs (Top, AI, Startups, Dev, Blogs), tap the share icon to share a story as an image, tap the bookmark icon to save, and open Settings (gear icon) to turn sources off or enable the daily digest and big story alerts. Notifications are local, created on the device; there is no push server.
+To try it (2.0): swipe up through stories, tap a tab chip (Top, AI, Startups, Dev, Reads) to change tabs, swipe left or tap a card to read the full story, tap the share icon to share a story as an image, tap the bookmark icon to save, and open Settings (gear icon) to mute sources or turn on the morning gist and big story alerts. The app asks for notification permission only after its own explanation screen (after eight stories or the first save) or from a switch in Settings. If server push is switched on for this build, say so here: big story alerts are then sent by Techgist's server to devices that turned them on.
 ```
 
 **Screenshots:** `AppStore/screenshots/` — 6.9" (1320×2868), upload in this order:

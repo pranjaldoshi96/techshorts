@@ -75,7 +75,7 @@ struct SavedView: View {
             Group {
                 if store.saved.isEmpty {
                     ContentUnavailableView("Nothing saved", systemImage: "bookmark",
-                                           description: Text("Tap the bookmark on a story to keep it here."))
+                                           description: Text("Tap the bookmark on a story to keep it here.").foregroundStyle(Theme.metaText))
                 } else {
                     List {
                         ForEach(results) { article in
@@ -146,7 +146,7 @@ struct SearchView: View {
             .overlay {
                 if query.trimmingCharacters(in: .whitespaces).isEmpty {
                     ContentUnavailableView("Search stories", systemImage: "magnifyingglass",
-                                           description: Text("Find a story by headline, summary or outlet."))
+                                           description: Text("Find a story by headline, summary or outlet.").foregroundStyle(Theme.metaText))
                 } else if results.isEmpty {
                     ContentUnavailableView.search(text: query)
                 }
@@ -164,6 +164,7 @@ struct SearchView: View {
 /// Every outlet reporting a story.
 struct CoverageSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
     let article: Article
     let onRead: (Article) -> Void
 
@@ -194,6 +195,7 @@ struct CoverageSheet: View {
                 } header: {
                     Text("Covered by \(article.coverage) outlets · first reported \(RelativeTime.spoken(article.publishedAt)) by \(article.source)")
                         .textCase(nil)
+                        .foregroundStyle(Theme.metaText)
                 }
                 if let points = article.points {
                     Section {
@@ -207,7 +209,9 @@ struct CoverageSheet: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+        // Opaque: on a see-through sheet the story behind shows through the list.
+        .presentationBackground(Color(.systemGroupedBackground))
     }
 }
 
@@ -239,20 +243,21 @@ struct SettingsView: View {
                         .disabled(sampleSent)
                     }
                 } header: {
-                    Text("Notifications")
+                    Text("Notifications").foregroundStyle(Theme.metaText)
                 } footer: {
                     Text((PushConfig.registerURL == nil
                           ? "One notification each morning with the top story, and an alert when a story is covered by several outlets at once, at most 3 a day. iOS decides when the app checks in the background, so alerts can arrive a few hours after a story breaks."
                           : "One notification each morning with the top story, and an alert from Techgist when a big story breaks, at most a few a day. Turning alerts off removes this phone from Techgist's alert list.")
                          + (digestEnabled || breakingEnabled ? " A sample alert arrives 5 seconds after you ask for it." : ""))
+                        .foregroundStyle(Theme.metaText)
                 }
 
                 Section {
                     Toggle("Open stories in Reader view", isOn: $readerMode)
                 } header: {
-                    Text("Reading")
+                    Text("Reading").foregroundStyle(Theme.metaText)
                 } footer: {
-                    Text("Shows the publisher's story as clean text when the page supports it.")
+                    Text("Shows the publisher's story as clean text when the page supports it.").foregroundStyle(Theme.metaText)
                 }
 
                 Section {
@@ -263,22 +268,25 @@ struct SettingsView: View {
                     }
                 } footer: {
                     Text("Muted sources don't appear in any tab. You can also mute a source from the More button on a story.")
+                        .foregroundStyle(Theme.metaText)
                 }
 
                 Section {
                     LabeledContent("Version", value: Self.version)
                     switch store.origin {
                     case .edition(let publishedAt, _):
-                        LabeledContent("Stories", value: "Techgist edition, \(RelativeTime.spoken(publishedAt))")
+                        storiesRow("Techgist edition, \(RelativeTime.spoken(publishedAt))")
                     case .direct:
-                        LabeledContent("Stories", value: "Direct from publishers")
+                        storiesRow("Direct from publishers")
                     case nil:
                         EmptyView()
                     }
                 } header: {
-                    Text("About")
+                    Text("About").foregroundStyle(Theme.metaText)
                 } footer: {
-                    Text("Summaries marked AI are written by Techgist's model from the publisher's story and checked against it. Every card links to the original. Your reading, saves and settings stay on this device.")
+                    Text("Summaries marked AI are written by Techgist's model from the publisher's story and checked against it. Every card links to the original. Your reading, saves and settings stay on this device."
+                         + (PushConfig.registerURL == nil ? "" : " With Big story alerts on, Techgist's server holds this phone's notification address, time zone and language so it can send them, and nothing else."))
+                        .foregroundStyle(Theme.metaText)
                 }
             }
             .navigationTitle("Settings")
@@ -295,6 +303,15 @@ struct SettingsView: View {
                 Text("Allow notifications for Techgist in Settings to get the morning gist and big story alerts.")
             }
         }
+    }
+
+    /// Where the stories came from. Stacked, so the long value never squeezes its label at any text size.
+    private func storiesRow(_ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Stories")
+            Text(value).font(.subheadline).foregroundStyle(Theme.metaText)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private var digestBinding: Binding<Bool> {

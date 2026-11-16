@@ -34,10 +34,13 @@ struct StoryImage: View {
             .clipped()
             .task(id: url) {
                 guard let url, image == nil else { return }
+                let asked = Date()
                 let loaded = await ImageLoader.shared.image(for: url, maxPixel: maxPixel)
                 guard !Task.isCancelled else { return }
                 if let loaded {
-                    withAnimation(Theme.fade) { image = loaded }
+                    // A picture that was on disk is there within a frame or two: show it at once. Only one that had
+                    // to be downloaded fades in.
+                    withAnimation(Date().timeIntervalSince(asked) < 0.12 ? nil : Theme.fade) { image = loaded }
                 } else {
                     failed = true
                 }

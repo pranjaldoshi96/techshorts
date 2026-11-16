@@ -45,6 +45,17 @@ actor ImageLoader {
         memory.object(forKey: Self.key(url, maxPixel) as NSString)
     }
 
+    /// Decodes a picture that is already on disk, right now, on the calling thread. For the one card that is on
+    /// screen in the first frame after launch, so it never shows a placeholder; everything else goes through
+    /// `image(for:maxPixel:)`.
+    nonisolated func warmFromDisk(_ url: URL, maxPixel: Int) {
+        let key = Self.key(url, maxPixel) as NSString
+        guard memory.object(forKey: key) == nil,
+              let data = try? Data(contentsOf: fileURL(for: url), options: .mappedIfSafe), !data.isEmpty,
+              let image = Self.downsample(data, maxPixel: maxPixel) else { return }
+        memory.setObject(image, forKey: key, cost: Int(image.size.width * image.size.height * image.scale * image.scale * 4))
+    }
+
     /// The picture at `url`, no larger than `maxPixel` on its longer side, decoded and ready to draw.
     func image(for url: URL, maxPixel: Int) async -> UIImage? {
         let key = Self.key(url, maxPixel)

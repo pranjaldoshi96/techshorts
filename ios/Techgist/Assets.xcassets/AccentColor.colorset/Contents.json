@@ -1,4 +1,6 @@
 {"colors":[
- {"idiom":"universal","color":{"color-space":"srgb","components":{"red":"0.184","green":"0.420","blue":"1.000","alpha":"1.000"}}},
- {"idiom":"universal","appearances":[{"appearance":"luminosity","value":"dark"}],"color":{"color-space":"srgb","components":{"red":"0.424","green":"0.592","blue":"1.000","alpha":"1.000"}}}
+ {"idiom":"universal","color":{"color-space":"srgb","components":{"red":"0.130","green":"0.360","blue":"0.930","alpha":"1.000"}}},
+ {"idiom":"universal","appearances":[{"appearance":"luminosity","value":"dark"}],"color":{"color-space":"srgb","components":{"red":"0.424","green":"0.592","blue":"1.000","alpha":"1.000"}}},
+ {"idiom":"universal","appearances":[{"appearance":"contrast","value":"high"}],"color":{"color-space":"srgb","components":{"red":"0.050","green":"0.250","blue":"0.750","alpha":"1.000"}}},
+ {"idiom":"universal","appearances":[{"appearance":"luminosity","value":"dark"},{"appearance":"contrast","value":"high"}],"color":{"color-space":"srgb","components":{"red":"0.620","green":"0.750","blue":"1.000","alpha":"1.000"}}}
 ],"info":{"author":"xcode","version":1}}

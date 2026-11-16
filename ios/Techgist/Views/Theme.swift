@@ -23,7 +23,8 @@ enum Theme {
     static let badge = Font.caption2.weight(.heavy)
 
     // Colors
-    /// The app's blue, from the asset catalog: 4.5:1 against white in light mode, 7.5:1 against black in dark.
+    /// The app's blue, from the asset catalog: 5.5:1 against white in light mode, 7.5:1 against black in dark,
+    /// and stronger still (8:1, 10:1) when Increase Contrast is on.
     /// Named explicitly because the system tint (a lighter blue, 3.4:1 on white) is what views get otherwise.
     static let accent = Color("AccentColor")
     static let cardBackground = Color(.systemBackground)
@@ -83,11 +84,12 @@ struct SourceMonogram: View {
     /// Grows with the text beside it.
     @ScaledMetric(relativeTo: .caption) private var scale: CGFloat = 1
 
+    /// Each is at least 6.5:1 against the white initial.
     private static let palette: [Color] = [
-        Color(red: 0.12, green: 0.34, blue: 0.80), Color(red: 0.55, green: 0.20, blue: 0.75),
-        Color(red: 0.78, green: 0.20, blue: 0.35), Color(red: 0.72, green: 0.33, blue: 0.05),
-        Color(red: 0.05, green: 0.47, blue: 0.43), Color(red: 0.25, green: 0.30, blue: 0.38),
-        Color(red: 0.10, green: 0.45, blue: 0.20), Color(red: 0.60, green: 0.15, blue: 0.55),
+        Color(red: 0.10, green: 0.29, blue: 0.72), Color(red: 0.48, green: 0.17, blue: 0.67),
+        Color(red: 0.66, green: 0.14, blue: 0.28), Color(red: 0.58, green: 0.26, blue: 0.03),
+        Color(red: 0.03, green: 0.38, blue: 0.35), Color(red: 0.23, green: 0.28, blue: 0.36),
+        Color(red: 0.07, green: 0.37, blue: 0.16), Color(red: 0.52, green: 0.12, blue: 0.48),
     ]
 
     static func color(for name: String) -> Color {

@@ -64,6 +64,10 @@ final class NewsStore: ObservableObject {
         saved = Self.loadSaved()
         disabledSources = Set(UserDefaults.standard.stringArray(forKey: Keys.disabledSources) ?? [])
         rebuildFeeds()
+        // The first card is on screen in the first frame; have its picture ready so nothing pops in.
+        if let first = feeds[.top]?.first, let url = first.cardImage(wide: UIScreen.main.bounds.width >= 390) {
+            ImageLoader.shared.warmFromDisk(url, maxPixel: ImageLoader.heroPixels)
+        }
         NotificationCenter.default.addObserver(forName: Self.savedChanged, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.saved = Self.loadSaved() }
         }

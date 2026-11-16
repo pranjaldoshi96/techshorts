@@ -308,7 +308,7 @@ struct CardView: View {
 
     private func readLabel(_ text: String) -> some View {
         HStack(spacing: 4) {
-            Text(text).lineLimit(1)
+            Text(text).lineLimit(1).fixedSize()
             Image(systemName: "chevron.right").imageScale(.small)
         }
     }

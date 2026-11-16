@@ -18,6 +18,8 @@ class FeedUITestCase: XCTestCase {
     func launch(offerAlreadyAnswered: Bool = true) {
         if offerAlreadyAnswered { app.launchArguments += ["-notificationsOffered", "YES"] }
         if let contentSize { app.launchArguments += ["-UIPreferredContentSizeCategoryName", contentSize] }
+        // The test runner lives in the same simulator, so this is what the app sees too.
+        print("SIMULATOR SETTINGS: reduceMotion=\(UIAccessibility.isReduceMotionEnabled) increaseContrast=\(UIAccessibility.isDarkerSystemColorsEnabled) textSize=\(contentSize ?? "simulator default")")
         app.launch()
         XCTAssertTrue(card.waitForExistence(timeout: 20), "The first card never appeared")
     }
@@ -108,6 +110,15 @@ class FeedUITestCase: XCTestCase {
     }
 
     func select(tab: String) {
-        app.buttons[tab].firstMatch.tap()
+        let chip = app.buttons[tab].firstMatch
+        // The chips scroll sideways when they don't all fit (large text, small phones).
+        var tries = 0
+        while !(chip.frame.maxX <= screen.maxX && chip.frame.minX >= 0), tries < 4 {
+            point(0.8, 0).withOffset(CGVector(dx: 0, dy: chipBarY)).press(forDuration: 0.05, thenDragTo: point(0.2, 0).withOffset(CGVector(dx: 0, dy: chipBarY)))
+            tries += 1
+        }
+        chip.tap()
     }
+
+    private var chipBarY: CGFloat { app.buttons["Top"].firstMatch.frame.midY }
 }
