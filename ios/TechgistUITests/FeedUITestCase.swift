@@ -96,16 +96,22 @@ class FeedUITestCase: XCTestCase {
     }
 
     func closeReader(file: StaticString = #filePath, line: UInt = #line) {
-        // Safari's own button is "Done" up to iOS 18 and "Close" from iOS 26.
-        for name in ["Close", "Done"] {
-            let button = app.buttons[name].firstMatch
-            if button.waitForExistence(timeout: 3) {
-                button.tap()
+        // Safari's own button is "Done" up to iOS 18 and "Close" from iOS 26. On iOS 26 the sheet has two buttons
+        // called "Close" while the page loads (close at the top, stop-loading in the bottom bar): take the top one,
+        // and try again if the first tap landed while the sheet was still coming up.
+        for _ in 0..<3 where !feedIsInFront {
+            for name in ["Close", "Done"] {
+                guard app.buttons[name].firstMatch.waitForExistence(timeout: 3) else { continue }
+                let topmost = app.buttons.matching(identifier: name).allElementsBoundByIndex
+                    .filter { $0.exists && $0.isHittable }
+                    .min { $0.frame.minY < $1.frame.minY }
+                guard let topmost else { continue }
+                topmost.tap()
                 break
             }
+            let deadline = Date().addingTimeInterval(4)
+            while !feedIsInFront, Date() < deadline { usleep(200_000) }
         }
-        let deadline = Date().addingTimeInterval(6)
-        while !feedIsInFront, Date() < deadline { usleep(200_000) }
         XCTAssertTrue(feedIsInFront, "The reader did not close", file: file, line: line)
     }
 

@@ -132,6 +132,8 @@ struct SearchView: View {
     @Environment(\.dismiss) private var dismiss
     let onSelect: (Article) -> Void
     @State private var query = ""
+    /// The field is focused as the sheet opens, so typing works straight away.
+    @State private var searching = true
 
     var body: some View {
         let results = StorySearch.results(for: query, in: store.articles, saved: store.saved)
@@ -151,7 +153,8 @@ struct SearchView: View {
                     ContentUnavailableView.search(text: query)
                 }
             }
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Headline, topic or outlet")
+            .searchable(text: $query, isPresented: $searching, placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "Headline, topic or outlet")
             .navigationTitle("Search")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -236,7 +239,7 @@ struct SettingsView: View {
                     }
                     Toggle("Big story alerts", isOn: breakingBinding)
                     if digestEnabled || breakingEnabled, let story = store.topStory {
-                        Button(sampleSent ? "Sample alert on its way" : "Send a sample alert") {
+                        Button(sampleSent ? "Preview on its way" : "Preview an alert") {
                             sampleSent = true
                             Task { await StoryNotification.sendSample(story) }
                         }
@@ -248,7 +251,7 @@ struct SettingsView: View {
                     Text((PushConfig.registerURL == nil
                           ? "One notification each morning with the top story, and an alert when a story is covered by several outlets at once, at most 3 a day. iOS decides when the app checks in the background, so alerts can arrive a few hours after a story breaks."
                           : "One notification each morning with the top story, and an alert from Techgist when a big story breaks, at most a few a day. Turning alerts off removes this phone from Techgist's alert list.")
-                         + (digestEnabled || breakingEnabled ? " A sample alert arrives 5 seconds after you ask for it." : ""))
+                         + (digestEnabled || breakingEnabled ? " The preview arrives 5 seconds after you ask for it." : ""))
                         .foregroundStyle(Theme.metaText)
                 }
 
@@ -281,6 +284,8 @@ struct SettingsView: View {
                     case nil:
                         EmptyView()
                     }
+                    Link("Privacy Policy", destination: Self.privacyURL)
+                    Link("Support", destination: Self.supportURL)
                 } header: {
                     Text("About").foregroundStyle(Theme.metaText)
                 } footer: {
@@ -353,6 +358,9 @@ struct SettingsView: View {
             Task { await DailyDigest.reschedule(with: store.topStory) }
         })
     }
+
+    static let privacyURL = URL(string: "https://pranjaldoshi96.github.io/apps/techgist/privacy/")!
+    static let supportURL = URL(string: "https://pranjaldoshi96.github.io/apps/techgist/support/")!
 
     private static var version: String {
         let info = Bundle.main.infoDictionary

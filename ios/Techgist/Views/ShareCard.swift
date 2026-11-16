@@ -22,7 +22,7 @@ enum StoryShare {
             .environment(\.colorScheme, .light))
         renderer.scale = 3
         guard let image = renderer.uiImage else { return nil }
-        return Payload(image: image, text: "\(article.displayTitle)\n\nRead tech news in 60 words on Techgist. Get it on the App Store: \(appURL.absoluteString)")
+        return Payload(image: image, text: "\(article.displayTitle)\n\nTech news in 60 words a story, on Techgist: \(appURL.absoluteString)")
     }
 }
 
@@ -72,8 +72,8 @@ private struct ShareCard: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 1) {
-                    Text("Download free on the").font(.caption2).opacity(0.85)
-                    Text("App Store").font(.subheadline.bold())
+                    Text("Read it on").font(.caption2).opacity(0.85)
+                    Text("Techgist").font(.subheadline.bold())
                 }
             }
             .foregroundStyle(.white)

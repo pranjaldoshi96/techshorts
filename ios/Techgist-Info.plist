@@ -14,7 +14,11 @@
 	<key>LSApplicationCategoryType</key><string>public.app-category.news</string>
 	<key>ITSAppUsesNonExemptEncryption</key><false/>
 	<key>NSAccentColorName</key><string>AccentColor</string>
-	<key>UILaunchScreen</key><dict/>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIImageName</key><string>LaunchLogo</string>
+		<key>UIImageRespectsSafeAreaInsets</key><true/>
+	</dict>
 	<key>UIApplicationSceneManifest</key>
 	<dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
 	<key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>

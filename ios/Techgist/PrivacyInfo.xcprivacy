@@ -4,12 +4,28 @@
 <dict>
 	<key>NSPrivacyTracking</key><false/>
 	<key>NSPrivacyTrackingDomains</key><array/>
-	<key>NSPrivacyCollectedDataTypes</key><array/>
+	<!-- With Big story alerts on, the push token (with time zone, language and app version) is held on Techgist's
+	     server so alerts can be sent. It is not tied to a person and is removed when alerts are turned off. -->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key><string>NSPrivacyCollectedDataTypeDeviceID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key><false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key><false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
+		</dict>
+	</array>
 	<key>NSPrivacyAccessedAPITypes</key>
 	<array>
 		<dict>
 			<key>NSPrivacyAccessedAPIType</key><string>NSPrivacyAccessedAPICategoryUserDefaults</string>
 			<key>NSPrivacyAccessedAPITypeReasons</key><array><string>CA92.1</string></array>
+		</dict>
+		<dict>
+			<!-- The picture cache is pruned oldest first, by each file's modification date. -->
+			<key>NSPrivacyAccessedAPIType</key><string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key><array><string>C617.1</string></array>
 		</dict>
 	</array>
 </dict>
