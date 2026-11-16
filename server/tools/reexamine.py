@@ -15,7 +15,8 @@ published after the last one). Four passes, each the live rule applied to stored
               and with --ask-dates the writer's `news_date` for the leads of events under --ask-hours old
               (llm.date_news, one small call each). cluster.refresh then moves the event's clock back.
   rewrites    events with two or more publishers that hold a hard-news report hours newer than their lead are
-              queued for a rewrite, which now gets each report's time and states the newest account.
+              queued for a rewrite, which now gets each report's time and states the newest account. The 2 h
+              cap is lifted for them once (the worker still makes at most cluster.max_rewrites a tick).
   recheck     every card of an edition is put to the fact-checker again with the current rules (entail.PROMPT).
               A card that fails goes back: a lead's own card to the writer with the reason (as a hold retry), a
               rewrite to its lead's card and the rewrite queue, a brief to the brief queue. Nothing is loosened:
@@ -165,7 +166,9 @@ def rewrites(store, since, dry_run=False):
         out.append(ev)
         if not dry_run:
             cluster._queue_rewrite(row, "newer_report")
-            store.db.conn.execute("UPDATE events SET rewrite_reason = ? WHERE id = ?",
+            # Not held back by the 2 h cap: the card being replaced is the one the old rule wrote.
+            row["rewritten_at"] = None
+            store.db.conn.execute("UPDATE events SET rewrite_reason = ?, rewritten_at = NULL WHERE id = ?",
                                   (row["rewrite_reason"], ev.id))
     return out
 
@@ -275,6 +278,10 @@ def main():
     cfg = config.load()
     if os.path.realpath(os.path.expanduser(cfg["state_dir"])) == os.path.realpath(os.path.expanduser("~/.techshorts")):
         sys.exit("refusing to touch the old publisher's state; set TECHGIST_STATE")
+    # Read before anything is asked or written: a missing or unreadable file must not end a half-made run.
+    edition_ids = None
+    if "recheck" in only and args.edition:
+        edition_ids = [a["eventId"] for a in json.load(open(args.edition))["articles"] if a.get("eventId")]
     db = DB(config.state_path(cfg, "state.db"))
     db.conn.execute("PRAGMA busy_timeout = 120000")
     srcs = sources_mod.load()
@@ -306,10 +313,10 @@ def main():
         for ev in got:
             print(f"  {ev.id} {ev.row.get('headline')}")
     if "recheck" in only:
-        if not args.edition:
+        if edition_ids is None:
             print("recheck: skipped, no --edition")
         else:
-            ids = [a["eventId"] for a in json.load(open(args.edition))["articles"] if a.get("eventId")]
+            ids = edition_ids
             model = llm.role_model(cfg, "judge")
             got = recheck(store, ids, lambda **f: entail.check(client, model, **f), args.dry_run)
             print(f"recheck: {len(got)} of {len(ids)} cards {tag}sent back")

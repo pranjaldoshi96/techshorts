@@ -158,7 +158,9 @@ def test_an_event_with_a_newer_report_is_queued_for_the_rewrite_that_now_leads_w
     assert [e.id for e in reexamine.rewrites(store, NOW - timedelta(hours=72), dry_run=True)] == [eid]
     assert store.events[eid].row["rewrite_reason"] is None
     assert [e.id for e in reexamine.rewrites(store, NOW - timedelta(hours=72))] == [eid]
-    assert db.one("SELECT rewrite_reason FROM events WHERE id = ?", eid)["rewrite_reason"] == "newer_report"
+    row = db.one("SELECT rewrite_reason, rewritten_at FROM events WHERE id = ?", eid)
+    assert (row["rewrite_reason"], row["rewritten_at"]) == ("newer_report", None)
+    # Rewritten 4 h ago in the test, but a card rewritten minutes ago by the old rule is due as well.
     assert cluster.due_rewrite(store.events[eid].row, NOW, S)
     assert reexamine.rewrites(store, NOW - timedelta(hours=72)) == []               # queued once
 
