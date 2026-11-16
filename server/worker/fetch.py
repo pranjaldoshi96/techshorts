@@ -104,6 +104,24 @@ def _image(e):
     return None
 
 
+_TM_HEADLINE = re.compile(r'<b>\s*<a\s[^>]*href="(https?://[^"]+)"', re.I)
+
+
+def techmeme_article(summary_html):
+    """The article a Techmeme entry is about: the headline's own link (the bold anchor), else the first link off
+    techmeme.com that has a path. An entry with a thumbnail starts with the article's link, but one without starts
+    with the outlet's front page ("Ann Cao / <a href=http://www.scmp.com/>South China Morning Post</a>:"), and
+    taking the first link shipped a card that opened scmp.com's home page with the home page's text as its source."""
+    m = _TM_HEADLINE.search(summary_html)
+    if m and "techmeme.com" not in m.group(1) and "mediagazer.com" not in m.group(1):
+        return html.unescape(m.group(1))
+    for u in re.findall(r'href="(https?://[^"]+)"', summary_html, re.I):
+        u = html.unescape(u)
+        if "techmeme.com" not in u and "mediagazer.com" not in u and not prefilter.no_path(u):
+            return u
+    return None
+
+
 def _signal_extra(source, e, summary_html):
     """Points and comments from hnrss; the linked article from Techmeme (whose own link is a permalink)."""
     extra = {}
@@ -119,9 +137,9 @@ def _signal_extra(source, e, summary_html):
         if m:
             extra["hn_url"] = m.group(1)
     elif source_id == "techmeme":
-        links = [u for u in re.findall(r'href="(https?://[^"]+)"', summary_html) if "techmeme.com" not in u]
-        if links:
-            extra["linked_url"] = canonical_url(html.unescape(links[0]))
+        link = techmeme_article(summary_html)
+        if link:
+            extra["linked_url"] = canonical_url(link)
     elif source.kind == "reddit":
         # A link post's entry carries the article behind an anchor labelled [link]; a text post links to itself.
         m = re.search(r'<a href="(https?://[^"]+)">\s*\[link\]\s*</a>', summary_html)
@@ -289,7 +307,7 @@ def classify(entry, source, sources, now, first_seen, first_run, cfg, vetted=Fal
         return "dropped", "domain_blocklist", published
     if source.include_tags and not set(entry.tags) & set(source.include_tags) and not vetted:
         return "dropped", "source_tags", published
-    rule = prefilter.check(entry.title, entry.url)
+    rule = prefilter.check(entry.title, entry.url, digest=source.kind != "techmeme")
     if rule:
         return "dropped", rule, published
     return ("signal" if source.is_signal else "new"), None, published
@@ -346,10 +364,18 @@ def _update_signal(db, existing, source, e):
     On the signal's own row they live at the top of `extra`; on a news item the signal also listed (or an article
     imported from the signal's link), under extra.signals.<source id>, where cluster.attach_signals reads them."""
     new = {k: e.extra[k] for k in POINT_KEYS if e.extra.get(k) is not None}
-    if not new:
-        return
     extra = json.loads(existing["extra"] or "{}")
     own = existing["status"] == "signal" and existing["source_id"] == source.id
+    # A Techmeme row that recorded the outlet's front page as its article (techmeme_article) takes the real link
+    # at its next sight, and is offered to promote_signals again.
+    link = e.extra.get("linked_url")
+    if own and link and extra.get("linked_url") != link and prefilter.no_path(extra.get("linked_url") or ""):
+        extra["linked_url"] = link
+        extra.pop("promoted", None)
+        db.conn.execute("UPDATE items SET extra = ? WHERE url_canonical = ?",
+                        (json.dumps(extra), existing["url_canonical"]))
+    if not new:
+        return
     cur = extra if own else extra.setdefault("signals", {}).setdefault(source.id, {})
     if all(cur.get(k) == v for k, v in new.items()):
         return
@@ -421,7 +447,7 @@ def promote_signals(db, srcs, cfg, now):
 
         host = host_name(target)
         if any(host == h or host.endswith("." + h) for h in NOT_ARTICLE_HOSTS) or \
-                urlsplit(target).path.lower().endswith((".pdf", ".zip", ".mp4")):
+                urlsplit(target).path.lower().endswith((".pdf", ".zip", ".mp4")) or prefilter.no_path(target):
             done("not_article")
             continue
         publisher = srcs.for_host(target) or web
@@ -429,7 +455,7 @@ def promote_signals(db, srcs, cfg, now):
             done("no_publisher")
             continue
         title = r["title"] if kind != "techmeme" else (_TECHMEME_CREDIT.sub("", r["title"]).strip() or r["title"])
-        rule = "domain_blocklist" if srcs.blocked(target) else prefilter.check(title, target)
+        rule = "domain_blocklist" if srcs.blocked(target) else prefilter.check(title, target, digest=kind != "techmeme")
         if rule:
             db.log_drop(now, r["source_id"], target, title, rule)
             done(rule)

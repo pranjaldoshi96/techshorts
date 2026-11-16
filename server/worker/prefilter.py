@@ -49,7 +49,10 @@ ROUNDUP_PATH = re.compile(r"(funding|deals|stories|news)[a-z-]*-this-week\b|/new
 
 _TITLE = [(name, re.compile(rx, re.I)) for name, rx in TITLE_RULES]
 # "Jensen Huang exits Nvidia after 33 years; Kia India plans $2B investment": two stories joined by ";", the second
-# starting with a name (case-sensitive, so "...; consultation open till December" is one story).
+# starting with a name (case-sensitive, so "...; consultation open till December" is one story). Techmeme's own
+# headlines are exempt (check's `digest`): its house style joins two facts of ONE story with ";" ("Sources:
+# Anthropic's IPO is ~7x oversubscribed; Anthropic and some of its backers are seeking to raise up to $90.4B"),
+# and the rule dropped that pick, the only sight of the story the engine had.
 DIGEST = re.compile(r"^[^;]{20,};\s*[A-Z][\w.&'-]*\s[^;]{12,}$")
 
 
@@ -58,8 +61,15 @@ def normalize_title(title):
     return re.sub(r"\s+", " ", title.replace("’", "'").replace(" ", " ")).strip()
 
 
-def check(title, url):
-    """Returns the name of the first rule that drops this item, or None to keep it."""
+def no_path(url):
+    """Is `url` a site's front page and not an article (no path and no query)?"""
+    parts = urlsplit(url)
+    return parts.path in ("", "/") and not parts.query
+
+
+def check(title, url, digest=True):
+    """Returns the name of the first rule that drops this item, or None to keep it.
+    `digest` False skips the two-stories-in-one-title rule (a Techmeme headline; see DIGEST)."""
     path = urlsplit(url).path.lower()
     for p in URL_PATHS:
         if p in path or path.endswith(p.rstrip("/")):
@@ -72,6 +82,6 @@ def check(title, url):
     for name, rx in _TITLE:
         if rx.search(t):
             return name
-    if DIGEST.search(t):
+    if digest and DIGEST.search(t):
         return "title_digest"
     return None
