@@ -127,8 +127,6 @@ a row raise their own.
   proven there: a made-up token gets 400 BadDeviceToken, not 403). After the first TestFlight or App Store install
   with alerts allowed: `pushctl devices` (the row says `production`), then `pushctl test PREFIX --event ev_...`
   must print `APNs: ok status=200 ... host=production`.
-- **SSH.** This machine now holds the APNs key; its sshd still allows root to log in with a password and
-  fail2ban is not running. Nothing here changes sshd.
 
 ## Not built
 
