@@ -28,6 +28,12 @@ struct NotificationsOffer: View {
                 Text("One morning gist with the day's top story, and an alert when a big story breaks. At most a few a day, never marketing.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(Theme.metaText)
+                if PushConfig.registerURL != nil {
+                    Text("Alerts are sent by Techgist's server, which keeps this phone's notification address until you turn them off.")
+                        .font(.footnote)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(Theme.metaText)
+                }
                 Button {
                     Task {
                         // One permission prompt covers both; record both before the sheet goes away.
@@ -35,7 +41,10 @@ struct NotificationsOffer: View {
                         digestEnabled = granted
                         breakingEnabled = granted
                         notificationsOffered = true
-                        if granted { await DailyDigest.reschedule(with: store.topStory) }
+                        if granted {
+                            PushRegistration.markAnswered()
+                            await DailyDigest.reschedule(with: store.topStory)
+                        }
                         await PushRegistration.sync()
                         dismiss()
                     }

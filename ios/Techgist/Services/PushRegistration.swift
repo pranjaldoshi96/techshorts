@@ -48,11 +48,43 @@ enum PushRegistration {
         #endif
     }
 
+    // MARK: The choice made in 1.x
+
+    /// In 1.x big story alerts were made on the phone and the policy said nothing went to a server. Someone who
+    /// turned them on then has not agreed to what 2.0 does, so nothing is registered for them until they have
+    /// answered a one-time notice. Turning alerts on in 2.0 (where the offer and Settings say it) is an answer.
+    static var isAnswered: Bool { defaults.bool(forKey: Keys.serverAlertsAnswered) || registeredToken != nil }
+
+    static func markAnswered() { defaults.set(true, forKey: Keys.serverAlertsAnswered) }
+
+    static func needsNotice(alertsOn: Bool, answered: Bool, status: UNAuthorizationStatus) -> Bool {
+        wantsPush(alertsOn: alertsOn, status: status) && !answered
+    }
+
+    /// True when the notice should be shown now.
+    @MainActor static func noticeIsDue() async -> Bool {
+        #if DEBUG
+        // For the UI test, which has no registry and no notification permission.
+        if ProcessInfo.processInfo.environment["UITEST_ALERTS_NOTICE"] == "1" { return !isAnswered }
+        #endif
+        guard baseURL != nil else { return false }
+        let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        return needsNotice(alertsOn: BreakingNews.isEnabled, answered: isAnswered, status: status)
+    }
+
+    /// The reader's answer to the notice: keep alerts (and register), or turn them off.
+    @MainActor static func answerNotice(keep: Bool) async {
+        markAnswered()
+        if keep { await sync() } else { await BreakingNews.disable() }
+    }
+
     /// Brings the registry in line with the reader's choices. Called on launch, after the permission prompt, and
     /// when "Big story alerts" changes. Never shows a prompt itself.
     @MainActor static func sync() async {
         guard baseURL != nil else { return }
         let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        // Not yet answered: nothing is sent and nothing is removed; the app's own local alerts carry on.
+        if needsNotice(alertsOn: BreakingNews.isEnabled, answered: isAnswered, status: status) { return }
         if wantsPush(alertsOn: BreakingNews.isEnabled, status: status) {
             // iOS answers through the app delegate, which calls `didRegister(deviceToken:)`.
             UIApplication.shared.registerForRemoteNotifications()

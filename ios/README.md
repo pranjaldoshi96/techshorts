@@ -19,7 +19,7 @@ The app loads a ranked **edition** that the Techgist server (`../server/`) publi
 | `TechgistNotificationService/` | Notification Service Extension: attaches the picture named in a push's `image` key and gives the push the Read and Save buttons. |
 | `Views/` | `CardView` (the card and its layouts), `FeedView` (paging), `ChipBar`, `ContentView` (shell), `SupportViews` (reader, saved, search, coverage, settings), `Theme` (design tokens). |
 | `TechgistTests/` | Decoding against snapshots of the live v1 edition and the engine's edition, ordering, alert content, the push wire format, the paging rule. |
-| `TechgistUITests/` | Drives the app in the simulator: pages through every tab with short drags, flicks and held presses; accessibility audits of each screen; a hitch measurement. |
+| `TechgistUITests/` | Drives the app in the simulator: pages through every tab with short drags, flicks and held presses; the one-time server-alerts notice; accessibility audits of each screen; a hitch measurement. |
 
 ### Edition fields the app reads
 
@@ -63,7 +63,7 @@ xcrun simctl ui booted increase_contrast enabled
 
 In a Debug build, `SIMCTL_CHILD_EDITION_URL=file:///path/to/edition.json xcrun simctl launch booted com.pranjald.techgist` points the app at another edition, and `SIMCTL_CHILD_UITEST_RESET=1` starts it as on a first launch. `SIMCTL_CHILD_EDITION_DELAY=1.5` makes that edition answer like a slow network (and fail when the request is cancelled).
 
-In the Simulator, scroll by clicking and dragging (a two-finger trackpad scroll is not a touch and does nothing in any app). A short drag is enough: the feed moves to the next story once it has travelled 36 points.
+In the Simulator, move through the feed by clicking and dragging upward, as a finger would. A short drag is enough: the feed moves to the next story once it has travelled 36 points. A two-finger trackpad scroll is not a touch; it has not been tested here (this Xcode install has no Simulator.app to send scroll-wheel events to), so if it does nothing, drag instead. Quick flicks one after another each move one card, including a flick made while the last one is still moving.
 
 ## Server push
 
@@ -72,6 +72,7 @@ In the Simulator, scroll by clicking and dragging (a two-finger trackpad scroll 
 - **Register:** `POST <registerURL>/v1/devices` with `{"token", "env": "sandbox"|"production", "tz", "locale", "appVersion"}`. Sent after the reader allows notifications with Big story alerts on, on every launch after that, and when iOS issues a new token (the old one is deleted first).
 - **Opt out:** `DELETE <registerURL>/v1/devices/<token>` when Big story alerts is turned off in Settings or the permission is taken away. If the server can't be reached it is tried again on the next launch.
 - **Payload:** `{"aps": {"alert": {"title", "body"}, "sound": "techgist.caf", "mutable-content": 1, "thread-id": eventId}, "eventId", "url", "image"}`. The extension attaches `image`; tapping the alert shows the story's card, found by `url` or `eventId`, loading the newer edition first when the story isn't in the one on screen.
+- **People who turned alerts on in 1.x** (where alerts were local and the policy said nothing went to a server) see a one-time notice on the first launch of 2.0: "Keep alerts on" registers, "Turn off alerts" turns the switch off. Nothing is sent before the answer; until then the app's own local alerts carry on. Turning alerts on in 2.0 counts as an answer (the offer and Settings both say alerts come from the server).
 - While the server is pushing to a device, the app's own background big-story alerts are off for it, so nobody gets the same story twice. The morning gist stays local.
 - The permission prompt only ever follows the in-app offer (after eight stories or the first save) or a switch in Settings; never at launch.
 - `env` is `sandbox` in Debug builds and `production` in Release builds.
@@ -94,7 +95,7 @@ Follow [`STORE_CHECKLIST.md`](STORE_CHECKLIST.md).
 
 - **Signing:** team `A4HLS6BV3C`, bundle ID `com.pranjald.techgist`, automatic signing. The extension is `com.pranjald.techgist.NotificationService`; both come from the `APP_BUNDLE_ID` build setting.
 - **Listing text, review notes, privacy and age-rating answers:** [`AppStore/LISTING.md`](AppStore/LISTING.md)
-- **Screenshots:** [`AppStore/screenshots/`](AppStore/screenshots/), 6.9" (1320 × 2868), from the 2.0 build
+- **Screenshots:** [`AppStore/screenshots/2.0/`](AppStore/screenshots/2.0/), 6.9" (1320 × 2868), from the 2.0 build
 - **Product, support and privacy pages:** <https://pranjaldoshi96.github.io/apps/techgist/>. The privacy page's 2.0 text is in [`PRIVACY.md`](PRIVACY.md).
 - **Upload a build:** `scripts/archive.sh` archives, exports a signed IPA and validates it; `scripts/archive.sh --upload` also uploads it to App Store Connect (see the checklist for the credentials each step uses).
 - **Export compliance:** already answered in `Info.plist` (`ITSAppUsesNonExemptEncryption = NO`).

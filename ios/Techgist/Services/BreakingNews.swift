@@ -16,6 +16,7 @@ enum BreakingNews {
     static func enable() async -> Bool {
         let granted = await StoryNotification.requestPermission()
         UserDefaults.standard.set(granted, forKey: Keys.breakingNews)
+        if granted { PushRegistration.markAnswered() }
         await PushRegistration.sync()
         return granted
     }

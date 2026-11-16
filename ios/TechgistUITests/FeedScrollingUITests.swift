@@ -127,6 +127,23 @@ final class FeedScrollingUITests: FeedUITestCase {
         pageForward(3, tab: "after the offer")
     }
 
+    /// People who turned big story alerts on in 1.x are told once that alerts now come from the server, and
+    /// choose, before anything is sent. The feed works behind and after the notice.
+    func testTheServerAlertsNoticeIsShownOnceAndTheFeedPagesAfterIt() {
+        app.launchEnvironment["UITEST_ALERTS_NOTICE"] = "1"
+        launch()
+        let notice = app.alerts["Big story alerts now come from Techgist's server"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 5), "The notice did not appear")
+        XCTAssertTrue(notice.buttons["Keep alerts on"].exists)
+        notice.buttons["Turn off alerts"].tap()
+        XCTAssertFalse(notice.waitForExistence(timeout: 2))
+        pageForward(3, tab: "after the notice")
+        app.buttons["Settings"].firstMatch.tap()
+        let toggle = app.switches["Big story alerts"].firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.value as? String, "0", "Turn off alerts left the switch on")
+    }
+
     /// Pulling down on the first card refreshes; it must not page, open anything or leave the feed stuck.
     /// (The story that was on screen has been read by then, so the refreshed tab opens on the next unread one.)
     func testPullToRefreshLeavesTheFeedOnACardAndItStillPages() {

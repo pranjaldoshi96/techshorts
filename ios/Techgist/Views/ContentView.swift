@@ -13,6 +13,8 @@ struct ContentView: View {
     @State private var pillHidden = false
     @State private var viewedThisSession = Set<String>()
     @AppStorage(Keys.notificationsOffered) private var notificationsOffered = false
+    /// Shown once to people who turned big story alerts on in 1.x, before anything is sent to the server.
+    @State private var serverAlertsNotice = false
 
     enum Sheet: Identifiable {
         case saved, settings, search, offer
@@ -98,6 +100,13 @@ struct ContentView: View {
                 }
                 .tint(Theme.accent)
             }
+        }
+        .task { serverAlertsNotice = await PushRegistration.noticeIsDue() }
+        .alert("Big story alerts now come from Techgist's server", isPresented: $serverAlertsNotice) {
+            Button("Keep alerts on") { Task { await PushRegistration.answerNotice(keep: true) } }
+            Button("Turn off alerts") { Task { await PushRegistration.answerNotice(keep: false) } }
+        } message: {
+            Text("So alerts arrive as the news breaks, Techgist's server keeps this phone's notification address, time zone and language. Nothing else, and it is deleted when you turn alerts off.")
         }
         .task {
             // While the app is open, look for a newer edition every 5 minutes and offer it with the pill.

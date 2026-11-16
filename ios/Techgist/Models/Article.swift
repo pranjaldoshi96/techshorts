@@ -259,4 +259,6 @@ enum Keys {
     static let breakingNews = "breakingNewsEnabled"
     static let readerMode = "readerModeEnabled"
     static let notificationsOffered = "notificationsOffered"
+    /// Set once the reader has chosen big story alerts knowing they come from Techgist's server.
+    static let serverAlertsAnswered = "serverAlertsAnswered"
 }

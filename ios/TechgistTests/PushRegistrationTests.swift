@@ -132,6 +132,25 @@ final class PushRegistrationTests: XCTestCase {
         XCTAssertFalse(PushRegistration.wantsPush(alertsOn: true, status: .notDetermined))
     }
 
+    // MARK: People who turned alerts on in 1.x
+
+    func testAlertsTurnedOnBefore2_0NeedTheNoticeBeforeAnythingIsSent() {
+        XCTAssertTrue(PushRegistration.needsNotice(alertsOn: true, answered: false, status: .authorized))
+        XCTAssertFalse(PushRegistration.needsNotice(alertsOn: true, answered: true, status: .authorized))
+        XCTAssertFalse(PushRegistration.needsNotice(alertsOn: false, answered: false, status: .authorized), "Alerts off: nothing to ask")
+        XCTAssertFalse(PushRegistration.needsNotice(alertsOn: true, answered: false, status: .denied), "No permission: nothing would be sent")
+    }
+
+    func testTurningAlertsOnIn2_0OrBeingRegisteredCountsAsAnAnswer() async {
+        XCTAssertFalse(PushRegistration.isAnswered)
+        PushRegistration.markAnswered()
+        XCTAssertTrue(PushRegistration.isAnswered)
+        PushRegistration.defaults.removeObject(forKey: Keys.serverAlertsAnswered)
+        XCTAssertFalse(PushRegistration.isAnswered)
+        await PushRegistration.register(token: token)
+        XCTAssertTrue(PushRegistration.isAnswered, "A device the registry already holds is not asked again")
+    }
+
     func testAPushPayloadFindsItsStoryByEventIdOrLink() throws {
         // The payload of the PUSH CONTRACT, as iOS hands it to the app.
         let payload: [AnyHashable: Any] = [
