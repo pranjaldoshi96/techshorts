@@ -45,7 +45,9 @@ def age_minutes(where, now=None):
     try:
         if where.startswith(("http://", "https://")):
             req = urllib.request.Request(where, headers={"Cache-Control": "no-cache", "User-Agent": "techgist-check"})
-            with urllib.request.urlopen(req, timeout=20) as r:
+            # The timeout applies to each of the host's addresses in turn: with 10 s a dead address (one of
+            # raw.githubusercontent.com's four was, on 2026-11-16) costs 10 s before the next is tried, not 20.
+            with urllib.request.urlopen(req, timeout=10) as r:
                 body = r.read()
         else:
             with open(where, "rb") as f:

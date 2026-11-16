@@ -177,8 +177,10 @@ ssh -i ~/.ssh/techgist_vps root@213.210.36.218 \
 
 # 2. The old box publishes again: its saved crontab back (this also removes the outside freshness check, which
 #    would alert on a 30-minute publisher), and one publish now. It force-replaces the branch (takes 1-2 min).
+#    `publish.sh` refuses to run without the marker file ~/.techshorts/ROLLBACK (so a run by hand cannot overwrite
+#    the worker's edition); the touch is what arms it.
 ssh pranjald@10.40.138.81 \
-  'crontab ~/crontab.before-cutover-20261116 && ~/TechShorts/server/publish.sh --log; tail -2 ~/.techshorts/publish.log; crontab -l'
+  'touch ~/.techshorts/ROLLBACK && crontab ~/crontab.before-cutover-20261116 && ~/TechShorts/server/publish.sh --log; tail -2 ~/.techshorts/publish.log; crontab -l'
 
 # 3. The same change in the repository, so the next deploy does not start the pushes again.
 sed -i '' -E 's|^( +git_remote:).*|\1 null|' server/config.yaml && git commit -m "Rollback: the VPS stops pushing the edition" server/config.yaml
@@ -196,4 +198,5 @@ holds exactly the two lines that were live; and the `sed` in step 1, run on a co
 `git_remote` reading as null. Not checked: an actual publish from the old box after the cutover.
 
 To cut over again after a rollback: set `publish.git_remote` back to the repository in `server/config.yaml`,
-comment out the two cron lines on the old box and add the freshness line again, then `server/deploy/deploy.sh`.
+comment out the two cron lines on the old box, remove `~/.techshorts/ROLLBACK` there and add the freshness line
+again, then `server/deploy/deploy.sh`.

@@ -9,7 +9,7 @@
 # a reminder every 30 min while it stays stale, and one message when it is fresh again.
 # Beside this script: check_freshness.py, alert.py and `env` (mode 600) holding NTFY_TOPIC=..., the same topic as
 # /etc/techgist/env on the VPS. The topic is a secret: it is never printed or logged here.
-#   freshness_cron.sh [URL] [LIMIT_MIN]      FRESHNESS_STAMP=<file> keeps a test run's state apart from cron's
+#   freshness_cron.sh [URL] [LIMIT_MIN]      FRESHNESS_STAMP=<file> keeps a test run's state apart from cron's; FRESHNESS_RETRY_S the wait before the one retry
 set -u
 dir=$(cd "$(dirname "$0")" && pwd)
 url=${1:-https://raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/edition.json}
@@ -22,6 +22,13 @@ set +a
 
 out=$(python3 "$dir/check_freshness.py" "$url" --max-age-min "$limit" 2>&1)
 status=$?
+# "Could not be read" (2) is tried once more before anyone is told: one of the raw host's four addresses was
+# unreachable from three networks on 2026-11-16, and a single failed fetch is not an outage.
+if [ $status -eq 2 ]; then
+    sleep "${FRESHNESS_RETRY_S:-30}"
+    out=$(python3 "$dir/check_freshness.py" "$url" --max-age-min "$limit" 2>&1)
+    status=$?
+fi
 if [ $status -eq 0 ]; then
     if [ -f "$stamp" ]; then
         python3 "$dir/alert.py" --title "Techgist: published edition is fresh again" "$out (checked from outside the server)" 2>/dev/null

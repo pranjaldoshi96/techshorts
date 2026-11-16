@@ -13,6 +13,13 @@ deploy_key="${DEPLOY_KEY:-$HOME/.ssh/techshorts_deploy}"
 remote="${EDITION_REMOTE:-git@github.com:pranjaldoshi96/techshorts.git}"
 
 mkdir -p "$state/bin" "$state/site"
+# Since the cutover of 2026-11-16 the worker on the VPS owns the edition branch, and this script force-replaces
+# it. It runs only while the rollback marker exists (server/deploy/README.md, "Rollback"), so a run by hand or a
+# forgotten cron line cannot overwrite the live edition.
+if [[ ! -f "$state/ROLLBACK" ]]; then
+  echo "publish.sh: not publishing. The VPS worker publishes the edition; to roll back, follow server/deploy/README.md (touch $state/ROLLBACK)." >&2
+  exit 3
+fi
 exec 9>"$state/lock"
 flock -n 9 || { echo "Another publish is running."; exit 0; }
 
