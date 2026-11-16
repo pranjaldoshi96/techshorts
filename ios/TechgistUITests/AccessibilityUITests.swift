@@ -39,7 +39,13 @@ final class AccessibilityUITests: FeedUITestCase {
         // A source's initial in its coloured circle: decoration beside the source's name, white on a fixed colour
         // of at least 6.5:1, never larger than twice its size. The audit samples the photo around the circle.
         let isMonogram = label.count == 1 && frame.width <= 64 && abs(frame.width - frame.height) < 1
+        // The system's own empty-state view ("Nothing saved", "Search stories") and its caption.
+        let isEmptyState = ["Nothing saved", "Search stories", "Tap the bookmark on a story to keep it here.",
+                            "Find a story by headline, summary or outlet."].contains(label)
         switch issue.auditType {
+        case .hitRegion:
+            // The clear button inside the system's search field.
+            return label == "Clear text"
         case .elementDetection:
             // "This element appears to display text": publishers' photos often contain words (a screenshot, a
             // sign). The card's label already carries the headline and summary; the picture is decoration.
@@ -54,13 +60,13 @@ final class AccessibilityUITests: FeedUITestCase {
             // The card's footer buttons stop growing at the third accessibility size so all of them stay on one
             // row (like a tab bar), and each has a Large Content Viewer label.
             if label.hasPrefix("Read more") || label == "Read" { return true }
-            return isMonogram
+            return isMonogram || isEmptyState
         case .textClipped:
             // The audit predicts clipping "at larger Dynamic Type sizes" from a line limit. These have one on purpose:
             // the footer label (which falls back to a shorter label instead of truncating), the alert preview
             // (two and three lines, like a real banner), and the system's search field.
             if label.hasPrefix("Read more") || label == "Read" { return true }
-            if issue.element?.elementType == .searchField { return true }
+            if issue.element?.elementType == .searchField || isEmptyState { return true }
             return issue.element == nil
         case .contrast:
             // A row cut off by the bottom edge of the screen is measured against whatever is behind the cut.
