@@ -144,10 +144,16 @@ publish:
   out_dir: null
   base_url: https://raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/
   # Rewritten when the content changes, and at least this often so editionAgeMin stays honest.
-  every_min: 5
-  git_remote: null              # git@github.com:pranjaldoshi96/techshorts.git at cutover
+  # 3 and 2 (were 5 and 10 before cutover): raw.githubusercontent.com caches a file for 5 min, so what a reader is
+  # served is up to 5 min older than the last push; with a publish at least every 3 min and a push at most every 2,
+  # the public edition stays under 10 min old.
+  every_min: 3
+  # The worker on the VPS is the live publisher of the edition branch since the cutover of 2026-11-16. Setting
+  # this to null (and deploying) stops the pushes: that is half of the rollback in deploy/README.md.
+  git_remote: git@github.com:pranjaldoshi96/techshorts.git
   git_branch: edition
-  git_every_min: 10
+  git_every_min: 2
+  # On the VPS: the techgist user's key (/var/lib/techgist/.ssh, mode 600), write access to this one repository.
   deploy_key: ~/.ssh/techshorts_deploy
 # Tab rules are the spec's (worker/rank.py, spec 2.12). Any of min_importance, window_h, tau_h and max can be
 # overridden per tab here, e.g. `tabs: {reads: {min_importance: 4}}`. Note: the LLM rates essays 4 (the 2.6

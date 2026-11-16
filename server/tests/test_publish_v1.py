@@ -65,6 +65,32 @@ def test_every_category_is_in_the_1_2_enum_and_every_top_article_is_ranked(editi
     assert len({a["url"] for a in arts}) == len(arts)
 
 
+def test_rank_is_each_articles_place_inside_its_category(edition):
+    """The field contract for the next app release: `rank` is an int, 0-based and gapless inside each v1
+    category; a category follows its tab's order and Top-filed articles follow topRank."""
+    ed, _, _, tabs = edition
+    by_cat = {}
+    for a in ed["articles"]:
+        assert type(a["rank"]) is int
+        by_cat.setdefault(a["category"], []).append(a)
+    for cat, arts in by_cat.items():
+        assert sorted(a["rank"] for a in arts) == list(range(len(arts))), cat
+    top = sorted(by_cat.get("Top", []), key=lambda a: a["rank"])
+    assert [a["topRank"] for a in top] == sorted(a["topRank"] for a in top)
+    for tid, cat in publish_v1.V1_CATEGORY.items():
+        place = {c.id: i for i, (c, _) in enumerate(tabs[tid])}
+        own = [a for a in sorted(by_cat.get(cat, []), key=lambda a: a["rank"]) if a["eventId"] in place]
+        assert [place[a["eventId"]] for a in own] == sorted(place[a["eventId"]] for a in own), cat
+
+
+def test_category_ranks_slots_in_an_article_from_another_tab():
+    arts = [{"eventId": e, "category": "Startups"} for e in ("a", "b", "c")] + [{"eventId": "t", "category": "Top"}]
+    # a and c are 2nd and 1st in the startups tab; b made only India, 2nd of 4 there.
+    places = {"a": [("startups", 1, 2)], "c": [("startups", 0, 2)], "b": [("india", 1, 4)]}
+    publish_v1.category_ranks(arts, places, {"t": 0})
+    assert {a["eventId"]: a["rank"] for a in arts} == {"c": 0, "a": 1, "b": 2, "t": 0}
+
+
 def test_every_article_has_ai_text_or_is_flagged_degraded(edition):
     for a in edition[0]["articles"]:
         if a["aiText"]:
@@ -496,7 +522,62 @@ def test_publish_refuses_an_edition_that_fails_the_check(replayed, tmp_path, mon
 
 
 @pytest.mark.skipif(not shutil.which("git"), reason="needs git")
-def test_mirror_force_pushes_one_amended_commit(tmp_path):
+def test_mirror_pushes_only_in_a_process_started_as_the_publisher(tmp_path, monkeypatch):
+    """config.yaml names the live repository; a test, a tool or a hand-run tick must never push to it."""
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    out = tmp_path / "site"
+    out.mkdir()
+    (out / "edition.json").write_text("{}")
+    cfg = {"publish": {"git_remote": str(remote), "git_branch": "edition", "deploy_key": ""}}
+    monkeypatch.delenv(mirror.ENV, raising=False)
+    assert mirror.remote(cfg) is None and mirror.remote(tc.CFG) is None
+    assert mirror.push(tc.new_db(), cfg, str(out), tc.EDITION_AT) is None
+    assert not (out / ".git").exists()
+    refs = subprocess.run(["git", "--git-dir", str(remote), "for-each-ref"], capture_output=True, text=True).stdout
+    assert refs == ""
+    monkeypatch.setenv(mirror.ENV, "1")
+    assert mirror.remote(cfg) == str(remote)
+    assert mirror.remote({"publish": {"git_remote": None}}) is None
+
+
+def test_image_urls_are_checked_only_for_pictures_already_pushed(tmp_path, monkeypatch):
+    """The check runs before the tick's push: a picture written this tick is not on GitHub yet and must not alert."""
+    monkeypatch.setenv(mirror.ENV, "1")
+    cfg = {"publish": {"git_remote": "git@example.test:x/y.git"}}
+    (tmp_path / "img").mkdir()
+    old, new = tmp_path / "img" / "old_std.jpg", tmp_path / "img" / "new_std.jpg"
+    old.write_bytes(b"x")
+    new.write_bytes(b"x")
+    at = tc.EDITION_AT
+    os.utime(old, (at.timestamp() - 600, at.timestamp() - 600))
+    os.utime(new, (at.timestamp() + 5, at.timestamp() + 5))
+    ed = {"articles": [{"image": "https://x.test/img/new_std.jpg"}, {"image": "https://x.test/img/old_std.jpg"}]}
+    asked = []
+
+    class Session:
+        def head(self, u, **kw):
+            asked.append(u)
+            return type("R", (), {"status_code": 200})()
+    db = tc.new_db()
+    got = publish_v1.image_url_check(db, cfg, ed, at + timedelta(minutes=1), Session(), out_dir=str(tmp_path))
+    assert got["checked"] == 0 and not asked                      # nothing pushed yet: nothing to expect
+    db.set_meta("mirror_ok_at", publish_v1.iso(at))
+    got = publish_v1.image_url_check(db, cfg, ed, at + timedelta(minutes=1), Session(), out_dir=str(tmp_path))
+    assert asked == ["https://x.test/img/old_std.jpg"] and got == {"served": True, "checked": 1, "failed": []}
+
+
+def test_the_worker_unit_is_the_only_file_that_makes_a_process_the_publisher():
+    server = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    unit = open(os.path.join(server, "deploy", "techgist-worker.service")).read()
+    assert "Environment=TECHGIST_MIRROR=1" in unit
+    for name in ("techgist-watchdog.service", "techgist-backup.service", "techgist-alert@.service"):
+        assert "TECHGIST_MIRROR" not in open(os.path.join(server, "deploy", name)).read()
+
+
+@pytest.mark.skipif(not shutil.which("git"), reason="needs git")
+def test_mirror_force_pushes_one_amended_commit(tmp_path, monkeypatch):
+    monkeypatch.setenv(mirror.ENV, "1")
     remote = tmp_path / "remote.git"
     subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
     out = tmp_path / "site"

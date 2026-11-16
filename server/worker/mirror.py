@@ -1,8 +1,9 @@
 """Pushes the published directory to the repo's `edition` branch, where 1.2 reads edition.json (spec 2.13).
 
-Off unless `publish.git_remote` is set (it stays off until cutover, while publish.sh still owns the branch). Same
+Off unless `publish.git_remote` is set (null is the rollback switch: deploy/README.md) and the process was started
+with TECHGIST_MIRROR=1 (only the worker's unit on the VPS is: see remote()). Same
 scheme as publish.sh: one commit, amended and force-pushed, so the branch never grows; images already on GitHub
-aren't uploaded again because the local repo is kept. At most once per `publish.git_every_min` (10 min).
+aren't uploaded again because the local repo is kept. At most once per `publish.git_every_min`.
 """
 import logging
 import os
@@ -15,16 +16,32 @@ log = logging.getLogger("techgist")
 EXCLUDE = "*.tmp\n*.rejected\n"
 
 
+# The local repository must not grow either: every push leaves the previous commit and edition.json unreachable.
+# With no reflog to hold them and a short prune window, the `gc --auto` that git runs after a commit removes them.
+KEEP_SMALL = ["-c", "core.logAllRefUpdates=false", "-c", "gc.pruneExpire=1.hour.ago", "-c", "gc.autoDetach=false"]
+
+
 def _git(out_dir, *args, env=None):
-    return subprocess.run(["git", "-C", out_dir, *args], capture_output=True, text=True, timeout=300,
+    return subprocess.run(["git", "-C", out_dir, *KEEP_SMALL, *args], capture_output=True, text=True, timeout=300,
                           env={**os.environ, **(env or {})})
+
+
+ENV = "TECHGIST_MIRROR"
+
+
+def remote(cfg):
+    """The remote to push to, or None. config.yaml names the live repository, and every checkout, test run and
+    tool reads that file; so the remote counts only in a process started with TECHGIST_MIRROR=1, which the
+    worker's systemd unit on the VPS sets and nothing else does. A test, a tool or a tick run by hand on a copy
+    of the state therefore never replaces the branch the app reads."""
+    return ((cfg.get("publish") or {}).get("git_remote") or None) if os.environ.get(ENV) == "1" else None
 
 
 def push(db, cfg, out_dir, now, force=False):
     """Returns None when off, "waiting" inside the interval, "pushed", or "failed: <why>"."""
     p = cfg.get("publish") or {}
-    remote = p.get("git_remote")
-    if not remote:
+    remote_url = remote(cfg)
+    if not remote_url:
         return None
     last = from_iso(db.get_meta("mirror_at"))
     if not force and last and now - last < timedelta(minutes=p.get("git_every_min", 10)):
@@ -46,9 +63,10 @@ def push(db, cfg, out_dir, now, force=False):
     key = os.path.expanduser(p.get("deploy_key") or "")
     if key and os.path.exists(key):
         env["GIT_SSH_COMMAND"] = f"ssh -i {key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-    r = _git(out_dir, "push", "-q", "-f", remote, f"HEAD:{branch}", env=env)
+    r = _git(out_dir, "push", "-q", "-f", remote_url, f"HEAD:{branch}", env=env)
     db.set_meta("mirror_at", iso(now))
     if r.returncode != 0:
         log.warning("mirror push failed: %s", r.stderr.strip()[:200])
         return f"failed: push {r.stderr.strip()[:200]}"
+    db.set_meta("mirror_ok_at", iso(now))
     return "pushed"

@@ -19,6 +19,9 @@ Group=techgist
 WorkingDirectory=/opt/techgist
 Environment=TECHGIST_STATE=/var/lib/techgist
 Environment=PYTHONUNBUFFERED=1
+# This process is the live publisher: it may push the edition to publish.git_remote (worker/mirror.py). Nothing
+# else sets this, so a tool or a tick run by hand from the same code and config never pushes.
+Environment=TECHGIST_MIRROR=1
 # The key is read from the file at start; it is never in the environment, the unit or the journal.
 Environment=NVIDIA_API_KEY_FILE=/etc/techgist/nvidia_key
 Environment=HUB_API_KEY_FILE=/etc/techgist/hub_key

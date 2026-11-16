@@ -2,12 +2,12 @@
 # (and sends an ntfy alert) when it is stale or unreachable. This is the check that still works when the whole VPS
 # is down, which nothing running on the VPS can report.
 #
-# MANUAL TRIGGER ONLY. The schedule below is commented out on purpose: it is the owner's decision to turn it on
-# (Actions tab > "Edition freshness" > Run workflow works today). To enable it:
+# MANUAL TRIGGER ONLY. The same check runs for real from cron on the old private box every 5 minutes
+# (server/deploy/freshness_cron.sh, server/deploy/README.md); this workflow is a second, independent place to run
+# it. The schedule below is commented out because it needs a repository secret only the owner can create:
 #   1. add the repository secret NTFY_TOPIC (the topic in /etc/techgist/env on the VPS), so a stale edition alerts;
-#   2. uncomment the two `schedule` lines;
-#   3. after cutover to the worker, lower max_age_min's default from 45 (the old publisher runs every 30 min)
-#      to 25 (the worker pushes at most every 10 min).
+#   2. uncomment the two `schedule` lines.
+# The limit is 20 min: since the cutover of 2026-11-16 the worker pushes about every 3 min and GitHub caches for 5.
 # GitHub may start scheduled runs 5-15 min late and stops them in a repository with no activity for 60 days.
 name: Edition freshness
 
@@ -19,7 +19,7 @@ on:
         default: https://raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/edition.json
       max_age_min:
         description: Minutes since the last publish before it counts as stale
-        default: "45"
+        default: "20"
   # schedule:
   #   - cron: "7,22,37,52 * * * *"
 
@@ -38,5 +38,5 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           URL: ${{ inputs.url || 'https://raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/edition.json' }}
-          MAX_AGE_MIN: ${{ inputs.max_age_min || '45' }}
+          MAX_AGE_MIN: ${{ inputs.max_age_min || '20' }}
         run: python3 server/deploy/check_freshness.py "$URL" --max-age-min "$MAX_AGE_MIN" --alert

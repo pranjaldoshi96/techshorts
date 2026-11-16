@@ -165,6 +165,9 @@ def tick(db, cfg, poll_all=False, client=None, embedder=None, out_dir=None, star
             pushed = mirror.push(db, cfg, out_dir, now)
             if pushed and pushed != "waiting":
                 counts[f"mirror_{pushed.split(':')[0]}"] += 1
+            if pushed and pushed.startswith("failed"):
+                # Readers are served the branch, not this box's disk: a push that fails leaves them an old edition.
+                health.notify(db, "mirror_push", f"the edition was not pushed to GitHub: {pushed[8:]}")
         if outage:
             log.warning("degraded publish (%s): %d cards, %d without AI text", outage, report["articles"],
                         report["degradedCards"])
