@@ -65,6 +65,32 @@ def test_every_category_is_in_the_1_2_enum_and_every_top_article_is_ranked(editi
     assert len({a["url"] for a in arts}) == len(arts)
 
 
+def test_rank_is_each_articles_place_inside_its_category(edition):
+    """The field contract for the next app release: `rank` is an int, 0-based and gapless inside each v1
+    category; a category follows its tab's order and Top-filed articles follow topRank."""
+    ed, _, _, tabs = edition
+    by_cat = {}
+    for a in ed["articles"]:
+        assert type(a["rank"]) is int
+        by_cat.setdefault(a["category"], []).append(a)
+    for cat, arts in by_cat.items():
+        assert sorted(a["rank"] for a in arts) == list(range(len(arts))), cat
+    top = sorted(by_cat.get("Top", []), key=lambda a: a["rank"])
+    assert [a["topRank"] for a in top] == sorted(a["topRank"] for a in top)
+    for tid, cat in publish_v1.V1_CATEGORY.items():
+        place = {c.id: i for i, (c, _) in enumerate(tabs[tid])}
+        own = [a for a in sorted(by_cat.get(cat, []), key=lambda a: a["rank"]) if a["eventId"] in place]
+        assert [place[a["eventId"]] for a in own] == sorted(place[a["eventId"]] for a in own), cat
+
+
+def test_category_ranks_slots_in_an_article_from_another_tab():
+    arts = [{"eventId": e, "category": "Startups"} for e in ("a", "b", "c")] + [{"eventId": "t", "category": "Top"}]
+    # a and c are 2nd and 1st in the startups tab; b made only India, 2nd of 4 there.
+    places = {"a": [("startups", 1, 2)], "c": [("startups", 0, 2)], "b": [("india", 1, 4)]}
+    publish_v1.category_ranks(arts, places, {"t": 0})
+    assert {a["eventId"]: a["rank"] for a in arts} == {"c": 0, "a": 1, "b": 2, "t": 0}
+
+
 def test_every_article_has_ai_text_or_is_flagged_degraded(edition):
     for a in edition[0]["articles"]:
         if a["aiText"]:

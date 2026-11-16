@@ -13,6 +13,8 @@ One article per event, in the exact shape Edition.swift and Article.swift decode
     alerts: the title is at most 40 characters, the body a hook of at most 110, both validated and fact-checked
     with the card. notifications.json next to the edition lists the cards ranked for pushing (spice x importance
     x traction).
+  - rank is the article's 0-based place inside its category (category_ranks), for the next app release, which
+    shows a category in the engine's order instead of by time.
   - Degraded cards (no validated AI text) carry the publisher title and a <= 55-word excerpt, no headline or
     summary, and aiText: false. 1.2 ignores unknown keys, so aiText, eventId and the edition's degraded flag
     ride along for health checks and R2.
@@ -543,6 +545,33 @@ def v1_category(c, placements, in_top):
     return "Top" if in_top else None
 
 
+V1_TAB = {cat: tid for tid, cat in V1_CATEGORY.items()}
+
+
+def category_ranks(articles, placements, top_rank):
+    """Sets each article's `rank`: its 0-based place inside its v1 category, best first, for the next app
+    release (1.2 ignores the key and sorts a category by time). A category's order is its tab's: an article filed
+    under AI, Startups, Dev or Blogs takes its place in that tab. One filed there from another tab (an India
+    funding round under Startups) is slotted in by its relative place in the tab it came from, and Top-filed
+    articles follow topRank. Ties keep the edition's order, so the ranks of a category are always 0..n-1."""
+    by_cat = {}
+    for i, a in enumerate(articles):
+        eid, cat = a["eventId"], a["category"]
+        places = placements.get(eid, [])
+        own = next((r for tid, r, _ in places if tid == V1_TAB.get(cat)), None)
+        if cat == "Top":
+            key = (top_rank.get(eid, len(articles)), 0)
+        elif own is not None:
+            key = (own, 0)
+        else:
+            n_own = sum(1 for other in articles if other["category"] == cat)
+            key = (min([(r + 1) / n for _, r, n in places] or [1.0]) * n_own, 1)
+        by_cat.setdefault(cat, []).append((key, i, a))
+    for group in by_cat.values():
+        for rank_, (_, _, a) in enumerate(sorted(group, key=lambda g: g[:2])):
+            a["rank"] = rank_
+
+
 def article(c, category, top_rank, image_url):
     lead = c.data["lead"]
     if c.ai_text:
@@ -730,6 +759,7 @@ def build(ctx, embedder=None, out_dir=None, image_store=None):
             used_images.add(name)
             image_url = f"{base}img/{name}_std.jpg"
         articles.append(article(c, cat, top_rank.get(eid), image_url))
+    category_ranks(articles, placements, top_rank)
     edition = {"publishedAt": iso(now), "articles": articles, "degraded": ctx.outage or False}
     spices = [c.spice for c in by_id.values() if c.classified]
     report = {
