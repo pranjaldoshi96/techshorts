@@ -173,10 +173,19 @@ private fun FeedPager(category: Category, items: List<Article>, store: NewsStore
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
                         val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!change.pressed) { ended = true; break }
                         tracker.addPosition(change.uptimeMillis, change.position)
                         dx = change.position.x - down.position.x
                         dy = change.position.y - down.position.y
+                        if (!change.pressed) {
+                            // A flick so quick that the finger was never seen moving is still a swipe, not a tap.
+                            if (vertical == null && (abs(dx) > slop || abs(dy) > slop)) {
+                                vertical = abs(dy) >= abs(dx)
+                                settle?.cancel()
+                                change.consume()
+                            }
+                            ended = true
+                            break
+                        }
                         if (vertical == null && (abs(dx) > slop || abs(dy) > slop)) {
                             vertical = abs(dy) >= abs(dx)
                             // A new touch takes the page from wherever the last snap had brought it.

@@ -20,7 +20,7 @@ where the Android equivalent is and its state:
 | Last stories cached (`articles.json`, cache directory) and on screen at the next launch, online or not | `Disk`, `ArticleCache` | Done (test; emulator: relaunch in airplane mode) |
 | Refresh on launch and on coming to the front when stories are over 10 minutes old; after a long break the feed goes back to the top | `NewsStore.becameActive` | Done (code port; test for the parts) |
 | Check for a newer edition every 5 minutes while open; never re-order under the reader | `ContentScreen`, `NewsStore.checkForNewStories` | Done (test) |
-| "N new stories" pill, hides after 8 seconds, tap brings them in | `NewStoriesPill` | Done (test for the count; the pill needs a new edition to arrive while reading, seen once in the emulator if noted below) |
+| "N new stories" pill, hides after 8 seconds, tap brings them in | `NewStoriesPill` | Done (test for the count and for bringing the stories in; the pill itself was not caught on screen in the emulator, since it needs a new edition to arrive mid-read) |
 | A refresh once asked for runs to its end; two at once fetch once; a pull holds a fast result 0.6 s | `NewsStore.refresh` | Done (tests) |
 | Offline: banner "Offline · stories from …", cached stories stay | `banner()` | Done (test; emulator) |
 | Banners: "Summaries catching up · showing headlines" (degraded or direct), "Updated … ago" (edition over 2 h old) | `banner()` | Done (test) |
@@ -38,9 +38,9 @@ where the Android equivalent is and its state:
 | Pull down on the first card (90 pt) to refresh | `FeedPager` | Done (emulator) |
 | Sideways swipe changes tab (50 pt, clearly horizontal); new tab slides in from that side | `FeedPager`, `AnimatedContent` | Done (test; emulator) |
 | Each tab remembers its card | `positions` in `ContentScreen` | Done (emulator) |
-| Card picks the richest layout that fits, text never shrinks: hero + full summary, hero + short, thumbnail + full, thumbnail + short, text only (ellipsis allowed only there) | `CardView` (`FirstThatFits`, `HeroPolicy`) | Done (emulator) |
+| Card picks the richest layout that fits, text never shrinks: hero + full summary, hero + short, thumbnail + full, thumbnail + short, text only (ellipsis allowed only there) | `CardView` (`FirstThatFits`, `HeroPolicy`) | Done (emulator: hero layout on every card seen, and the thumbnail layout at the largest font; the text-only fallback did not occur) |
 | Hero picture 170 pt to 16:10 with rounded bottom corners, scrim and white source label; shimmer while loading; drawn gradient cover per tab when there is no picture | `StoryImage`, `StoryCover` | Done (emulator) |
-| Meta row: BREAKING (two pulses) / DEVELOPING / HOT (spice 8+) badge, story type, age or "Updated …", "AI summary" or "Summary pending" | `MetaRow` | Done (emulator: HOT and AI summary; BREAKING and DEVELOPING depend on the day's edition) |
+| Meta row: BREAKING (two pulses) / DEVELOPING / HOT (spice 8+) badge, story type, age or "Updated …", "AI summary" or "Summary pending" | `MetaRow` | Done (emulator: HOT and AI summary; no story was BREAKING or DEVELOPING during the run, so those two badges were not seen) |
 | Source monograms with the same colour per name as on iOS | `SourceMonogram`, `monogramColor` | Done (test; emulator) |
 | "Source + N more · X pts on HN ›" opens Full coverage; "N points on Hacker News" when alone | `CoverageRow` | Done (emulator) |
 | Footer: "Read more at Source ›", Save, Share, More (Full coverage, Copy link, Mute source) | `Footer` | Done (emulator) |
@@ -48,7 +48,7 @@ where the Android equivalent is and its state:
 | Last page "You're all caught up", count and update time, Back to top, Saved stories | `EndOfTabCard` | Done (emulator) |
 | Skeleton card while the first edition loads; "No stories … Try again" when nothing could be loaded | `SkeletonCard`, `EmptyFeed` | Done (emulator) |
 | Highlight border for 1.6 s on a card opened from an alert or search | `CardView`, `ContentScreen` | Done (emulator) |
-| At accessibility text sizes the feed becomes a scrolling list of full-length cards with pull to refresh | `FeedList`, from font scale 1.6 | Done (emulator at the largest font size) |
+| At accessibility text sizes the feed becomes a scrolling list of full-length cards with pull to refresh | `FeedList`, from font scale 1.6 | Done (emulator at font scale 2.0) |
 | VoiceOver: one spoken label per card, actions for Save, Share, Full coverage, Copy link, Mute | TalkBack: `spokenLabel`, custom actions | Done (test for the label; not tried with TalkBack on) |
 | Haptics on tab change, pill, save, refresh | `LocalHapticFeedback` | Done (code; an emulator cannot show it) |
 | Light and dark appearance, accent blue `#215CED` / `#6C97FF`, black and red icon | `Theme.kt`, adaptive icon from the iOS artwork | Done (emulator, both) |
@@ -74,8 +74,8 @@ where the Android equivalent is and its state:
 |---|---|---|
 | Permission asked once at first launch; yes turns on the morning gist and big story alerts | `ContentScreen` (Android 13+ dialog; earlier versions allow by default) | Done (emulator) |
 | Switching either on later asks again, or explains how to allow it in Settings | `SettingsScreen` | Done (emulator) |
-| Alert: title and body exactly as the edition's `notification` (else headline and alert line), picture, chosen sound, Read and Save buttons | `StoryNotification.post` | Done (emulator, with "Preview an alert") |
-| Tap an alert: the story's card comes on screen, highlighted, loading the newest edition first if needed; an old story opens its page | `MainActivity`, `NewsStore.showStory` | Done (test; emulator) |
+| Alert: title and body exactly as the edition's `notification` (else headline and alert line), picture, chosen sound, Read and Save buttons | `StoryNotification.post` | Done (emulator, with "Preview an alert", app in the background) |
+| Tap an alert: the story's card comes on screen, highlighted, loading the newest edition first if needed; an old story opens its page | `MainActivity`, `NewsStore.showStory` | Done (test; emulator: by link from the app's alert, and by event id as a server push names it, across tabs) |
 | Read button opens the story; Save keeps it without opening the app | `MainActivity`, `SaveStoryReceiver` | Done (emulator) |
 | Five alert sounds; the choice is sent to the server | `AlertSound`: the same sound files as WAV; one notification channel, re-made for the chosen sound | Adapted (Android ties a sound to a channel). Done (emulator: channel and preview; an emulator's audio was not listened to) |
 | Morning gist at the chosen time with the top story and picture | `DailyDigest` (alarm, also after a restart) | Adapted: Android may deliver it a few minutes late; the story is the top one at that moment. Done (code and test of the time; not waited for overnight) |
@@ -89,3 +89,17 @@ where the Android equivalent is and its state:
 ## Not in either app
 
 Ads, analytics, accounts. Nothing was added that the iOS app does not have.
+
+## How it was checked
+
+Emulator: Android 15 (API 35), Pixel 7 profile, debug build, live edition, 17 November 2026. Seen on screen: first
+launch with the skeleton and the notification prompt, the feed and paging, all five tabs by chip and by sideways
+swipe, Full coverage with an outlet's own report opening over it, the story in the in-app browser, Save, More,
+Saved, Search, Settings, Sources, the sound picker (channel `stories_wire` with its sound), an alert preview with
+picture, its tap, its Read and its Save, a story opened by event id in another tab with the highlight, the end
+card and Back to top, dark mode, the share sheet and its picture, a relaunch in airplane mode (cached stories and
+the Offline banner), and the list layout at the largest font. Not seen: anything that needs time or a real phone
+(the morning alarm, the hourly background job, haptics, how the sounds sound) and server push, which needs the
+owner's Firebase project.
+
+Unit tests: `android/build.sh testDebugUnitTest` (54 tests).

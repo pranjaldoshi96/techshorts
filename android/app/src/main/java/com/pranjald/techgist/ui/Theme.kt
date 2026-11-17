@@ -181,14 +181,15 @@ fun monogramColor(name: String): Color {
 
 /** A round stand-in for a publisher's logo: its initial on a colour that is always the same for that name. */
 @Composable
-fun SourceMonogram(name: String, size: Dp = 20.dp, modifier: Modifier = Modifier) {
+fun SourceMonogram(name: String, size: Dp = 20.dp, modifier: Modifier = Modifier, scales: Boolean = false) {
     val initial = (name.firstOrNull { it.isLetterOrDigit() } ?: 'T').uppercase()
-    Box(modifier.size(size).clip(CircleShape).background(monogramColor(name)).clearAndSetSemantics { },
+    val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
+    // Beside text it grows with the text (up to twice); elsewhere it is a picture of a fixed size.
+    val side = if (scales) size * fontScale.coerceIn(1f, 2f) else size
+    Box(modifier.size(side).clip(CircleShape).background(monogramColor(name)).clearAndSetSemantics { },
         contentAlignment = Alignment.Center) {
-        // Sized by the circle, not by the font scale: the circle is a picture.
         Text(initial, color = Color.White, fontWeight = FontWeight.Bold,
-            style = TextStyle(fontSize = (size.value * 0.55f / androidx.compose.ui.platform.LocalDensity.current.fontScale).sp,
-                lineHeight = (size.value * 0.7f / androidx.compose.ui.platform.LocalDensity.current.fontScale).sp),
+            style = TextStyle(fontSize = (side.value * 0.55f / fontScale).sp, lineHeight = (side.value * 0.7f / fontScale).sp),
             textAlign = TextAlign.Center)
     }
 }

@@ -247,7 +247,7 @@ private fun TextOnly(article: Article, summary: String, onCoverage: () -> Unit) 
 @Composable
 private fun SourceLabel(name: String, color: Color, modifier: Modifier = Modifier, shadow: Boolean = false) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-        SourceMonogram(name)
+        SourceMonogram(name, scales = true)
         Text(name, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis,
             style = Theme.caption.copy(fontWeight = FontWeight.SemiBold,
                 shadow = if (shadow) Shadow(Color.Black.copy(alpha = 0.6f), blurRadius = 6f) else null))
