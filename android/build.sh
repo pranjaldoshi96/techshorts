@@ -16,6 +16,8 @@ if [ ! -f local.properties ] && [ -z "$ANDROID_HOME" ] && [ -z "$ANDROID_SDK_ROO
         if [ -d "$sdk" ]; then echo "sdk.dir=$sdk" > local.properties; break; fi
     done
 fi
-if [ $# -eq 0 ]; then set -- assembleDebug; fi
+task=""
+for arg in "$@"; do case "$arg" in -*) ;; *) task=yes ;; esac; done
+if [ -z "$task" ]; then set -- assembleDebug "$@"; fi
 ./gradlew "$@"
 if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then echo "APK: $(pwd)/app/build/outputs/apk/debug/app-debug.apk"; fi
