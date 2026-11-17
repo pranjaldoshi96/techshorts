@@ -551,8 +551,13 @@ def record(db, source, sources, res, now, cfg):
         db.update_source(source.id, **fields)
         res.error = error
     else:
+        fails = state["consecutive_failures"] + 1
+        if fails >= cfg["fetch"]["failure_alert_after"]:
+            # A feed that keeps refusing us is asked less often, and goes back to its own pace when it answers.
+            wait = max(source.poll_seconds, cfg["fetch"]["failure_backoff_min"] * 60)
+            next_poll = iso(now + timedelta(seconds=wait))
         db.update_source(source.id, last_polled_at=iso(now), next_poll_at=next_poll, last_status=res.status,
-                         last_error=res.error, consecutive_failures=state["consecutive_failures"] + 1)
+                         last_error=res.error, consecutive_failures=fails)
     db.log_poll(now, source.id, res.status, stats.entries, stats.new, res.ms, res.error)
     return stats
 

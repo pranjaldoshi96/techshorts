@@ -390,7 +390,7 @@ def test_server_alerts_go_to_owner_devices_only_and_bypass_story_limits(env):
     env.sender.tick(night)                                                           # first run: cursor only
     assert env.store.get("ntfy_since") == str(int(night.timestamp()))
     env.ntfy.inbox = [{"id": "m1", "event": "message", "title": "Techgist: techgist-worker.service failed",
-                       "message": "it was killed"},
+                       "message": "it was killed", "priority": 4},
                       {"id": "m2", "event": "message", "title": "Techgist push in 5 min", "message": "x",
                        "tags": [HOLD_TAG]}]
     later = night + timedelta(seconds=env.cfg["owner"]["poll_s"])
@@ -403,6 +403,29 @@ def test_server_alerts_go_to_owner_devices_only_and_bypass_story_limits(env):
     env.ntfy.inbox = []
     env.sender.tick(later + timedelta(seconds=env.cfg["owner"]["poll_s"]))
     assert len(env.apns.sent) == 1
+
+
+def test_a_server_alert_reaches_the_owners_phone_once_and_only_when_readers_are_affected(env):
+    env.device(TOK_A)
+    env.store.set_owner(TOK_A)
+    step = timedelta(seconds=env.cfg["owner"]["poll_s"])
+    env.sender.tick(NOW)
+    # ntfy keeps handing back the same messages (two posted in one second): 17 Nov, one alert a minute for 3 h.
+    env.ntfy.inbox = [{"id": "a1", "event": "message", "title": "Techgist: no_publish", "message": "m", "priority": 4},
+                      {"id": "a2", "event": "message", "title": "Techgist: image_urls", "message": "m"},
+                      {"id": "a3", "event": "message", "title": "Techgist: llm_budget", "message": "m", "priority": 3}]
+    for i in range(1, 30):
+        env.sender.tick(NOW + step * i)
+    assert [s["payload"]["aps"]["alert"]["title"] for s in env.apns.sent] == ["Server alert: Techgist: no_publish"]
+    # A storm of real ones is capped per hour, and the cap lifts afterwards.
+    cap = env.cfg["owner"]["relay_max_per_hour"]
+    env.ntfy.inbox = [{"id": f"b{n}", "event": "message", "title": f"Techgist: unit {n} failed", "message": "m",
+                       "priority": 5} for n in range(cap + 5)]
+    env.sender.tick(NOW + step * 30)
+    assert len(env.apns.sent) == cap
+    env.ntfy.inbox = [{"id": "c1", "event": "message", "title": "Techgist: disk full", "message": "m", "priority": 5}]
+    env.sender.tick(NOW + timedelta(hours=2))
+    assert len(env.apns.sent) == cap + 1 and env.apns.sent[-1]["payload"]["aps"]["alert"]["title"].endswith("disk full")
 
 
 def test_health_file_counts(env):

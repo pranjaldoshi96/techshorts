@@ -16,8 +16,12 @@ fetch:
   max_age_days_reads: 14
   # A source's first poll marks older items as seen, so a new source doesn't flood the LLM.
   first_run_skip_hours: 36
-  # ntfy alert after this many failed polls in a row (section 7).
+  # After this many failed polls in a row a source counts as failing: logged, shown in health.json, and polled
+  # only every failure_backoff_min until it answers. No alert for one source; the owner is told only when
+  # sources_down_share of all sources are failing at once.
   failure_alert_after: 6
+  failure_backoff_min: 30
+  sources_down_share: 0.2
 
 # check_sources runs at worker start and then every check_every_hours (the "nightly" check).
 check_every_hours: 24

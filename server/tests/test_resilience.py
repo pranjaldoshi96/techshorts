@@ -254,7 +254,7 @@ def test_health_notify_retries_an_alert_that_could_not_be_sent(monkeypatch):
     monkeypatch.setattr(resilience, "ntfy", lambda title, message, priority=None: calls.append(priority) or True)
     assert health.notify(db, "no_publish", "m") is True and calls == ["high"]
     assert health.notify(db, "no_publish", "m") is False and len(calls) == 1       # once per 6 h
-    assert health.notify(db, "source_failing:x", "m") is True and calls[-1] is None
+    assert health.notify(db, "image_urls", "m") is True and calls[-1] is None
 
 
 def test_health_notify_without_a_topic_logs_once(monkeypatch):

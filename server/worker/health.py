@@ -18,7 +18,7 @@ ALERT_EVERY = timedelta(hours=6)
 
 
 # Conditions that mean readers are not getting news: sent at ntfy's high priority.
-URGENT = ("no_publish", "v1_check", "llm_auth", "disk_low")
+URGENT = ("no_publish", "v1_check", "llm_auth", "disk_low", "sources_down")
 
 
 def notify(db, condition, message):

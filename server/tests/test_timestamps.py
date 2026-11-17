@@ -229,6 +229,30 @@ def test_failures_count_up_and_reset(db):
     assert db.source_state(NEWS.id)["consecutive_failures"] == 0
 
 
+def test_a_source_that_keeps_failing_is_polled_less_often_and_alerts_no_one(db, monkeypatch):
+    from worker import health, main as worker_main, resilience
+    sent = []
+    monkeypatch.setattr(resilience, "ntfy", lambda title, message, priority=None: sent.append((title, priority)) or True)
+    after = CFG["fetch"]["failure_alert_after"]
+    for i in range(after + 40):
+        at = NOW + timedelta(minutes=3 * i)
+        poll(db, NEWS, fetch.FetchResult(NEWS.id, status=403, error="HTTP 403"), at)
+        assert worker_main.sources_down(db, SRCS, CFG) == ([NEWS.id] if i + 1 >= after else [])
+    state = db.source_state(NEWS.id)
+    assert state["consecutive_failures"] == after + 40 and sent == []                # one source: no message at all
+    assert from_iso(state["next_poll_at"]) - at == timedelta(minutes=CFG["fetch"]["failure_backoff_min"])
+    poll(db, NEWS, ok(NEWS, "feed_news.xml"), at + timedelta(minutes=30))            # it answers: its own pace again
+    assert from_iso(db.source_state(NEWS.id)["next_poll_at"]) - at == timedelta(minutes=30, seconds=NEWS.poll_seconds)
+    # Every feed failing at once is our network or our address being refused: that one is worth a message.
+    for s in SRCS.sources:
+        for i in range(after):
+            poll(db, s, fetch.FetchResult(s.id, status=403, error="HTTP 403"), NOW + timedelta(days=1, minutes=i))
+    polled = [s.id for s in SRCS.sources if s.polled]
+    assert worker_main.sources_down(db, SRCS, CFG) == polled
+    assert sent == [("Techgist: sources_down", "high")]
+    assert worker_main.sources_down(db, SRCS, CFG) == polled and len(sent) == 1      # once per 6 h
+
+
 def test_empty_feed_is_a_failure(db):
     empty = fetch.FetchResult(NEWS.id, status=200, body=b"<rss><channel></channel></rss>")
     poll(db, NEWS, empty, NOW)

@@ -164,6 +164,7 @@ class Sender:
         self.log = log
         self.pool = ThreadPoolExecutor(max_workers=cfg["apns"]["concurrency"], thread_name_prefix="apns")
         self.last_relay = None
+        self.relayed_at = []
         self.last_prune = None
         self.dry_loops = 0
         self.last_error = None
@@ -355,18 +356,30 @@ class Sender:
         except (OSError, ValueError) as e:
             self.log(f"relay: ntfy not readable ({type(e).__name__})")
             return 0
+        # ntfy can hand back a message it already gave (two posted in one second, a cursor it has forgotten), so
+        # the cursor alone is not trusted: an id is relayed once, ever, and the phone gets a few an hour at most.
+        seen = json.loads(self.store.get("ntfy_relayed") or "[]")
         sent = 0
         for m in messages:
-            tags = m.get("tags") or []
-            if HOLD_TAG not in tags:
-                payload = apns_mod.server_payload(m.get("title"), m.get("message"))
-                for d in self.store.owners():
-                    res = self.apns.send(d["token"], d["env"], payload, collapse_id="ntfy-" + str(m["id"]),
-                                         expiration=int(now.timestamp()) + 86400)
-                    self._settle(d, None, res, now)
-                    sent += res.outcome == "ok"
-                    self._alive()
+            mid = str(m["id"])
+            if mid not in seen:
+                seen.append(mid)
+                self.relayed_at = [t for t in self.relayed_at if (now - t).total_seconds() < 3600]
+                if HOLD_TAG in (m.get("tags") or []) or int(m.get("priority") or 3) < o["relay_min_priority"]:
+                    pass                                    # the owner's ntfy topic has it; not worth a phone alert
+                elif len(self.relayed_at) >= o["relay_max_per_hour"]:
+                    self.log(f"relay: hourly limit reached, not sent to phones: {m.get('title')}")
+                else:
+                    self.relayed_at.append(now)
+                    payload = apns_mod.server_payload(m.get("title"), m.get("message"))
+                    for d in self.store.owners():
+                        res = self.apns.send(d["token"], d["env"], payload, collapse_id="ntfy-" + mid,
+                                             expiration=int(now.timestamp()) + 86400)
+                        self._settle(d, None, res, now)
+                        sent += res.outcome == "ok"
+                        self._alive()
             self.store.put("ntfy_since", m["id"])
+        self.store.put("ntfy_relayed", json.dumps(seen[-300:]))
         return sent
 
     # 4. Health

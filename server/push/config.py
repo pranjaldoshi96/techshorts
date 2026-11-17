@@ -49,6 +49,8 @@ DEFAULTS = {
     "owner": {
         "relay_ntfy": True,         # operational alerts on the ntfy topic also go to owner devices
         "poll_s": 60,
+        "relay_min_priority": 4,    # ntfy's scale (3 = default): only "readers are not getting news" reaches a phone
+        "relay_max_per_hour": 4,    # whatever goes wrong upstream, the owner's phone gets at most this many
         "ntfy_url": "https://ntfy.sh",
     },
 }

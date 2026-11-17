@@ -61,11 +61,25 @@ def fetch_due(db, srcs, cfg, poll_all=False):
             tick[k] += getattr(stats, k)
         if res.error:
             log.info("%s: %s", source.id, res.error)
-        fails = db.source_state(source.id)["consecutive_failures"]
-        if fails >= cfg["fetch"]["failure_alert_after"]:
-            health.notify(db, f"source_failing:{source.id}", f"{source.name} failed {fails} polls in a row ({res.error})")
+        if db.source_state(source.id)["consecutive_failures"] == cfg["fetch"]["failure_alert_after"]:
+            # One source refusing us is the log's and health.json's business, never a message to anyone's phone.
+            log.warning("%s has failed %d polls in a row (%s); polled less often until it answers", source.id,
+                        cfg["fetch"]["failure_alert_after"], res.error)
+    sources_down(db, srcs, cfg)
     db.commit()
     return tick
+
+
+def sources_down(db, srcs, cfg):
+    """The one source alert: a large share of all feeds failing at once, which is our network or our address
+    being refused and does thin the news. Returns the failing source ids."""
+    after = cfg["fetch"]["failure_alert_after"]
+    polled = [s for s in srcs.sources if s.polled]
+    failing = [s.id for s in polled if db.source_state(s.id)["consecutive_failures"] >= after]
+    if polled and len(failing) >= max(3, len(polled) * cfg["fetch"]["sources_down_share"]):
+        health.notify(db, "sources_down", f"{len(failing)} of {len(polled)} sources are failing: "
+                                          f"{', '.join(failing[:8])}{' ...' if len(failing) > 8 else ''}")
+    return failing
 
 
 def maybe_check_sources(db, srcs, cfg):

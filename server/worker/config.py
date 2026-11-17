@@ -21,6 +21,8 @@ DEFAULTS = {
         "max_age_days_reads": 14,
         "first_run_skip_hours": 36,
         "failure_alert_after": 6,
+        "failure_backoff_min": 30,
+        "sources_down_share": 0.2,
     },
     "check_every_hours": 24,
     "llm": {"base_url": "https://integrate.api.nvidia.com/v1", "model": None, "fallback_model": None, "daily_budget": 0,
