@@ -1,0 +1,12 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+captures/
+# Firebase config and signing material are the owner's; they never go into this public repository.
+app/google-services.json
+*.jks
+*.keystore
+keystore.properties

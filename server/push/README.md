@@ -1,7 +1,8 @@
 # Techgist push (R3)
 
 Real push notifications, sent from the VPS: a device registry the app talks to, and a sender that takes stories
-from the engine's alert queue and delivers them through APNs.
+from the engine's alert queue and delivers them through APNs (and, for Android devices, through FCM: see
+[Android](#android-fcm), which is in the code and **not deployed yet**).
 
 | | |
 |---|---|
@@ -11,6 +12,7 @@ from the engine's alert queue and delivers them through APNs.
 | State | `/var/lib/techgist/push.db` (devices, stories taken, what each device got), `/var/lib/techgist/push_health.json` |
 | Backup | `techgist-push-backup.timer`, nightly 03:50 UTC: `push/backup.py` writes a checked copy to `/var/lib/techgist/backups/nightly/push-<time>.db` and keeps 7. Restore: stop the service, copy one over `push.db`, remove `push.db-wal` and `push.db-shm`, start it. |
 | Key | `/etc/techgist/apns/AuthKey_K2DXJ7NMGX.p8` (`root:techgist` 640, directory 750). Key id, team and topic are in `config.py`. |
+| FCM credential (Android; not there yet) | `/etc/techgist/fcm/service-account.json` (`root:techgist` 640, directory 750): the Firebase project's service account. While it is absent the service runs as before and Android devices wait. |
 | Settings | defaults in `config.py`; `/var/lib/techgist/push.json` overrides any of them (read at start) |
 | TLS | Let's Encrypt certificate for the sslip.io name (it resolves to the VPS address; nothing was bought), HTTP-01 through the webroot `/var/www/techgist-acme`, renewed by `certbot.timer`, nginx reloaded by the certificate's deploy hook |
 | nginx | one added file, `/etc/nginx/sites-available/techgist-push` (linked in `sites-enabled`). Only `/v1/` is proxied, to `127.0.0.1:8787`, at most 5 requests a second per address (burst 20). No version in answers; its own error log at `crit` only, so a device token in a request line is never logged. No other nginx file is touched. |
@@ -18,11 +20,12 @@ from the engine's alert queue and delivers them through APNs.
 ```bash
 server/push/deploy/deploy_push.sh            # copy code, (re)build the venv if requirements changed, restart
 server/push/deploy/deploy_push.sh --key      # also copy the APNs key from ~/Desktop (scp; never shown)
+server/push/deploy/deploy_push.sh --fcm      # also copy the Firebase service account JSON from ~/Desktop (scp; never shown)
 server/push/deploy/deploy_push.sh --https    # also (re)run setup_https.sh: nginx file + certificate
 
 # On the VPS
 /opt/techgist-push/pushctl status            # devices, sent, failed, held
-/opt/techgist-push/pushctl devices           # first six characters of each token, env, time zone, owner flag
+/opt/techgist-push/pushctl devices           # first six characters of each token, platform, env, time zone, owner flag
 /opt/techgist-push/pushctl owner --latest    # the device that registered last is the owner's (or: owner PREFIX)
 /opt/techgist-push/pushctl test PREFIX       # one labelled test notification to that device, now
 /opt/techgist-push/pushctl test PREFIX --event ev_...   # that edition story as a real alert carries it, now
@@ -32,11 +35,13 @@ journalctl -u techgist-push -f
 
 ## The registry
 
-`POST /v1/devices` with `{"token", "env": "sandbox"|"production", "tz", "locale", "appVersion", "topics"?}` answers
+`POST /v1/devices` with `{"token", "env": "sandbox"|"production", "tz", "locale", "appVersion", "topics"?, "sound"?,
+"platform"?}` answers
 `{"ok": true}`; the same call again refreshes the device. `DELETE /v1/devices/<token>` removes it (same answer for
-an unknown token). The token must be 64 to 200 hex characters; `env`, `tz` and `topics` have a length and character
+an unknown token). The token must be 64 to 200 hex characters (an Android device's is different: see
+[Android](#android-fcm)); `env`, `tz` and `topics` have a length and character
 limit and a value outside it is refused with 400 and the field's name; `locale` loses anything after `@` (iOS sends
-`en_US@rg=inzzzz`) and, like `appVersion`, is stored as unknown when it does not fit. Bodies over 2 KB are refused. 60 requests a minute
+`en_US@rg=inzzzz`) and, like `appVersion`, is stored as unknown when it does not fit. Bodies over 4 KB are refused (nginx's own limit; it was 2 KB before an FCM token had to fit). 60 requests a minute
 per address, of which 10 registrations (anyone can register a well-formed token, and each costs APNs calls at the
 next story), and 30 per token, then 429. There is no endpoint that lists or returns devices, answers never contain a
 token, and the log shows a token's first six characters at most. `topics` is stored and not used yet.
@@ -103,17 +108,65 @@ Every 15 s:
 copy and `mark_sent`: the second copy is ignored. Killed between APNs' answer and the per-device record: that device
 is sent the story once more with the same collapse id, which replaces the first on the phone.
 
+## Android (FCM)
+
+In the code, tested against a fake Google, and **not deployed**: no Firebase project's credential is on the VPS and
+no Android app is registered. Until `deploy_push.sh --fcm` has run, the service behaves exactly as before.
+
+**Registry.** The Android app adds `"platform": "android"` to its registration; absent means `"ios"` (the iOS 2.0
+app sends none), anything else is refused with 400 and `field: platform`. Its `token` is the FCM registration
+token: 100 to 1024 characters of `A-Z a-z 0-9 _ - :`, case-sensitive, stored exactly as sent. `env`, `tz`, `locale`,
+`appVersion`, `topics` and `sound` are as for iOS (`env` is required and stored, and means nothing to FCM).
+`DELETE /v1/devices/<token>` takes the token percent-encoded or plain. The log still shows six characters at most.
+
+**Sending.** The same loop, rules, hold, records and limits; only the last step differs. An Android device's story
+goes to FCM's HTTP v1 API (`fcm.py`) as a data-only message, because the app builds the notification itself (its
+own channel per alert sound, the picture, a tap that opens the story's card):
+
+```json
+{"message": {"token": "<the device's>",
+  "data": {"kind": "story", "title": "...", "body": "...", "eventId": "ev_...", "url": "...", "image": "...", "sound": "wire"},
+  "android": {"priority": "HIGH", "ttl": "10800s", "collapse_key": "<the queue row's collapse id>"}}}
+```
+
+Every `data` value is a string. `title` and `body` are the edition's at the moment of sending, unchanged. `url`,
+`image` and `sound` are left out when there is none; `sound` is the reader's choice as registered (`flash`, `wire`,
+`chime`, `soft`, `default`). `kind` is `story`, `server` (an owner alert: `title` "Server alert: ...", `body`) or
+`test` (`pushctl test`). There is never a `notification` block.
+
+- Authorisation: the service account signs an RS256 assertion (scope `firebase.messaging`), Google's token
+  endpoint answers with an access token, which is reused until 5 minutes before its hour ends. The file is read
+  only then and neither it nor the token is ever logged.
+- 404, `UNREGISTERED`, 403 `SENDER_ID_MISMATCH`: the device is removed. 429, 5xx, network errors: three attempts,
+  then again on the next loop. 401: a new access token once; then, like any other 403 or a service account Google
+  refuses, an ntfy alert ("FCM refused our credentials", hourly at most) and the story stays for the next loop.
+  400 `INVALID_ARGUMENT` and anything else: that story is not tried again on that device.
+- APNs and FCM each have their own round (batches of 8, the breaker, 120 s: the `apns` settings, counted per
+  service), iPhones first, so FCM being down never delays an iPhone and the other way round.
+- While no credential file is readable (checked at start; `--fcm` restarts the service), an Android device's
+  sends are passed over: nothing is recorded, one log line, no alert. It gets a story once FCM is there, if the
+  story is still inside its usual age limits.
+
+Settings: `fcm` in `config.py` (`credentials_file`, `project_id` when it should not be the file's own, `timeout_s`,
+`attempts`, `backoff_s`, `ttl_s`). To turn it on: download the service account key from the Firebase console
+(Project settings, Service accounts) to `~/Desktop`, then `server/push/deploy/deploy_push.sh --fcm` (it takes the
+one `*firebase-adminsdk*.json` there, or the file `TECHGIST_FCM_JSON` names). The journal then says `FCM configured`;
+`pushctl test PREFIX` on an Android device must print `FCM: ok status=200 ...`. An Android token's prefix is typed
+with its capitals. The first start with this code adds a `platform` column to `push.db` in place (existing devices
+are `ios`); the previous code still runs on the upgraded file.
+
 ## Owner alerts in the app
 
 `pushctl owner --latest` (or `owner PREFIX`) marks a registered device as the owner's. Once a minute the service
 reads the ntfy topic and sends every new message there (worker crashes, the watchdog, stale editions, this
-service's own failures) to owner devices as "Server alert: <title>", outside quiet hours, caps and gaps. The
+service's own failures) to owner devices as "Server alert: <title>" (by APNs or FCM, as the device is), outside quiet hours, caps and gaps. The
 "push in 5 min" notices are not relayed. ntfy itself is unchanged, so both arrive.
 
 ## Health
 
-`push_health.json`: devices (total, sandbox, production, owner, holding a story for the morning), sent (total, last
-24 h, last time), failed (total and APNs' last answer), devices removed, stories in the owner hold, and the engine
+`push_health.json`: devices (total, sandbox, production, owner, holding a story for the morning), `platforms` (ios,
+android), `fcm.configured`, sent (total, last
+24 h, last time), failed (total and the last answer, APNs' or FCM's), devices removed, stories in the owner hold, and the engine
 queue's counts. A crash or watchdog kill raises the worker's kind of ntfy alert through `techgist-alert@`; an
 unreadable key, APNs refusing the key, five rounds without one successful send, and a loop that fails ten times in
 a row raise their own.

@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS devices (
   owner INTEGER NOT NULL DEFAULT 0,
   held_event TEXT,
   sound TEXT,                    -- the alert sound the reader chose in the app (NULL = the service's default)
+  platform TEXT NOT NULL DEFAULT 'ios',   -- ios (the token is APNs') or android (an FCM registration token)
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -84,6 +85,11 @@ class Store:
                 self.conn.execute("ALTER TABLE devices ADD COLUMN sound TEXT")        # a push.db from before it
             except sqlite3.OperationalError:
                 pass
+        if "platform" not in {r["name"] for r in self.q("PRAGMA table_info(devices)")}:
+            try:                                                                  # a push.db from before Android
+                self.conn.execute("ALTER TABLE devices ADD COLUMN platform TEXT NOT NULL DEFAULT 'ios'")
+            except sqlite3.OperationalError:
+                pass
         if "queued_at" not in {r["name"] for r in self.q("PRAGMA table_info(alerts)")}:
             try:
                 self.conn.execute("ALTER TABLE alerts ADD COLUMN queued_at TEXT")     # a push.db from before it
@@ -99,20 +105,22 @@ class Store:
 
     # Devices
 
-    def register(self, token, env, tz, locale, app_version, topics, now, max_devices=None, sound=None):
+    def register(self, token, env, tz, locale, app_version, topics, now, max_devices=None, sound=None,
+                 platform="ios"):
         """Adds the device or refreshes it (owner flag and history are kept). False when the registry is full."""
         if self.q("SELECT 1 FROM devices WHERE token = ?", token):
             self.conn.execute("UPDATE devices SET env = ?, tz = ?, locale = ?, app_version = ?, topics = ?,"
-                              " sound = ?, updated_at = ? WHERE token = ?",
+                              " sound = ?, platform = ?, updated_at = ? WHERE token = ?",
                               (env, tz, locale, app_version, json.dumps(topics) if topics is not None else None,
-                               sound, iso(now), token))
+                               sound, platform, iso(now), token))
         else:
             if max_devices and self.device_count() >= max_devices:
                 return False
             self.conn.execute("INSERT INTO devices (token, dkey, env, tz, locale, app_version, topics, sound,"
-                              " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                              " platform, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                               (token, dkey(token), env, tz, locale, app_version,
-                               json.dumps(topics) if topics is not None else None, sound, iso(now), iso(now)))
+                               json.dumps(topics) if topics is not None else None, sound, platform, iso(now),
+                               iso(now)))
         self.conn.commit()
         return True
 
@@ -132,7 +140,11 @@ class Store:
         return self.q("SELECT * FROM devices WHERE owner = 1")
 
     def find(self, prefix):
-        return self.q("SELECT * FROM devices WHERE token LIKE ? ORDER BY updated_at DESC", prefix.lower() + "%")
+        """Devices whose token starts with `prefix`. An FCM token is matched exactly as typed (it is case-sensitive,
+        and its "_" is not a wildcard here); an APNs token also in lower case, as it is stored."""
+        return self.q("SELECT * FROM devices WHERE substr(token, 1, ?) = ?"
+                      " OR (platform = 'ios' AND substr(token, 1, ?) = ?) ORDER BY updated_at DESC",
+                      len(prefix), prefix, len(prefix), prefix.lower())
 
     def latest(self):
         return self.q("SELECT * FROM devices ORDER BY updated_at DESC, created_at DESC LIMIT 1")
@@ -150,6 +162,11 @@ class Store:
                    " COALESCE(SUM(held_event IS NOT NULL), 0) held FROM devices")[0]
         return {"total": r["n"], "sandbox": r["sandbox"], "production": r["production"], "owner": r["owner"],
                 "holding": r["held"]}
+
+    def platform_counts(self):
+        r = self.q("SELECT COALESCE(SUM(platform = 'ios'), 0) ios, COALESCE(SUM(platform = 'android'), 0) android"
+                   " FROM devices")[0]
+        return {"ios": r["ios"], "android": r["android"]}
 
     def set_held(self, token, event_id):
         self.conn.execute("UPDATE devices SET held_event = ? WHERE token = ?", (event_id, token))

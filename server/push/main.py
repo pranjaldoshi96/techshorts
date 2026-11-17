@@ -11,7 +11,7 @@ import socket
 import sys
 import time
 
-from . import api, config
+from . import api, config, fcm
 from .apns import Apns
 from .sender import Ntfy, Sender
 from .store import Store
@@ -44,13 +44,16 @@ def main():
         log("worker.alertq not importable: registry only, nothing is taken from the engine's queue")
     store = Store(cfg["paths"]["push_db"])
     ntfy = Ntfy(cfg)
+    # Android is optional: without the service account file the service runs as it always has (no alert for it).
+    android = fcm.from_config(cfg)
     sender = Sender(cfg, store, Apns(cfg["apns"]), alertq=alertq, ntfy=ntfy, log=log,
-                    heartbeat=lambda: sd_notify("WATCHDOG=1"))
+                    heartbeat=lambda: sd_notify("WATCHDOG=1"), fcm=android)
     api.serve(cfg, lambda: Store(cfg["paths"]["push_db"]), sender.alive, log)
     key_ok = os.access(cfg["apns"]["key_file"], os.R_OK)
     log(f"push service up on {cfg['api']['host']}:{cfg['api']['port']}; sending "
         f"{'on' if cfg['sending_enabled'] else 'off'}; APNs key {'readable' if key_ok else 'NOT readable'}; "
         f"{store.device_count()} devices")
+    log("FCM configured (Android devices are sent to)" if android else "FCM not configured (Android devices wait)")
     if not key_ok and cfg["sending_enabled"]:
         ntfy.send("Techgist push: APNs key not readable", "The push service started but cannot read its APNs key "
                   "file; nothing can be sent until it can.", key="apns_key", priority="high", tags="warning", log=log)

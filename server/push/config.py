@@ -10,7 +10,7 @@ DEFAULTS = {
     "api": {
         "host": "127.0.0.1",        # never anything else: nginx is the only way in
         "port": 8787,
-        "max_body": 2048,
+        "max_body": 4096,           # an FCM token may be 1 KB; nginx (setup_https.sh) lets 4k through
         "ip_per_min": 60,           # requests per client address per minute
         "ip_post_per_min": 10,      # ... of which registrations (each unproven token costs APNs calls later)
         "token_per_min": 30,        # requests per device token per minute (spec 6.5)
@@ -33,6 +33,15 @@ DEFAULTS = {
         # down a loop then costs one batch of `concurrency` devices, however many are registered.
         "breaker_failures": 8,
         "round_max_s": 120,
+    },
+    "fcm": {                        # Android, through Firebase Cloud Messaging (HTTP v1). Rounds, batches and the
+        # breaker are the `apns` section's (concurrency, breaker_failures, round_max_s), counted per service.
+        "credentials_file": "/etc/techgist/fcm/service-account.json",   # absent = Android devices wait
+        "project_id": "",           # empty: the service account file's own
+        "timeout_s": 10,
+        "attempts": 3,              # per send, on 429 / 5xx / a network error
+        "backoff_s": [0.5, 2, 5],
+        "ttl_s": 10800,             # FCM stops trying to deliver a story after 3 h, like apns.expiration_s
     },
     "rules": {
         "min_spice": 7,

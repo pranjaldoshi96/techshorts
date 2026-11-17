@@ -1,7 +1,10 @@
 """The device registry's HTTP side. Listens on localhost only; nginx terminates TLS and proxies /v1/ to it.
 
-  POST   /v1/devices            {"token", "env", "tz", "locale", "appVersion", "topics"?, "sound"?}  -> {"ok": true}
-  DELETE /v1/devices/<token>    opt out; the same answer whether or not the token was known
+  POST   /v1/devices            {"token", "env", "tz", "locale", "appVersion", "topics"?, "sound"?, "platform"?}
+                                -> {"ok": true}. platform is "ios" (also when absent: the iOS app sends none) or
+                                "android"; the token is then an FCM registration token, kept exactly as sent.
+  DELETE /v1/devices/<token>    opt out; the same answer whether or not the token was known. An FCM token may be
+                                percent-encoded.
   GET    /v1/health             {"ok": true} while the sender loop is alive, 503 otherwise (HEAD: the same, no body)
 
 There is no way to list or look up devices over HTTP. Answers never carry a token back, and the request log shows
@@ -11,18 +14,22 @@ import json
 import re
 import threading
 import time
+import urllib.parse
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import store as store_mod
 
 TOKEN = re.compile(r"^[0-9a-f]{64,200}$")
+# An FCM registration token: case-sensitive, never lowercased. Real ones are 140 to 260 characters or so.
+FCM_TOKEN = re.compile(r"^[A-Za-z0-9_\-:]{100,1024}$")
+PLATFORMS = ("ios", "android")
 TZ = re.compile(r"^[A-Za-z0-9_+\-/:]{1,64}$")
 LOCALE = re.compile(r"^[A-Za-z0-9_\-@.]{1,35}$")
 VERSION = re.compile(r"^[0-9A-Za-z.\-+() ]{1,24}$")
 TOPIC = re.compile(r"^[A-Za-z0-9_\- &]{1,32}$")
 ENVS = ("sandbox", "production")
-FIELDS = {"token", "env", "tz", "locale", "appVersion", "topics", "sound"}
+FIELDS = {"token", "env", "tz", "locale", "appVersion", "topics", "sound", "platform"}
 # The alert sounds the app ships (apns.SOUNDS has their file names). Anything else is stored as "no choice".
 SOUNDS = ("flash", "wire", "chime", "soft", "default")
 
@@ -32,13 +39,21 @@ class Invalid(Exception):
 
 
 def validate(data):
-    """The device row for a registration body, or Invalid(field). Unknown fields are ignored. A token, env, tz or
-    topics value out of bounds is refused; locale and appVersion are kept only when they fit."""
+    """The device row for a registration body, or Invalid(field). Unknown fields are ignored. A platform, token,
+    env, tz or topics value out of bounds is refused; locale and appVersion are kept only when they fit."""
     if not isinstance(data, dict):
         raise Invalid("body")
+    platform = data.get("platform", "ios")
+    if platform not in PLATFORMS:
+        raise Invalid("platform")
     token = data.get("token")
-    if not isinstance(token, str) or not TOKEN.match(token.lower()):
+    if platform == "android":
+        if not isinstance(token, str) or not FCM_TOKEN.match(token):
+            raise Invalid("token")
+    elif not isinstance(token, str) or not TOKEN.match(token.lower()):
         raise Invalid("token")
+    else:
+        token = token.lower()
     if data.get("env") not in ENVS:
         raise Invalid("env")
     tz = data.get("tz")
@@ -61,8 +76,8 @@ def validate(data):
                 or not all(isinstance(t, str) and TOPIC.match(t) for t in topics)):
             raise Invalid("topics")
     sound = data.get("sound") if data.get("sound") in SOUNDS else None
-    return {"token": token.lower(), "env": data["env"], "tz": tz, "locale": locale, "app_version": version,
-            "topics": topics, "sound": sound}
+    return {"token": token, "env": data["env"], "tz": tz, "locale": locale, "app_version": version,
+            "topics": topics, "sound": sound, "platform": platform}
 
 
 class RateLimit:
@@ -122,15 +137,20 @@ class App:
             if not self.by_token.allow(dev["token"]):
                 return 429, {"ok": False, "error": "rate_limited"}
             ok = self.store().register(dev["token"], dev["env"], dev["tz"], dev["locale"], dev["app_version"],
-                                       dev["topics"], self.clock(), self.cfg["max_devices"], sound=dev["sound"])
+                                       dev["topics"], self.clock(), self.cfg["max_devices"], sound=dev["sound"],
+                                       platform=dev["platform"])
             return (200, {"ok": True}) if ok else (503, {"ok": False, "error": "full"})
         if method == "DELETE" and path.startswith("/v1/devices/"):
-            token = path[len("/v1/devices/"):].lower()
-            if not TOKEN.match(token):
+            # The path does not say which platform: a hex token is APNs' and stored in lower case; anything else
+            # must look like an FCM token and is used as it is (the Android app percent-encodes it).
+            raw = urllib.parse.unquote(path[len("/v1/devices/"):])
+            tokens = [t for t, ok in ((raw.lower(), TOKEN.match(raw.lower())), (raw, FCM_TOKEN.match(raw))) if ok]
+            if not tokens:
                 return 400, {"ok": False, "error": "invalid", "field": "token"}
-            if not self.by_token.allow(token):
+            if not self.by_token.allow(tokens[0]):
                 return 429, {"ok": False, "error": "rate_limited"}
-            self.store().remove(token)
+            for token in dict.fromkeys(tokens):         # both, for the rare FCM token that is all hex digits
+                self.store().remove(token)
             return 200, {"ok": True}
         if path in ("/v1/devices", "/v1/health") or path.startswith("/v1/devices/"):
             return 405, {"ok": False, "error": "method"}

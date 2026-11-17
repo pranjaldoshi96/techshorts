@@ -1,4 +1,4 @@
-"""The sending loop: engine queue -> push.db -> APNs.
+"""The sending loop: engine queue -> push.db -> APNs (iOS devices) and FCM (Android devices).
 
 One tick:
   intake    claims rows from the engine's alert_queue (worker/alertq.py: claim, mark_sent), writes each story into
@@ -11,6 +11,9 @@ One tick:
             The alert's words are the edition's at the moment of sending (the card's `notification`), so a card
             the engine corrected after it was queued is never announced with its old text.
             A round stops early when APNs is not answering or the round has run long; the rest go next loop.
+            An Android device goes through FCM (fcm.py) under the same rules and records, in a round of its own,
+            so one service being down never holds up the other's devices. While no FCM client is configured its
+            sends are left for a later loop: nothing is recorded, and it gets the story once there is one.
   relay     operational alerts posted to the owner's ntfy topic are also sent to devices marked as the owner's.
   health    counts into push_health.json.
 
@@ -25,10 +28,17 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from . import apns as apns_mod
+from . import fcm as fcm_mod
 from . import rules
 from .store import from_iso, iso, short
 
 HOLD_TAG = "techgist_push_hold"
+SERVICE = {"ios": "APNs", "android": "FCM"}
+
+
+def platform(d):
+    """ios or android, for a devices row (a row read before the column existed is an iPhone's)."""
+    return d["platform"] if "platform" in d.keys() and d["platform"] == "android" else "ios"
 
 
 def utcnow():
@@ -156,8 +166,10 @@ def _news_at(article):
 
 class Sender:
     def __init__(self, cfg, store, apns, alertq=None, engine=None, edition=None, ntfy=None, log=print,
-                 heartbeat=None, mono=time.monotonic):
+                 heartbeat=None, mono=time.monotonic, fcm=None):
         self.cfg, self.store, self.apns, self.alertq = cfg, store, apns, alertq
+        self.fcm = fcm                      # None: not configured, Android devices wait
+        self.waiting_android = 0
         self.engine = engine or (lambda: EngineDB(cfg["paths"]["engine_db"]))
         self.edition = edition or Edition(cfg["paths"]["edition"])
         self.ntfy = ntfy or Ntfy(cfg)
@@ -166,8 +178,9 @@ class Sender:
         self.last_relay = None
         self.relayed_at = []
         self.last_prune = None
-        self.dry_loops = 0
+        self.dry_loops = {}                 # per service: rounds in a row without one successful send
         self.last_error = None
+        self.last_errors = {}               # per service, for its own alert
         self.busy_loops = 0
         self.heartbeat, self.mono = heartbeat, mono
         self.beat = time.monotonic()
@@ -251,7 +264,7 @@ class Sender:
         if not stories:
             return {}
         hist_all = self.store.history(now)
-        jobs = []
+        jobs, waiting = {"ios": [], "android": []}, 0
         for d in self.store.devices():
             h = rules.History(held=d["held_event"], registered_at=from_iso(d["created_at"]))
             for event_id, status, at, local_date in hist_all.get(d["dkey"], ()):
@@ -263,20 +276,40 @@ class Sender:
             if dec.action == "hold":
                 self.store.set_held(d["token"], dec.event_id)
             elif dec.action == "send":
-                jobs.append((d, dec.event_id))
+                if platform(d) == "android" and self.fcm is None:
+                    waiting += 1            # not sent, not recorded: decided again once FCM is configured
+                else:
+                    jobs[platform(d)].append((d, dec.event_id))
         self.store.conn.commit()
-        return self._send_all(jobs, rows, now)
-
-    def _send_all(self, jobs, rows, now):
+        if waiting != self.waiting_android:         # said when it starts and when it changes, not every loop
+            self.waiting_android = waiting
+            if waiting:
+                self.log(f"deliver: FCM not configured, {waiting} Android devices wait")
         tally = {}
-        expiration = int(now.timestamp()) + self.cfg["apns"]["expiration_s"]
+        for plat in ("ios", "android"):
+            for k, v in self._send_all(jobs[plat], rows, now, plat).items():
+                tally[k] = tally.get(k, 0) + v
+        return tally
+
+    def _client(self, d):
+        """The service's client for this device (None for an Android device while FCM is not configured)."""
+        return self.fcm if platform(d) == "android" else self.apns
+
+    def _send_all(self, jobs, rows, now, plat="ios"):
+        """One service's round: every job is a device of platform `plat`."""
+        tally = {}
+        svc, android = SERVICE[plat], plat == "android"
+        expiration = int(now.timestamp()) + (self.cfg["fcm"]["ttl_s"] if android else self.cfg["apns"]["expiration_s"])
 
         def one(job):
             d, event_id = job
             alert, art = rows[event_id]
-            payload = apns_mod.story_payload(alert, art, apns_mod.sound_for(d, self.cfg["apns"]["sound"]))
-            return job, self.apns.send(d["token"], d["env"], payload, collapse_id=alert["collapse_id"],
-                                       expiration=expiration)
+            if android:
+                payload = fcm_mod.story_message(alert, art, fcm_mod.choice_of(d))
+            else:
+                payload = apns_mod.story_payload(alert, art, apns_mod.sound_for(d, self.cfg["apns"]["sound"]))
+            return job, self._client(d).send(d["token"], d["env"], payload, collapse_id=alert["collapse_id"],
+                                             expiration=expiration)
 
         # In batches, so that a round can stop: with APNs unreachable every send takes its full timeouts and
         # retries, and a round over all devices would outlast the unit's watchdog.
@@ -290,30 +323,42 @@ class Sender:
             self._alive()
             left = len(jobs) - (i + batch)
             if left > 0 and (streak >= a["breaker_failures"] or self.mono() - started >= a["round_max_s"]):
-                why = (f"APNs is not answering ({streak} sends in a row failed)" if streak >= a["breaker_failures"]
+                why = (f"{svc} is not answering ({streak} sends in a row failed)" if streak >= a["breaker_failures"]
                        else f"the round has run {a['round_max_s']} s")
                 self.log(f"deliver: stopped, {why}; {left} sends wait for the next loop")
                 tally["deferred"] = left
                 break
         if jobs:
-            self.log("deliver: " + ", ".join(f"{k}={v}" for k, v in sorted(tally.items())))
+            self.log(("deliver (FCM): " if android else "deliver: ")
+                     + ", ".join(f"{k}={v}" for k, v in sorted(tally.items())))
             ok = tally.get("ok", 0)
-            self.dry_loops = 0 if ok or not (tally.get("retry") or tally.get("auth")) else self.dry_loops + 1
-            if tally.get("auth"):
+            dry = 0 if ok or not (tally.get("retry") or tally.get("auth")) else self.dry_loops.get(plat, 0) + 1
+            self.dry_loops[plat] = dry
+            last = self.last_errors.get(plat) or {"status": 0, "reason": ""}
+            if tally.get("auth") and android:
+                self.ntfy.send("Techgist push: FCM refused our credentials",
+                               f"FCM answered {last['status']} ({last['reason']}) to {tally['auth']} sends. Check the "
+                               "service account file and that its project is the Android app's. Nothing is lost: "
+                               "stories are tried again. iOS alerts are not affected.",
+                               key="fcm_auth", priority="high", tags="warning", log=self.log)
+            elif tally.get("auth"):
                 self.ntfy.send("Techgist push: APNs refused our key",
-                               f"APNs answered 403 ({self.last_error['reason']}) to {tally['auth']} sends. Check the "
+                               f"APNs answered 403 ({last['reason']}) to {tally['auth']} sends. Check the "
                                "key file, key id, team id and topic. Nothing is lost: stories are tried again.",
                                key="apns_auth", priority="high", tags="warning", log=self.log)
-            elif self.dry_loops >= 5:
-                self.ntfy.send("Techgist push: sends are failing",
-                               f"No send has succeeded in {self.dry_loops} rounds; last answer: "
-                               f"{self.last_error['status']} {self.last_error['reason']}.",
-                               key="apns_failing", priority="high", tags="warning", log=self.log)
+            elif dry >= 5:
+                self.ntfy.send(f"Techgist push: {'FCM (Android) ' if android else ''}sends are failing",
+                               f"No send has succeeded in {dry} rounds; last answer: "
+                               f"{last['status']} {last['reason']}.",
+                               key="fcm_failing" if android else "apns_failing", priority="high", tags="warning",
+                               log=self.log)
         return tally
 
     def _settle(self, d, event_id, res, now):
-        """Records one APNs answer. `event_id` is None for a server alert to an owner device."""
+        """Records one answer from APNs or FCM. `event_id` is None for a server alert to an owner device."""
         tok = short(d["token"])
+        plat = platform(d)
+        svc = SERVICE[plat]
         if res.outcome == "ok":
             if event_id is not None:
                 self.store.record(d["token"], event_id, "sent", now,
@@ -322,18 +367,22 @@ class Sender:
                 self.store.set_env(d["token"], res.env)
             self.store.bump("sent_total")
             self.store.put("last_sent_at", iso(now))
-            self.log(f"sent {event_id or 'server-alert'} to {tok} ({res.env}) apns-id {res.apns_id}")
+            self.log(f"sent {event_id or 'server-alert'} to {tok} "
+                     + (f"(android) fcm-id {res.apns_id}" if plat == "android" else f"({res.env}) apns-id {res.apns_id}"))
             return
         self.last_error = {"at": iso(now), "status": res.status, "reason": res.reason, "outcome": res.outcome}
+        if plat == "android":
+            self.last_error["service"] = svc
+        self.last_errors[plat] = self.last_error
         self.store.put("last_error", json.dumps(self.last_error))
         if res.outcome == "gone":
             self.store.remove(d["token"])
             self.store.bump("removed_total")
-            self.log(f"removed {tok}: APNs {res.status} {res.reason}")
+            self.log(f"removed {tok}: {svc} {res.status} {res.reason}")
             return
         self.store.bump("failed_total")
         if res.outcome == "bad" and event_id is not None:
-            # APNs will never take this story for this device (a payload problem): not tried again.
+            # The service will never take this story for this device (a payload problem): not tried again.
             self.store.record(d["token"], event_id, "failed", now)
         self.log(f"failed {event_id or 'server-alert'} to {tok}: {res.outcome} {res.status} {res.reason}")
 
@@ -371,10 +420,13 @@ class Sender:
                     self.log(f"relay: hourly limit reached, not sent to phones: {m.get('title')}")
                 else:
                     self.relayed_at.append(now)
-                    payload = apns_mod.server_payload(m.get("title"), m.get("message"))
                     for d in self.store.owners():
-                        res = self.apns.send(d["token"], d["env"], payload, collapse_id="ntfy-" + mid,
-                                             expiration=int(now.timestamp()) + 86400)
+                        if self._client(d) is None:
+                            continue                        # an Android owner device and no FCM: ntfy has it
+                        make = fcm_mod.server_message if platform(d) == "android" else apns_mod.server_payload
+                        res = self._client(d).send(d["token"], d["env"], make(m.get("title"), m.get("message")),
+                                                   collapse_id="ntfy-" + mid,
+                                                   expiration=int(now.timestamp()) + 86400)
                         self._settle(d, None, res, now)
                         sent += res.outcome == "ok"
                         self._alive()
@@ -388,6 +440,8 @@ class Sender:
         s = self.store
         doc = {"at": iso(now), "sendingEnabled": bool(self.cfg["sending_enabled"]),
                "devices": s.device_stats(),
+               "platforms": s.platform_counts(),
+               "fcm": {"configured": self.fcm is not None},
                "sent": {"total": s.counter("sent_total"), "last24h": s.sent_since(now - timedelta(hours=24)),
                         "lastAt": s.get("last_sent_at")},
                "failed": {"total": s.counter("failed_total"), "last": json.loads(s.get("last_error") or "null")},

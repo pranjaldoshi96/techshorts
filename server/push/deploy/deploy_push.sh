@@ -3,6 +3,10 @@
 #   server/push/deploy/deploy_push.sh            code, venv (when requirements changed), units (the service and
 #                                                the nightly push.db backup timer), restart
 #   server/push/deploy/deploy_push.sh --key      also copy the APNs key from this Mac (never displayed)
+#   server/push/deploy/deploy_push.sh --fcm      also copy the Firebase service account JSON from this Mac (never
+#                                                displayed) to /etc/techgist/fcm/service-account.json: Android alerts
+#                                                start with the restart. TECHGIST_FCM_JSON names the file; without
+#                                                it, the one ~/Desktop/*firebase-adminsdk*.json.
 #   server/push/deploy/deploy_push.sh --https    also run setup_https.sh there (nginx server block + certificate)
 # It never touches /opt/techgist, the worker, or any nginx file but its own.
 set -euo pipefail
@@ -12,6 +16,20 @@ APNS_KEY=${TECHGIST_APNS_KEY:-$HOME/Desktop/AuthKey_K2DXJ7NMGX.p8}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 -i "$KEY")
 DEST=/opt/techgist-push
+
+# --fcm: the file is found before anything is copied, so a missing one stops the deploy with nothing changed.
+FCM_JSON=${TECHGIST_FCM_JSON:-}
+for arg in "$@"; do
+    if [ "$arg" = "--fcm" ]; then
+        if [ -z "$FCM_JSON" ]; then
+            found=("$HOME"/Desktop/*firebase-adminsdk*.json)
+            [ ${#found[@]} -eq 1 ] && [ -f "${found[0]}" ] || {
+                echo "--fcm: expected exactly one ~/Desktop/*firebase-adminsdk*.json (or set TECHGIST_FCM_JSON)" >&2; exit 1; }
+            FCM_JSON=${found[0]}
+        fi
+        [ -f "$FCM_JSON" ] || { echo "--fcm: no such file: $FCM_JSON" >&2; exit 1; }
+    fi
+done
 
 "${SSH[@]}" "$HOST" "mkdir -p $DEST/push" </dev/null
 rsync -az --delete -e "${SSH[*]}" --exclude __pycache__ --exclude '*.pyc' "$HERE/" "$HOST:$DEST/push/" </dev/null
@@ -23,6 +41,12 @@ for arg in "$@"; do
         scp -q -o BatchMode=yes -i "$KEY" "$APNS_KEY" "$HOST:/etc/techgist/apns/$(basename "$APNS_KEY")" </dev/null
         "${SSH[@]}" "$HOST" "chown root:techgist /etc/techgist/apns/*.p8 && chmod 640 /etc/techgist/apns/*.p8" </dev/null
         echo "APNs key copied"
+    fi
+    if [ "$arg" = "--fcm" ]; then
+        "${SSH[@]}" "$HOST" "install -d -o root -g techgist -m 750 /etc/techgist/fcm" </dev/null
+        scp -q -o BatchMode=yes -i "$KEY" "$FCM_JSON" "$HOST:/etc/techgist/fcm/service-account.json" </dev/null
+        "${SSH[@]}" "$HOST" "chown root:techgist /etc/techgist/fcm/service-account.json && chmod 640 /etc/techgist/fcm/service-account.json" </dev/null
+        echo "FCM service account copied"
     fi
 done
 
