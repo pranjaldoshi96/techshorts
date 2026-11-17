@@ -8,7 +8,7 @@ The rules (limits in config.py `rules`; spec 6.2 where it has a number):
   - nothing in the device's quiet hours; the best story seen during them is held (one per device, replaced when a
     better one comes) and sent first when they end, even if it is older than max_age_h by then;
   - at least min_gap_min between two alerts;
-  - at most daily_cap a local day; a story of importance >= override_importance may go over that (up to
+  - at most daily_cap a local day (0 = no limit); a story of importance >= override_importance may go over that (up to
     daily_cap_hard), but never into quiet hours and never inside the gap.
 """
 import re
@@ -103,7 +103,7 @@ def decide(now, tz, stories, hist, rules):
     if hist.last_sent_at is not None and now - hist.last_sent_at < timedelta(minutes=rules["min_gap_min"]):
         return Decision("none", reason="gap")
     today = sum(1 for d in hist.sent_local_dates if d == loc.strftime("%Y-%m-%d"))
-    if today >= rules["daily_cap"]:
+    if rules["daily_cap"] and today >= rules["daily_cap"]:          # 0: only the gap and the night limit alerts
         hard = rules.get("daily_cap_hard") or 0
         pool = [s for s in pool if s.importance >= rules["override_importance"]]
         if not pool or (hard and today >= hard):

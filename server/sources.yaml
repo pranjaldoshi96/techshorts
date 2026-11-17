@@ -48,9 +48,9 @@ sources:
   # Shares links with the main feed; same publisher, so it keeps the 1.2 name for per-source toggles.
   - {id: techcrunch_ai, name: TechCrunch AI, v1_name: TechCrunch, url: "https://techcrunch.com/category/artificial-intelligence/feed/", tier: 1, authority: 1.2, poll: 3m}
   - {id: verge, name: The Verge, v1_name: The Verge, url: "https://www.theverge.com/rss/index.xml", tier: 1, authority: 1.1, poll: 3m, domains: [theverge.com]}
-  - {id: cnbc, name: CNBC Tech, v1_name: CNBC Tech, url: "https://www.cnbc.com/id/19854910/device/rss/rss.html", tier: 1, authority: 1.1, poll: 3m, domains: [cnbc.com]}
+  - {id: cnbc, name: CNBC Tech, v1_name: CNBC Tech, url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910", tier: 1, authority: 1.1, poll: 3m, domains: [cnbc.com]}
   # CNBC's top stories: where its tech-adjacent business scoops (Treasury on Nvidia, IPO pricing) appear first.
-  - {id: cnbc_top, name: CNBC, v1_name: CNBC Tech, url: "https://www.cnbc.com/id/100003114/device/rss/rss.html", tier: 1, authority: 1.1, poll: 3m}
+  - {id: cnbc_top, name: CNBC, v1_name: CNBC Tech, url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114", tier: 1, authority: 1.1, poll: 3m}
   - {id: bbc, name: BBC Technology, v1_name: BBC Technology, url: "https://feeds.bbci.co.uk/news/technology/rss.xml", tier: 1, authority: 1.1, poll: 3m, domains: [bbc.com, bbc.co.uk]}
   - {id: bbc_business, name: BBC Business, v1_name: BBC Technology, url: "https://feeds.bbci.co.uk/news/business/rss.xml", tier: 1, authority: 1.1, poll: 3m}
   - {id: nyt, name: New York Times, v1_name: New York Times, url: "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml", tier: 1, authority: 1.1, poll: 3m, fetch_page: false, domains: [nytimes.com]}
@@ -140,7 +140,7 @@ sources:
   - {id: crunchbase, name: Crunchbase News, v1_name: Crunchbase News, url: "https://news.crunchbase.com/feed/", domains: [news.crunchbase.com], poll: 3m}
   - {id: sifted, name: Sifted, v1_name: Sifted, url: "https://sifted.eu/feed", domains: [sifted.eu]}
   - {id: techeu, name: Tech.eu, v1_name: Tech.eu, url: "https://tech.eu/feed/", authority: 0.9, domains: [tech.eu]}
-  - {id: eustartups, name: EU-Startups, v1_name: EU-Startups, url: "https://www.eu-startups.com/feed/", authority: 0.8, domains: [eu-startups.com]}
+  - {id: eustartups, name: EU-Startups, v1_name: EU-Startups, url: "https://feeds.feedburner.com/eu-startups", authority: 0.8, domains: [eu-startups.com]}
   - {id: geekwire, name: GeekWire, v1_name: GeekWire, url: "https://www.geekwire.com/feed/", authority: 0.9, poll: 3m, domains: [geekwire.com]}
   - {id: siliconangle, name: SiliconANGLE, v1_name: SiliconANGLE, url: "https://siliconangle.com/feed/", authority: 0.9, domains: [siliconangle.com]}
   - {id: tc_startups, name: TechCrunch Startups, v1_name: TechCrunch, url: "https://techcrunch.com/category/startups/feed/", tier: 1, authority: 1.2, poll: 3m}

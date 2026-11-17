@@ -36,7 +36,7 @@ DEFAULTS = {
     },
     "rules": {
         "min_spice": 7,
-        "daily_cap": 2,             # stories per device per local day (spec 6.2)
+        "daily_cap": 2,             # stories per device per local day (spec 6.2); 0 = no limit
         "daily_cap_hard": 3,        # ... including the ones importance let past daily_cap (spec 6.3); 0 = no limit
         "override_importance": 9,   # a story this important may exceed daily_cap, never quiet hours
         "min_gap_min": 180,         # between two alerts on one device (spec 6.2)
@@ -47,7 +47,7 @@ DEFAULTS = {
         "owner_hold_s": 300,        # a story waits this long after the owner was told, so it can be killed
     },
     "owner": {
-        "relay_ntfy": True,         # operational alerts on the ntfy topic also go to owner devices
+        "relay_ntfy": False,        # off: the app carries news only; operational alerts stay on the ntfy topic
         "poll_s": 60,
         "relay_min_priority": 4,    # ntfy's scale (3 = default): only "readers are not getting news" reaches a phone
         "relay_max_per_hour": 4,    # whatever goes wrong upstream, the owner's phone gets at most this many

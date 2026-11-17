@@ -384,6 +384,7 @@ def test_owner_hold_announces_then_sends_and_a_kill_stops_it(tmp_path):
 
 
 def test_server_alerts_go_to_owner_devices_only_and_bypass_story_limits(env):
+    env.cfg["owner"]["relay_ntfy"] = True
     env.device(TOK_A, tz="Asia/Kolkata"), env.device(TOK_B)
     env.store.set_owner(TOK_A)
     night = datetime(2026, 11, 16, 20, 0, tzinfo=timezone.utc)                       # 01:30 IST: quiet hours
@@ -406,6 +407,7 @@ def test_server_alerts_go_to_owner_devices_only_and_bypass_story_limits(env):
 
 
 def test_a_server_alert_reaches_the_owners_phone_once_and_only_when_readers_are_affected(env):
+    env.cfg["owner"]["relay_ntfy"] = True
     env.device(TOK_A)
     env.store.set_owner(TOK_A)
     step = timedelta(seconds=env.cfg["owner"]["poll_s"])
@@ -614,3 +616,12 @@ def test_a_busy_engine_database_is_logged_only_once_it_lasts(env):
     assert not any("busy" in line for line in env.lines)
     env.sender.tick(NOW + timedelta(seconds=45))
     assert sum("engine state busy for 4 loops" in line for line in env.lines) == 1
+
+
+def test_the_app_carries_news_only_server_alerts_are_not_relayed_by_default(env):
+    env.device(TOK_A)
+    env.store.set_owner(TOK_A)
+    env.sender.tick(NOW)
+    env.ntfy.inbox = [{"id": "x1", "event": "message", "title": "Techgist: no_publish", "message": "m", "priority": 5}]
+    env.sender.tick(NOW + timedelta(seconds=env.cfg["owner"]["poll_s"]))
+    assert env.cfg["owner"]["relay_ntfy"] is False and env.apns.sent == []

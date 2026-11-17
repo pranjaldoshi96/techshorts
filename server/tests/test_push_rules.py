@@ -153,3 +153,11 @@ def test_old_zone_names_are_not_utc():
     at = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
     for name in ("Asia/Calcutta", "Asia/Katmandu", "Europe/Kiev", "US/Pacific"):
         assert at.astimezone(rules.zone(name)).utcoffset().total_seconds() != 0, name
+
+
+def test_no_daily_cap_leaves_the_gap_and_the_night_as_the_only_limits():
+    r = dict(R, daily_cap=0, daily_cap_hard=0)
+    many = History(sent_local_dates=["2026-11-16"] * 25, last_sent_at=NOON - timedelta(minutes=r["min_gap_min"]))
+    assert rules.decide(NOON, IST, [story()], many, r).action == "send"
+    close = History(sent_local_dates=["2026-11-16"] * 25, last_sent_at=NOON - timedelta(minutes=1))
+    assert rules.decide(NOON, IST, [story()], close, r).reason == "gap"
