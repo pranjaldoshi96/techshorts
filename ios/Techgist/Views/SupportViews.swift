@@ -277,7 +277,7 @@ struct SettingsView: View {
                 } footer: {
                     Text((PushConfig.registerURL == nil
                           ? "One notification each morning with the top story, and an alert when a story is covered by several outlets at once, at most 3 a day. iOS decides when the app checks in the background, so alerts can arrive a few hours after a story breaks."
-                          : "One notification each morning with the top story, and an alert from Techgist when a big story breaks, at most a few a day. Turning alerts off removes this phone from Techgist's alert list.")
+                          : "One notification each morning with the top story, and alerts from Techgist through the day as big stories break, never at night. Turning alerts off removes this phone from Techgist's alert list.")
                          + (digestEnabled || breakingEnabled ? " The preview arrives 5 seconds after you ask for it." : ""))
                         .foregroundStyle(Theme.metaText)
                 }
