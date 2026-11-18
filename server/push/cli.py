@@ -1,23 +1,28 @@
 """The push service by hand. On the VPS:  /opt/techgist-push/pushctl <command>
 
   status                      the health file's counts, live
-  devices                     registered devices: first six characters of the token, env, time zone, owner flag
+  devices                     registered devices: first six characters of the token, platform, env, time zone,
+                              owner flag
   owner PREFIX | --latest     mark a device as the owner's: it also gets server alerts (the ntfy ones) by APNs
+                              (an Android device: by FCM)
   owner PREFIX --off          ... and unmark it
   kill EVENT_ID               stop a story before it is sent (during the owner hold, or while it waits its turn)
   test PREFIX ["title" "body"]    send one labelled test notification to a device now, outside every rule, and
-                              print APNs' answer. A device APNs rejects is removed, as in normal sending.
+                              print APNs' answer (FCM's for an Android device). A device the service rejects
+                              is removed, as in normal sending.
   test PREFIX --event EVENT_ID    the same, but the story itself, exactly as a real alert carries it (a tap opens it)
 
-PREFIX is the start of a device token (six characters are usually enough). Full tokens are never printed.
+PREFIX is the start of a device token (six characters are usually enough; an Android token's capitals matter).
+Full tokens are never printed.
 """
 import argparse
 import json
 import sys
 
 from . import config
+from . import fcm as fcm_mod
 from .apns import Apns, sound_for, story_payload
-from .sender import Edition, EngineDB, Sender, alert_text, utcnow
+from .sender import Edition, EngineDB, Sender, alert_text, platform, utcnow
 from .store import Store, short
 
 
@@ -47,10 +52,10 @@ def main(argv=None):
     store = Store(cfg["paths"]["push_db"])
     now = utcnow()
     if a.cmd in (None, "status"):
-        print(json.dumps(Sender(cfg, store, None).health(now), indent=1))
+        print(json.dumps(Sender(cfg, store, None, fcm=fcm_mod.from_config(cfg)).health(now), indent=1))
     elif a.cmd == "devices":
         for d in store.devices():
-            print(f"{short(d['token'])} {d['env']:<10} {d['tz']:<24} v{d['app_version'] or '?':<8}"
+            print(f"{short(d['token'])} {platform(d):<7} {d['env']:<10} {d['tz']:<24} v{d['app_version'] or '?':<8}"
                   f" {'OWNER' if d['owner'] else '     '} registered {d['created_at']} seen {d['updated_at']}")
         print(f"{store.device_count()} devices")
     elif a.cmd == "owner":
@@ -72,23 +77,36 @@ def main(argv=None):
         print("killed" if n else "nothing waiting under that id")
     elif a.cmd == "test":
         d = _one(store, a.prefix)
+        android = platform(d) == "android"
+        fcm = fcm_mod.from_config(cfg) if android else None
+        if android and fcm is None:
+            sys.exit("that is an Android device and FCM is not configured (no readable service account file)")
         if a.event:
             # The story as a real alert carries it (text, link and picture from the edition), outside the rules.
             art = Edition(cfg["paths"]["edition"]).articles().get(a.event)
             title, body = alert_text({"title": "", "body": ""}, art)
             if not title or not body:
                 sys.exit("that event is not in the edition, or has no notification text")
-            payload = story_payload({"event_id": a.event, "title": title, "body": body}, art, sound_for(d, cfg["apns"]["sound"]))
+            alert = {"event_id": a.event, "title": title, "body": body}
+            payload = (fcm_mod.story_message(alert, art, fcm_mod.choice_of(d)) if android
+                       else story_payload(alert, art, sound_for(d, cfg["apns"]["sound"])))
         else:
             title, body = a.text if len(a.text) == 2 else ("Techgist test", "A test notification from the push server.")
-            payload = {"aps": {"alert": {"title": title, "body": body}, "sound": sound_for(d, cfg["apns"]["sound"]),
-                               "thread-id": "test"}, "kind": "test"}
-        sender = Sender(cfg, store, Apns(cfg["apns"]))
-        res = sender.apns.send(d["token"], d["env"], payload, collapse_id="test-" + now.strftime("%H%M%S"),
-                               expiration=int(now.timestamp()) + 600)
+            if android:
+                payload = fcm_mod.trial_message(title, body, fcm_mod.choice_of(d))
+            else:
+                payload = {"aps": {"alert": {"title": title, "body": body},
+                                   "sound": sound_for(d, cfg["apns"]["sound"]), "thread-id": "test"}, "kind": "test"}
+        sender = Sender(cfg, store, Apns(cfg["apns"]), fcm=fcm)
+        res = sender._client(d).send(d["token"], d["env"], payload, collapse_id="test-" + now.strftime("%H%M%S"),
+                                     expiration=int(now.timestamp()) + 600)
         sender._settle(d, None, res, now)
-        print(f"APNs: {res.outcome} status={res.status} reason={res.reason or '-'} host={res.env}"
-              f" attempts={res.attempts} apns-id={res.apns_id or '-'}")
+        if android:
+            print(f"FCM: {res.outcome} status={res.status} reason={res.reason or '-'}"
+                  f" attempts={res.attempts} message={res.apns_id or '-'}")
+        else:
+            print(f"APNs: {res.outcome} status={res.status} reason={res.reason or '-'} host={res.env}"
+                  f" attempts={res.attempts} apns-id={res.apns_id or '-'}")
         return 0 if res.outcome == "ok" else 1
     return 0
 
