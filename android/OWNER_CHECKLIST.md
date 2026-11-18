@@ -27,19 +27,27 @@ Nothing here is needed to build or try the app. Each part unlocks one thing. Do 
 
 Until this is done, Android phones that register simply wait; iPhones are not affected in any way.
 
-## 3. Google Play developer account (needed to publish) — start early, it takes days
+## 3. Google Play (publishing)
 
-1. Open https://play.google.com/console/signup and choose **Yourself** (personal account), unless you want it under a company.
-2. Pay the one-time **US$25** fee and finish the identity check (a government ID and, for some countries, a
-   phone and address check). Approval can take a few days.
-3. Google requires new personal accounts to run a **closed test with at least 12 testers for 14 days** before an
-   app can go public. Collect 12 Gmail addresses of people willing to install it (friends, readers).
-4. When the account is approved, tell Claude. What follows, and can be prepared for you step by step:
-   - a release signing key (made on this Mac, kept out of git; Play App Signing holds the real one)
-   - the store listing (the iOS texts and screenshots redone for Android), the content rating form, the
-     Data safety form (the app collects only the push token, time zone and language, and only with alerts on;
-     no ads, no tracking), the "News app" declaration, the privacy policy link
-   - uploading the first build to the closed test
+Parts 1 and 2 are done (18 Nov 2026): Firebase project `techgistapp`, server push deployed.
+
+Prepared already, in `android/play/`: the listing text and the answers to every form (`LISTING.md`), the icon,
+the feature graphic, five screenshots. The signed release file is
+`android/app/build/outputs/bundle/release/app-release.aab`. The upload key and its password are in
+`~/.techgist/android/` on this Mac, outside the repository: keep a copy of that folder somewhere safe.
+
+What only the owner can do, in the Play Console (https://play.google.com/console):
+
+1. Check it opens a **developer** account (a Play Store or Play Pass subscription is not one). If it asks you to
+   sign up: choose **Yourself**, pay the one-time US$25, finish the identity check.
+2. **Create app**: name `Techgist: AI & Startup News`, language English, **App**, **Free**, tick the two
+   declarations.
+3. **Dashboard → Set up your app**: fill each form with the answers in `android/play/LISTING.md`
+   ("Forms in the Play Console").
+4. **Grow → Store presence → Main store listing**: paste the texts, upload the icon, feature graphic, screenshots.
+5. **Testing → Closed testing → Create track**: add the testers' Gmail addresses, **Create new release**, upload
+   `app-release.aab`, accept Play App Signing, save, **Send for review**.
+6. New personal accounts must keep **12 testers opted in for 14 days**, then **Apply for production access**.
 
 ## 4. Small things worth knowing
 

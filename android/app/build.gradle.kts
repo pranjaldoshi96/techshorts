@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -9,6 +11,14 @@ plugins {
 // without it (alerts are then made on the phone), and picks it up as soon as the file is put in app/.
 val hasFirebase = file("google-services.json").exists()
 if (hasFirebase) apply(plugin = "com.google.gms.google-services")
+
+// Release signing: the upload key and its passwords are the owner's and live outside the repository, in
+// ~/.techgist/android/keystore.properties (storeFile, storePassword, keyAlias, keyPassword), or in
+// android/keystore.properties. Without the file a release build is left unsigned.
+val keystoreProps = listOf(rootProject.file("keystore.properties"),
+    File(System.getProperty("user.home"), ".techgist/android/keystore.properties"))
+    .firstOrNull { it.exists() }
+    ?.let { f -> Properties().apply { f.inputStream().use { load(it) } } }
 
 android {
     namespace = "com.pranjald.techgist"
@@ -26,8 +36,17 @@ android {
             "\"https://raw.githubusercontent.com/pranjaldoshi96/techshorts/edition/edition.json\"")
     }
 
+    signingConfigs {
+        if (keystoreProps != null) create("upload") {
+            storeFile = File(keystoreProps.getProperty("storeFile"))
+            storePassword = keystoreProps.getProperty("storePassword")
+            keyAlias = keystoreProps.getProperty("keyAlias")
+            keyPassword = keystoreProps.getProperty("keyPassword")
+        }
+    }
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("upload")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

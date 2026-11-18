@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Saved stories and settings are backed up; the device's push registration is not (a restored phone has a new token). -->
+<!-- Saved stories and settings are backed up; nothing else is: the device's push registration (techgist_device.xml) stays out, since a restored phone has a new token. -->
 <full-backup-content>
     <include domain="file" path="saved.json" />
     <include domain="sharedpref" path="techgist.xml" />
-    <exclude domain="sharedpref" path="techgist_device.xml" />
 </full-backup-content>
