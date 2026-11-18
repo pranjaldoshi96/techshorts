@@ -80,8 +80,8 @@ where the Android equivalent is and its state:
 | Five alert sounds; the choice is sent to the server | `AlertSound`: the same sound files as WAV; one notification channel, re-made for the chosen sound | Adapted (Android ties a sound to a channel). Done (emulator: channel and preview; an emulator's audio was not listened to) |
 | Morning gist at the chosen time with the top story and picture | `DailyDigest` (alarm, also after a restart) | Adapted: Android may deliver it a few minutes late; the story is the top one at that moment. Done (code and test of the time; not waited for overnight) |
 | Hourly background refresh; without server push, the app's own big-story alerts (breaking or 3+ outlets, under 6 h, 3 a day, never twice, not stories already seen) | `BackgroundRefresh` (WorkManager), `BreakingNews` | Done (tests for the rules; the hourly job was not waited for) |
-| Server push: register after permission + switch, on every launch, and on a new token; unregister when off; token only over HTTPS; body `token, env, tz, locale, appVersion, sound` | `PushRegistration` + `"platform": "android"`, FCM token | Done in code and tests. **Not live**: needs the owner's Firebase file and the server change deployed |
-| Server rules: spice 7+, gap, quiet hours in the device's time zone, never twice | `server/push` (same `rules.decide` for both platforms) | Done, tested, **not deployed** |
+| Server push: register after permission + switch, on every launch, and on a new token; unregister when off; token only over HTTPS; body `token, env, tz, locale, appVersion, sound` | `PushRegistration` + `"platform": "android"`, FCM token | Done (tests; emulator, 18 November 2026: the app got its FCM token and the live server registered it as `android`) |
+| Server rules: spice 7+, gap, quiet hours in the device's time zone, never twice | `server/push` (same `rules.decide` for both platforms) | Done, tested, deployed 18 November 2026 (revision `5dcf0b3`). A `pushctl test --event` alert reached the emulator through FCM with title, body, picture, Read and Save, and its tap opened the story's card; a rule-driven alert has not yet been watched arriving |
 | Picture attached to a server push (notification service extension) | the app builds the notification from the data message | Adapted |
 | One-time notice for people who had alerts on in 1.x | none | Not applicable: there is no Android 1.x |
 | Alerts shown while the app is open | Android shows them by default | Done |
@@ -99,7 +99,10 @@ Saved, Search, Settings, Sources, the sound picker (channel `stories_wire` with 
 picture, its tap, its Read and its Save, a story opened by event id in another tab with the highlight, the end
 card and Back to top, dark mode, the share sheet and its picture, a relaunch in airplane mode (cached stories and
 the Offline banner), and the list layout at the largest font. Not seen: anything that needs time or a real phone
-(the morning alarm, the hourly background job, haptics, how the sounds sound) and server push, which needs the
-owner's Firebase project.
+(the morning alarm, the hourly background job, haptics, how the sounds sound).
+
+Server push, 18 November 2026, with the owner's Firebase project: the emulator registered with the live server, a
+test alert for a story in the edition arrived through FCM while the app was in the background, and tapping it
+opened that story's card with the highlight.
 
 Unit tests: `android/build.sh testDebugUnitTest` (54 tests).

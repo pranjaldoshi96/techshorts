@@ -53,6 +53,6 @@ DELETE https://techgist.213-210-36-218.sslip.io/v1/devices/<token>
 
 The server sends data messages (`kind`, `title`, `body`, `eventId`, `url`, `image`); the app draws the
 notification, so the reader's sound, the picture, Read and Save, and "a tap opens the story's card" all work
-whether the app is open or not. The server side is in `server/push` (see its README) and is **not deployed**.
+whether the app is open or not. The server side is in `server/push` (see its README) and has been deployed since 18 November 2026.
 
 `google-services.json`, keystores and `local.properties` are in `.gitignore`: this repository is public.
