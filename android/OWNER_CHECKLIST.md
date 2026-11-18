@@ -7,7 +7,7 @@ Nothing here is needed to build or try the app. Each part unlocks one thing. Do 
 1. Open https://console.firebase.google.com and sign in with the Google account that should own Techgist.
 2. **Create a project**. Name it `Techgist`. When it asks about Google Analytics, turn it **off**.
 3. On the project's home page click the **Android** icon ("Add app").
-   - Android package name: `com.pranjald.techgist` (exactly this)
+   - Android package name: `com.techshorts.app` (exactly this; the first app, `com.pranjald.techgist`, stays too)
    - App nickname: `Techgist`
    - Leave the SHA-1 box empty. Click **Register app**.
 4. Click **Download google-services.json**. Skip the remaining steps on that page (they are already done in the code).
@@ -38,20 +38,22 @@ the feature graphic, five screenshots. The signed release file is
 
 What only the owner can do, in the Play Console (https://play.google.com/console):
 
-1. Check it opens a **developer** account (a Play Store or Play Pass subscription is not one). If it asks you to
-   sign up: choose **Yourself**, pay the one-time US$25, finish the identity check.
-2. **Create app**: name `Techgist: AI & Startup News`, language English, **App**, **Free**, tick the two
-   declarations.
-3. **Dashboard → Set up your app**: fill each form with the answers in `android/play/LISTING.md`
-   ("Forms in the Play Console").
-4. **Grow → Store presence → Main store listing**: paste the texts, upload the icon, feature graphic, screenshots.
-5. **Testing → Closed testing → Create track**: add the testers' Gmail addresses, **Create new release**, upload
-   `app-release.aab`, accept Play App Signing, save, **Send for review**.
-6. New personal accounts must keep **12 testers opted in for 14 days**, then **Apply for production access**.
+The app goes into the existing listing **TechShorts: Tech News, Fast** (`com.techshorts.app`), which has already
+passed the 12-tester, 14-day closed test.
+
+1. **Upload key reset** (the old key's password is lost): Test and release → App integrity → App signing →
+   Settings → **Request upload key reset** → "I lost my upload key" → upload
+   `~/Desktop/techgist_upload_certificate.pem`. Google emails when the new key is active (a day or two).
+2. **Grow users → Store presence → Main store listing**: rename to `Techgist: AI & Startup News`, paste the texts
+   from `android/play/LISTING.md`, replace the icon, feature graphic and screenshots.
+3. **Policy → App content**: check each form against "Forms in the Play Console" in `LISTING.md`.
+4. When the key is active: **Closed testing → Alpha → Create new release**, upload `app-release.aab`, send for
+   review; then **Apply for production** on the Dashboard.
+5. **Declare your trader status** (Home page notice, due February 2027): the owner's own legal declaration.
 
 ## 4. Small things worth knowing
 
 - The privacy page (https://pranjaldoshi96.github.io/apps/techgist/privacy/) should say that on Android alerts are
   delivered through Google's Firebase Cloud Messaging. It is one sentence; ask for it when the Play listing is prepared.
-- The share picture links to `https://play.google.com/store/apps/details?id=com.pranjald.techgist`, which starts
+- The share picture links to `https://play.google.com/store/apps/details?id=com.techshorts.app`, which starts
   working when the app is public.

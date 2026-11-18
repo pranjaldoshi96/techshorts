@@ -1,7 +1,7 @@
 # Techgist for Android
 
 The Android app, with the same features as the iOS app 2.0 (`ios/`, branch `app-2.0`). Kotlin and Jetpack Compose,
-package `com.pranjald.techgist`, Android 8.0 (API 26) and later. It reads the same public edition file as the iOS
+code package `com.pranjald.techgist`, installed app ID `com.techshorts.app` (the existing Play listing's), Android 8.0 (API 26) and later. It reads the same public edition file as the iOS
 app and talks to the same push registry. No ads, no analytics.
 
 - What matches iOS and what does not: [PARITY.md](PARITY.md)

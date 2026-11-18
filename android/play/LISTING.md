@@ -1,5 +1,8 @@
 # Google Play listing — Techgist 2.0 (Android)
 
+The app goes into the existing Play listing **TechShorts: Tech News, Fast** (`com.techshorts.app`, account "The
+Nanu"), which is renamed to Techgist: that listing has already passed Google's closed test (12 testers, 14 days).
+
 The text follows the App Store listing for 2.0 (`ios/AppStore/LISTING.md` on branch `app-2.0`), changed only
 where Android differs: no Reader view, "phone" for "iPhone", and no number of alerts a day (the server has had no
 daily cap since 17 Nov 2026).
@@ -66,7 +69,7 @@ Google's Firebase Cloud Messaging.
   Techgist's own cover if Google objects.
 
 **Release file:** `android/app/build/outputs/bundle/release/app-release.aab`, made by
-`android/build.sh bundleRelease` (version 2.0, code 20), signed with the upload key in `~/.techgist/android/`.
+`android/build.sh bundleRelease` (version 2.0, code 26111801, app ID `com.techshorts.app`), signed with the upload key in `~/.techgist/android/`.
 When Play asks, choose **Play App Signing** (the default).
 
 ## Forms in the Play Console (App content)

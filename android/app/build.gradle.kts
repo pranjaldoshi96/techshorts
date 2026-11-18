@@ -25,10 +25,13 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.pranjald.techgist"
+        // The Play listing was created in June 2026 as com.techshorts.app and an app's ID can never change, so the
+        // installed app keeps that ID. The code's package (namespace) stays com.pranjald.techgist.
+        applicationId = "com.techshorts.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 20
+        // Above every build the listing has had; the date and a counter (YYMMDDNN).
+        versionCode = 26111801
         versionName = "2.0"
         buildConfigField("boolean", "HAS_FIREBASE", hasFirebase.toString())
         buildConfigField("String", "PUSH_URL", "\"https://techgist.213-210-36-218.sslip.io\"")

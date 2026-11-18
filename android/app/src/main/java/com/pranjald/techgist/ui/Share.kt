@@ -50,7 +50,7 @@ object Reader {
 
 /** Shares a story as a picture of its card with a Techgist footer, plus a short line linking to the app. */
 object StoryShare {
-    const val APP_URL = "https://play.google.com/store/apps/details?id=com.pranjald.techgist"
+    const val APP_URL = "https://play.google.com/store/apps/details?id=com.techshorts.app"
     private const val ACCENT = 0xFF215CED.toInt()
 
     fun text(article: Article): String =
